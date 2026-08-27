@@ -134,7 +134,22 @@ export class RenderPipeline {
       // dissolves into mush": at farScale 0.45 with a 70 m rest focus, every
       // ridge and gantry past the midground was blurred by up to 6.5 px BEFORE
       // the haze touched it. AC6's depth cue is aerial perspective, not defocus.
-      dof: { restFocus: 90, farScale: 0.10, nearScale: 0.10, maxRadius: 3.2, hex: 0.75 },
+      //
+      // `restFocus` is now only the no-subject fallback (empty scene, garage,
+      // boot). It used to be the focus distance in almost every frame the game
+      // ever rendered — see `syncFromGame`, which only left it when an enemy
+      // was locked — and at 90 m against a third-person camera that sits 8-20 m
+      // from the mech, that meant THE SUBJECT WAS PERMANENTLY DEFOCUSED AND THE
+      // BACKGROUND WAS THE ONLY THING IN FOCUS. Measured on mech_detail by mean
+      // |Laplacian| per region: chest 11.5 with DOF on against 33.7 with it off,
+      // pauldron 10.7 against 24.9, while the background was 15.0 against 14.9,
+      // i.e. the mech lost two thirds of its detail and the background lost
+      // nothing. Every visual review of this project was graded through that.
+      //
+      // `subjectRise` lifts the focus point from the mech's ORIGIN, which the
+      // contract puts at the feet, to roughly the middle of its mass. Focusing
+      // on the feet of a 9 m subject 19 m away is a visible error on its own.
+      dof: { restFocus: 90, subjectRise: 4.5, farScale: 0.10, nearScale: 0.10, maxRadius: 3.2, hex: 0.75 },
       taa: { blend: 0.925, clampGamma: 1.15, jitterScale: 1.0 },
       chromatic: { amount: 0.85 },
       // Down from 0.34. Both review framings put GROUND in the bottom corners,
@@ -240,6 +255,9 @@ export class RenderPipeline {
     this._viewToWorld = new THREE.Matrix3();
     this._prevCamPos = new THREE.Vector3(1e9, 1e9, 1e9);
     this._camPos = new THREE.Vector3();
+    // Autofocus scratch — syncFromGame runs every frame and must not allocate.
+    this._focusFwd = new THREE.Vector3();
+    this._focusVec = new THREE.Vector3();
     this._sunDir = new THREE.Vector3(0.4, 0.35, 0.6).normalize();
     this._fogColor = new THREE.Color(0.26, 0.23, 0.19);
     this._fogSunColor = new THREE.Color(0.72, 0.37, 0.16);
@@ -838,15 +856,63 @@ export class RenderPipeline {
     const speedNorm = clamp((speed - 55) / 170, 0, 1);
     d.speedT = assault ? speedNorm : speedNorm * 0.30 * boosting;
 
-    const target = game?.targeting?.target;
-    const tp = target?.root?.position;
-    if (tp && this.camera?.position) {
-      d.focusT = clamp(this.camera.position.distanceTo(tp), 8, 500);
+    // ---- autofocus ---------------------------------------------------------
+    //
+    // Focus follows what is actually IN FRAME. This used to key off the locked
+    // target alone and fall back to `restFocus` (90 m) whenever nothing was
+    // locked — which is every review pose and most of normal play — so the
+    // player's own mech, 8-20 m away and filling the middle of the screen, sat
+    // 70+ m outside the focal plane in almost every frame the game rendered.
+    //
+    // The player's mech is the subject of a third-person shot, so it is the
+    // primary focus target. When an enemy is ALSO locked, focus at the harmonic
+    // mean of the two distances rather than on either: that is the classic
+    // two-plane depth-of-field split, and it is what keeps both acceptably
+    // sharp instead of trading one for the other. With the mech at 19 m and a
+    // target at 200 m it lands at 35 m, which puts BOTH inside the 0.6 px
+    // circle-of-confusion threshold the DOF pass skips entirely.
+    //
+    // Distances are VIEW DEPTH, not radial distance, because that is what
+    // DOF_FRAG compares `uFocus` against.
+    const pp = game?.player?.root?.position;
+    const tp = game?.targeting?.target?.root?.position;
+    const pd = pp ? this._viewDepth(pp, this.params.dof.subjectRise) : -1;
+    const td = tp ? this._viewDepth(tp, this.params.dof.subjectRise) : -1;
+
+    if (pd > 0 && td > 0) {
+      d.focusT = clamp((2 * pd * td) / (pd + td), 3, 500);
+    } else if (pd > 0) {
+      d.focusT = clamp(pd, 3, 500);
+    } else if (td > 0) {
+      d.focusT = clamp(td, 3, 500);
     } else {
       d.focusT = this.params.dof.restFocus;
     }
 
     if (game?.state === 'dead') d.critT = 1;
+  }
+
+  /**
+   * View-space depth of a world point — its distance along the camera's forward
+   * axis, which is the quantity DOF_FRAG reconstructs from the depth buffer.
+   * Radial distance is NOT the same thing and is wrong for anything off-centre.
+   *
+   * Returns -1 when there is no camera. Allocation-free.
+   *
+   * @param {THREE.Vector3} pos
+   * @param {number} rise metres to lift the point along world up
+   * @returns {number}
+   */
+  _viewDepth(pos, rise) {
+    const cam = this.camera;
+    if (!cam) return -1;
+    const e = cam.matrixWorld.elements;
+    // three cameras look down their local -Z; column 2 of matrixWorld is that
+    // local Z axis expressed in world space.
+    this._focusFwd.set(-e[8], -e[9], -e[10]).normalize();
+    this._focusVec.copy(pos).sub(cam.position);
+    this._focusVec.y += rise;
+    return this._focusVec.dot(this._focusFwd);
   }
 
   _updateDynamics(dt) {
@@ -856,7 +922,15 @@ export class RenderPipeline {
 
     d.crit = damp(d.crit, d.critT, 5, step);
     d.speed = damp(d.speed, d.speedT, 6, step);
-    d.focus = damp(d.focus, d.focusT, 3.2, step);
+    // A CUT, not a rack. On a camera teleport, a respawn or a target switch the
+    // focus distance jumps by an order of magnitude, and damping through that
+    // at rate 3.2 spends over a second visibly focused on nothing — and in a
+    // still capture, which settles for well under a second, it never converges
+    // at all. Real camera work snaps focus across a cut and racks only within a
+    // shot, so key the behaviour off the RATIO: anything past 2.5x is a cut.
+    const fr = d.focusT / Math.max(d.focus, 1e-3);
+    if (fr > 2.5 || fr < 0.4) d.focus = d.focusT;
+    else d.focus = damp(d.focus, d.focusT, 3.2, step);
     d.hit = Math.max(0, d.hit - step * 2.6);
     d.scan = Math.max(0, d.scan - step * 1.8);
 

@@ -637,3 +637,33 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   higher priority. A contact shadow reads because the ground AROUND it is lit. Whoever
   owns the pose or that building's placement: move the hero framing so the mech stands in
   sun, and the contact shadow appears for free.
+- 2026-08-27 [render] BUG, fixed: THE DEPTH-OF-FIELD PASS WAS DEFOCUSING THE SUBJECT AND
+  LEAVING THE BACKGROUND SHARP, in every frame this project has ever been reviewed on.
+  `Pipeline.syncFromGame` only ever set `_dyn.focusT` from a LOCKED TARGET and otherwise
+  fell back to `params.dof.restFocus` (90 m). Review poses call `debug.clearEnemies()`, and
+  normal play is unlocked most of the time, so focus sat at 90 m while the third-person
+  camera sat 7-20 m from the mech. Confirmed independently by mean |Laplacian| on the
+  untouched baseline: mech_detail chest 12.6 and pauldron 10.5 against a BACKGROUND of
+  18.0 — the subject measurably softer than what is behind it. Worst case is the
+  mech_detail pose, whose camera is 7.07 m of view depth from the chest: the CoC term
+  `(z - focus) / z` returns -11.7, which saturates the clamp and applies the pass's
+  MAXIMUM 3.2 px blur radius to the subject of the shot.
+  Focus is now driven by what is in frame: view depth of the player's mech (lifted
+  `dof.subjectRise` = 4.5 m off the origin, which the contract puts at the feet), or the
+  harmonic mean of player and locked target when both exist — the two-plane DOF split, so
+  neither is traded for the other. Two things to know before touching this:
+  (a) `uFocus` is compared against VIEW DEPTH in DOF_FRAG, not radial distance, so use the
+  new `_viewDepth()` helper rather than `camera.position.distanceTo()` — the old code used
+  distanceTo, which is wrong for anything off-centre;
+  (b) focus now SNAPS instead of damping when the target ratio exceeds 2.5x. That is a cut
+  versus a rack: a teleport or respawn moves focus by an order of magnitude, and at damp
+  rate 3.2 a still capture that settles for 0.6 s never converges, which would have left
+  this bug half-fixed and unmeasurable.
+  Consequence worth flagging: with focus correct, `farScale`/`nearScale` of 0.10 put
+  essentially every surface in these poses under the 0.6 px threshold the pass early-outs
+  on, so DOF is now close to a no-op. That is deliberate and strictly better than the old
+  behaviour, but whoever wants real subject separation can now raise `farScale` safely —
+  it was only ever dropped to 0.10 because a wrong focus distance made it destroy the
+  midground. Also note the earlier amendment blaming the chest's "dark smeared streak" on
+  TAA and motion blur: that investigation was run through a 3.2 px defocus of the subject,
+  so its conclusion should be re-measured before anyone acts on it.

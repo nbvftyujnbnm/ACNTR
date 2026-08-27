@@ -736,8 +736,13 @@ export function buildCore(o = {}) {
   // --- primary mass ------------------------------------------------------
   // Deliberately heavy: the chest is the single largest volume on an AC and
   // everything else has to look outgunned by it.
+  // taperX 0.84, not 0.90: the flank has to fall AWAY from the arm as it climbs,
+  // or the armpit closes. The arm hangs from y 1.72 with its inner face at 0.99,
+  // and at 0.90 the hull was still 0.86-0.89 wide up there — a 0-3 cm joint that
+  // read as one welded mass. At 0.84 the hull is 0.82 at the shoulder, so there
+  // is 12-17 cm of daylight between torso and arm for the whole run.
   b.box('armor', MASK.BASE, W, 1.56, 1.40, 0.085, 0, 1.26, -0.04, 0, 0, 0,
-    { taperX: 0.90, taperZ: 0.92, taperFrontX: 0.94 });
+    { taperX: 0.84, taperZ: 0.92, taperFrontX: 0.94 });
   // Upper deck the shoulders bolt onto, plus the collar step above it. Two
   // stacked masses instead of one 0.50-tall box: the chest-to-shoulder run was a
   // plain vertical wall, and a plain wall is what makes a torso read as a crate.
@@ -822,21 +827,44 @@ export function buildCore(o = {}) {
     // shoulder on visible hardware, which is how AC shoulders are built; before,
     // yoke and plate were one continuous lump and the joint was invisible.
     for (let r = -1; r <= 1; r += 2) {
-      b.box('mech', MASK.TRIM, 0.20, 0.17, 0.22, 0.022, s * (sx + 0.20), 2.06, r * 0.30, 0, 0, 0);
+      b.box('mech', MASK.TRIM, 0.20, 0.17, 0.22, 0.022, s * (sx + 0.28), 2.06, r * 0.30, 0, 0, 0);
     }
-    // outer pauldron plate
+    // Outer pauldron plate. Moved out with the arm pivot below (sx+0.10) so it
+    // still CAPS the arm: its outer face sits at 1.705 and the arm's outermost
+    // plating at 1.70. If these two ever swap order the pauldron turns back into
+    // an overhanging slab with a thin arm poking through it.
     b.addM('armor', MASK.ACCENT, plate(beveledRectShape(0.96, 0.76, { tl: 0.26, tr: 0.10, bl: 0.20, br: 0.10 }), 0.13, 0.03),
-      _m.compose(_pv.set(s * (sx + 0.32), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
-    // hardpoint deck on top
-    b.box('armor', MASK.TRIM, 0.52, 0.14, 0.74, 0.028, s * (sx - 0.16), 2.52, 0.02);
-    b.box('mech', MASK.TRIM, 0.34, 0.10, 0.52, 0.02, s * (sx - 0.16), 2.62, 0.02);
+      _m.compose(_pv.set(s * (sx + 0.38), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+    // HARDPOINT RAIL, standing off the shoulder on two pylons.
+    //
+    // This used to be a 0.14 base plate with a 0.10 riser sat flush on top of it,
+    // and the ordnance anchor 6 cm above that. Everything from the waist to the
+    // top of the shoulder was therefore ONE unbroken filled rectangle: from hero
+    // distance the torso, both yokes and both weapon decks read as a single crate
+    // with no sky anywhere inside the outline. Real ACs hang their ordnance off
+    // visible hardware and you see daylight under it, which is most of what makes
+    // the silhouette read as a machine rather than a box.
+    //
+    // Base plate on the yoke, two pylons with a 27 cm gap between them, and the
+    // rail the ordnance actually bolts to 35 cm above the plate. The two open
+    // slots are 27 cm and 2 x 10 cm — at hero framing (78 px per metre) that is
+    // 8-21 px of visible sky per shoulder.
+    const mx = s * (sx - 0.16);
+    b.box('armor', MASK.TRIM, 0.52, 0.13, 0.74, 0.028, mx, 2.50, 0.02);
+    for (let r = -1; r <= 1; r += 2) {
+      b.box('mech', MASK.TRIM, 0.16, 0.34, 0.17, 0.022, mx, 2.74, 0.02 + r * 0.22);
+    }
+    b.box('armor', MASK.TRIM, 0.44, 0.10, 0.68, 0.024, mx, 2.96, 0.02);
+    // tie-down cleats on the rail, so it reads as a mount and not a floating slab
+    if (d) boltRing(b, 'mech', MASK.STEEL, 'py', mx, 3.01, 0.02, 0.17, 6, 0.022, 0.014);
     // status light channel recessed into the pauldron's leading edge
-    b.box('mech', MASK.TRIM, 0.10, 0.14, 0.30, 0.02, s * (sx + 0.25), 2.30, -0.34);
-    b.box('glow', MASK.BASE, 0.05, 0.075, 0.24, 0.012, s * (sx + 0.31), 2.30, -0.34);
-    // shoulder socket
-    axleJoint(b, 'mech', MASK.TRIM, s * (sx + 0.02), 1.72, 0.0, 0.30, 0.34, 14);
+    b.box('mech', MASK.TRIM, 0.10, 0.14, 0.30, 0.02, s * (sx + 0.31), 2.30, -0.34);
+    b.box('glow', MASK.BASE, 0.05, 0.075, 0.24, 0.012, s * (sx + 0.37), 2.30, -0.34);
+    // Shoulder socket — sits ON the arm pivot (sx + 0.10), so it must move with
+    // the anchor in `anchors.shoulderL/R` below, never independently.
+    axleJoint(b, 'mech', MASK.TRIM, s * (sx + 0.10), 1.72, 0.0, 0.30, 0.34, 14);
     if (d) {
-      boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.24), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
+      boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.30), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
       greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.32), 2.45, 0.10, 0.66, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
       greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.30), 1.86, 0.60, 0.72, 0.40, rng, { cols: 3, rows: 2, depth: 0.045, accent: 0.04 });
       // EDGE BUSYNESS: a lifting eye and a hose run that project past the yoke's
@@ -862,34 +890,40 @@ export function buildCore(o = {}) {
   // run y 0.9..2.0 so they physically bridge waist to shoulder. The hull tapers
   // inward with height and these do not, so each one emerges further from the
   // surface as it climbs — the profile widens toward the shoulder for free.
+  // OUTBOARD BUDGET: nothing in this block may pass x = 0.96. The upper arm's
+  // inner face is at 0.99 and the armpit gap is the whole point of the taper
+  // above — hardware that reaches past 0.96 does not "stand proud of the hull",
+  // it is buried inside the arm. The previous values ran the conduit to 1.00,
+  // the header tank to 1.07 and the bleed line to 1.15, i.e. up to 16 cm INSIDE
+  // the upper arm, which is also why the shoulder read as one solid mass.
   if (d && !crude) {
     // RIGHT: armoured coolant conduit, clamped to the hull at three points.
     const cz = 0.44;
-    b.box('mech', MASK.TRIM, 0.19, 1.26, 0.23, 0.028, W * 0.485, 1.38, cz, 0.05, 0, 0);
+    b.box('mech', MASK.TRIM, 0.19, 1.26, 0.23, 0.028, W * 0.455, 1.38, cz, 0.05, 0, 0);
     // header tank capping it under the shoulder
-    b.box('armor', MASK.BASE, 0.27, 0.32, 0.31, 0.035, W * 0.50, 2.02, cz - 0.03, 0, 0, -0.09,
+    b.box('armor', MASK.BASE, 0.25, 0.32, 0.31, 0.035, W * 0.45, 2.02, cz - 0.03, 0, 0, -0.09,
       { taperX: 0.86 });
     for (let i = 0; i < 3; i++) {
-      b.addM('mech', MASK.STEEL, ring(0.115, 0.155, 0.055, 10, 0.012),
-        _m.compose(_pv.set(W * 0.485, 1.00 + i * 0.38, cz), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+      b.addM('mech', MASK.STEEL, ring(0.115, 0.145, 0.055, 10, 0.012),
+        _m.compose(_pv.set(W * 0.44, 1.00 + i * 0.38, cz), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
     }
     // bleed line running off the header, out past the hull's outline
     b.addM('mech', MASK.TRIM, cable([
-      [W * 0.50, 1.96, cz - 0.16], [W * 0.62, 1.80, cz - 0.34], [W * 0.52, 1.52, cz - 0.30],
+      [W * 0.45, 1.96, cz - 0.16], [W * 0.50, 1.80, cz - 0.34], [W * 0.46, 1.52, cz - 0.30],
     ], 0.032, 10, 5), null);
 
     // LEFT: a countermeasure/ammo box — a different SHAPE, not a mirrored one.
     // Sits ABOVE and BEHIND the flank heat sink (which occupies y 0.82..1.28,
     // z -0.21..0.41) so it never grows out of the vent bezel, and its hinged lid
     // is the accent slot so it reads as a serviceable sub-assembly.
-    b.box('armor', MASK.BASE, 0.28, 0.62, 0.36, 0.04, -W * 0.50, 1.52, 0.48, 0, 0, 0.06,
+    b.box('armor', MASK.BASE, 0.26, 0.62, 0.36, 0.04, -W * 0.45, 1.52, 0.48, 0, 0, 0.06,
       { taperZ: 0.94 });
-    b.box('armor', MASK.ACCENT, 0.30, 0.10, 0.38, 0.022, -W * 0.51, 1.87, 0.48, 0, 0, 0.06);
+    b.box('armor', MASK.ACCENT, 0.28, 0.10, 0.38, 0.022, -W * 0.45, 1.87, 0.48, 0, 0, 0.06);
     // stub exhaust off its back face, canted down and outboard
     _e.set(Math.PI * 0.5 - 0.5, 0, -0.30); _q.setFromEuler(_e); _sc.set(1, 1, 1);
-    _pv.set(-W * 0.545, 1.34, 0.64); _m.compose(_pv, _q, _sc);
+    _pv.set(-W * 0.485, 1.34, 0.64); _m.compose(_pv, _q, _sc);
     b.addM('mech', MASK.TRIM, nozzle(0.055, 0.095, 0.17, 12), _m);
-    boltRing(b, 'mech', MASK.STEEL, 'nx', -W * 0.545, 1.52, 0.48, 0.14, 6, 0.022, 0.014);
+    boltRing(b, 'mech', MASK.STEEL, 'nx', -W * 0.485, 1.52, 0.48, 0.14, 6, 0.022, 0.014);
 
     // Whip antenna off the RIGHT yoke's rear corner, raked back and outboard.
     // A 1.2 m mast against the sky is worth more to a silhouette than any amount
@@ -958,10 +992,17 @@ export function buildCore(o = {}) {
     anchors: {
       // top of the neck column — the head's sleeve overlaps 0.3 m of it
       neck: [0, 2.72, 0.02],
-      shoulderL: [-sx, 1.72, 0.0],
-      shoulderR: [sx, 1.72, 0.0],
-      mountL: [-(sx - 0.16), 2.68, 0.02],
-      mountR: [sx - 0.16, 2.68, 0.02],
+      // Arm pivot, set OUTBOARD of the yoke reference `sx` on purpose. The arm
+      // used to hang at exactly sx, which put its inner face 4 cm INSIDE the
+      // torso flank: no armpit, and the flank hardware physically intersected
+      // the upper arm. At sx + 0.10 the inner face clears the hull by 12-17 cm.
+      // The shoulder socket, the pauldron and its brackets are all placed off
+      // the same offset above — move one and you must move all of them.
+      shoulderL: [-(sx + 0.10), 1.72, 0.0],
+      shoulderR: [sx + 0.10, 1.72, 0.0],
+      // top of the raised hardpoint rail, not the top of the yoke
+      mountL: [-(sx - 0.16), 3.02, 0.02],
+      mountR: [sx - 0.16, 3.02, 0.02],
       backpack: [0, 1.38, 0.66],
       coreMuzzle: [0, 1.30, -0.86],
     },
@@ -1133,7 +1174,7 @@ export function buildUpperArm(o = {}) {
   b.addM('mech', MASK.STEEL, chamferCyl(0.28, 0.28, 0.52, 14, 0.10),
     _m.compose(_pv.set(0, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
   // shoulder cap sits over the socket
-  b.box('armor', MASK.BASE, 0.72, 0.56, 0.84, 0.055, 0, -0.12, 0, 0, 0, 0, { taperX: 1.04, taperZ: 1.04 });
+  b.box('armor', MASK.BASE, 0.68, 0.56, 0.84, 0.055, 0, -0.12, 0, 0, 0, 0, { taperX: 1.02, taperZ: 1.04 });
   b.addM('mech', MASK.TRIM, ring(0.18, 0.28, 0.46, 14, 0.022),
     _m.compose(_pv.set(s * -0.20, -0.06, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
 
@@ -1142,13 +1183,16 @@ export function buildUpperArm(o = {}) {
   // 1.50 m the aspect ratio was 1:2.9 and it read as tubing bolted to a pauldron
   // — the single loudest proportion tell in the hero frame.
   b.box('armor', MASK.BASE, 0.66, L * 0.86, 0.78, 0.055, 0, -L * 0.52, 0.0, 0, 0, 0,
-    { taperX: 1.10, taperZ: 1.06 });
+    // taperX 1.02, not 1.10: the pivot moved 10 cm outboard to open the armpit,
+    // and the arm's outer plating has to give most of that back or the shoulders
+    // grow from 36% of height to 39% and the pauldron stops capping the arm.
+    { taperX: 1.02, taperZ: 1.06 });
   // front bicep plate — breaks up the long flat run down to the elbow
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.50, L * 0.54, { tl: 0.14, tr: 0.14, bl: 0.08, br: 0.08 }), 0.10, 0.026),
     _m.compose(_pv.set(0, -L * 0.50, -0.41), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
   // outer shell plate — the outermost armour on the whole frame
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.86, 0.52, { tl: 0.20, bl: 0.10, tr: 0.20, br: 0.10 }), 0.11, 0.028),
-    _m.compose(_pv.set(s * 0.30, -L * 0.48, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+    _m.compose(_pv.set(s * 0.26, -L * 0.48, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, Math.PI * 0.5)), _sc.set(1, 1, 1)));
   // inner actuator + hose
   b.addM('mech', MASK.TRIM, chamferCyl(0.11, 0.11, L * 0.7, 10, 0.022),
     _m.compose(_pv.set(s * -0.30, -L * 0.5, 0.08), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
