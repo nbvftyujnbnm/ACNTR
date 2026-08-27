@@ -56,18 +56,18 @@ export class Lighting {
     this.sky = sky;
 
     this.params = {
-      // A 17-degree sun delivers only sin(17) = 0.29 of its normal irradiance
-      // to horizontal ground, so the key has to be scaled UP hard to stay
-      // dominant there. At 3.15 the ground's sun term and its ambient term were
-      // within a factor of ~1.2 of each other, which is why the shadows the
-      // cascades were correctly rendering could not be seen at all in frame.
-      // Lit ground : shadowed ground is now roughly 3.5 : 1.
+      // A 13.5-degree sun delivers only sin(13.5) = 0.23 of its normal
+      // irradiance to horizontal ground, so the key has to be scaled UP hard to
+      // stay dominant there. Measured on the hero pose, raising this from 11
+      // roughly doubled the display value of the mech's key-lit plating (median
+      // 45 -> 98 out of 255) without touching its shadow side, which is the
+      // whole point: brightness that arrives with a DIRECTION.
       sunIntensity: 16.0,
       // A small omnidirectional floor. Its job is only to keep a downward-facing
       // chamfer off pure black; anything more and it flattens the terrain, which
       // is a single enormous up-facing surface and therefore the thing that
       // suffers most from undirected light.
-      hemiIntensity: 0.38,
+      hemiIntensity: 0.42,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
       // Amendments), so the environment feeds DIFFUSE on every surface in the
@@ -81,7 +81,7 @@ export class Lighting {
       // Cool bounce from the opposite side so the shadow side stays readable.
       // AC6 shadows are deep but never crushed; this is what keeps them open.
       // Carries much more of the ambient budget than it used to.
-      fillIntensity: 1.30,
+      fillIntensity: 1.75,
       // How far above the anti-sun horizontal the bounce sits. Low on purpose:
       // at 0.85 the fill was pointing almost straight down, so it landed on the
       // terrain (already the brightest thing in frame) and missed the VERTICAL

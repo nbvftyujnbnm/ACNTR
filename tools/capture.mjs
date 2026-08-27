@@ -76,6 +76,15 @@ async function startServer() {
   const port = 5200 + Math.floor(Math.random() * 600);
   const useDev = !!arg('dev', false);
 
+  // A stray backtick in a GLSL comment still BUILDS (it is valid JS) and only
+  // fails at import time with an unrelated-looking error, after ~8 minutes of
+  // capture. Catch it in milliseconds instead.
+  const lint = await run('node', ['tools/lint-glsl.mjs']);
+  if (lint.code !== 0) {
+    console.error(lint.out);
+    process.exit(3);
+  }
+
   if (!useDev) {
     const b = await run('npx', ['vite', 'build']);
     if (b.code !== 0) {

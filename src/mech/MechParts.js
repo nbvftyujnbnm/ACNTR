@@ -605,14 +605,20 @@ export const MECH_DIMS = {
   neckY: 7.07,     // waistY + buildCore's neck anchor (top of the neck column)
   hipX: 0.72,
   footX: 1.02,
-  shoulderX: 1.46,
+  // Shoulder PIVOT, not the outer edge of the shoulder. The arm's own armour
+  // reaches ~0.33 m outboard of this and the pauldron caps it at ~1.61, so the
+  // frame measures 3.2 m across the shoulders — 36% of its 9 m height. It used
+  // to be 1.46, which put the outermost arm plate at 1.81 and the shoulders at
+  // 40% of height: a slab that overhung a thin arm instead of capping a thick one.
+  shoulderX: 1.26,
   thigh: 1.85,     // hipY - kneeY
   shin: 1.58,      // kneeY - ankleY
-  // Arm length is set so the fingertips hang just past mid-thigh, which is the
-  // AC silhouette. At the old 1.30/1.47 the hands stopped level with the hip and
-  // the whole arm read as a stub bolted to an oversized pauldron.
-  elbowDrop: 1.50,
-  wristDrop: 1.60,
+  // Arm length is set so the fingertips hang just past mid-thigh (3.03 m), which
+  // is the AC silhouette. 1.50/1.60 put them at 2.69 — past the knee, and a
+  // 3.1 m arm on a 0.52 m-wide upper arm is what read as "long and thin".
+  // 1.40/1.48 lands the fingertips at ~2.91 with 30% more section on the arm.
+  elbowDrop: 1.40,
+  wristDrop: 1.48,
 };
 
 export const LEG_TYPES = ['biped', 'reverse', 'tetrapod'];
@@ -765,25 +771,31 @@ export function buildCore(o = {}) {
   }
 
   // --- shoulder yokes ----------------------------------------------------
+  // Everything here is placed relative to the shoulder PIVOT (`sx`), and the
+  // whole cluster now sits further inboard and reaches less far outboard: the
+  // yoke's outer face is at sx+0.27 and the pauldron caps it at sx+0.35, where
+  // the previous build ran the yoke to sx+0.16 and let the ARM's own plating
+  // stick out past it to sx+0.35. A pauldron that a thin arm pokes out of reads
+  // as an overhanging slab; a pauldron that caps a thick arm reads as a shoulder.
   const sx = MECH_DIMS.shoulderX * wide;
   for (let s = -1; s <= 1; s += 2) {
-    b.box('armor', MASK.BASE, 0.92, 0.88, 1.20, 0.065, s * (sx - 0.30), 2.00, 0.02, 0, 0, s * -0.06,
+    b.box('armor', MASK.BASE, 0.90, 0.90, 1.16, 0.065, s * (sx - 0.18), 2.00, 0.02, 0, 0, s * -0.06,
       { taperX: 0.86, taperZ: 0.9 });
     // outer pauldron plate
-    b.addM('armor', MASK.ACCENT, plate(beveledRectShape(1.02, 0.72, { tl: 0.26, tr: 0.10, bl: 0.20, br: 0.10 }), 0.13, 0.03),
-      _m.compose(_pv.set(s * (sx + 0.16), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+    b.addM('armor', MASK.ACCENT, plate(beveledRectShape(0.96, 0.76, { tl: 0.26, tr: 0.10, bl: 0.20, br: 0.10 }), 0.13, 0.03),
+      _m.compose(_pv.set(s * (sx + 0.32), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
     // hardpoint deck on top
-    b.box('armor', MASK.TRIM, 0.52, 0.14, 0.74, 0.028, s * (sx - 0.26), 2.50, 0.02);
-    b.box('mech', MASK.TRIM, 0.34, 0.10, 0.52, 0.02, s * (sx - 0.26), 2.60, 0.02);
+    b.box('armor', MASK.TRIM, 0.52, 0.14, 0.74, 0.028, s * (sx - 0.16), 2.52, 0.02);
+    b.box('mech', MASK.TRIM, 0.34, 0.10, 0.52, 0.02, s * (sx - 0.16), 2.62, 0.02);
     // status light channel recessed into the pauldron's leading edge
-    b.box('mech', MASK.TRIM, 0.10, 0.14, 0.30, 0.02, s * (sx + 0.13), 2.30, -0.34);
-    b.box('glow', MASK.BASE, 0.05, 0.075, 0.24, 0.012, s * (sx + 0.20), 2.30, -0.34);
+    b.box('mech', MASK.TRIM, 0.10, 0.14, 0.30, 0.02, s * (sx + 0.25), 2.30, -0.34);
+    b.box('glow', MASK.BASE, 0.05, 0.075, 0.24, 0.012, s * (sx + 0.31), 2.30, -0.34);
     // shoulder socket
-    axleJoint(b, 'mech', MASK.TRIM, s * (sx - 0.06), 1.72, 0.0, 0.30, 0.34, 14);
+    axleJoint(b, 'mech', MASK.TRIM, s * (sx + 0.02), 1.72, 0.0, 0.30, 0.34, 14);
     if (d) {
-      boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.14), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
-      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.30), 2.45, -0.30, 0.7, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
-      greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.30), 2.00, 0.62, 0.72, 0.66, rng, { cols: 3, rows: 3, depth: 0.045, accent: 0.04 });
+      boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.24), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
+      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.18), 2.45, -0.30, 0.7, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
+      greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.18), 2.00, 0.60, 0.72, 0.66, rng, { cols: 3, rows: 3, depth: 0.045, accent: 0.04 });
     }
   }
 
@@ -843,8 +855,8 @@ export function buildCore(o = {}) {
       neck: [0, 2.72, 0.02],
       shoulderL: [-sx, 1.72, 0.0],
       shoulderR: [sx, 1.72, 0.0],
-      mountL: [-(sx - 0.26), 2.66, 0.02],
-      mountR: [sx - 0.26, 2.66, 0.02],
+      mountL: [-(sx - 0.16), 2.68, 0.02],
+      mountR: [sx - 0.16, 2.68, 0.02],
       backpack: [0, 1.38, 0.66],
       coreMuzzle: [0, 1.30, -0.86],
     },
@@ -969,32 +981,35 @@ export function buildUpperArm(o = {}) {
   // Shoulder ball: a machined steel sphere-ish drum riding in the core's socket.
   // Without a visible pivot the arm looks glued to the pauldron rather than hung
   // from it, which is most of why the old arms read as stubs.
-  b.addM('mech', MASK.STEEL, chamferCyl(0.24, 0.24, 0.44, 14, 0.09),
+  b.addM('mech', MASK.STEEL, chamferCyl(0.28, 0.28, 0.52, 14, 0.10),
     _m.compose(_pv.set(0, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
   // shoulder cap sits over the socket
-  b.box('armor', MASK.BASE, 0.62, 0.52, 0.68, 0.05, 0, -0.10, 0, 0, 0, 0, { taperX: 1.05, taperZ: 1.05 });
-  b.addM('mech', MASK.TRIM, ring(0.16, 0.25, 0.40, 14, 0.02),
-    _m.compose(_pv.set(s * -0.16, -0.06, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  b.box('armor', MASK.BASE, 0.72, 0.56, 0.84, 0.055, 0, -0.12, 0, 0, 0, 0, { taperX: 1.04, taperZ: 1.04 });
+  b.addM('mech', MASK.TRIM, ring(0.18, 0.28, 0.46, 14, 0.022),
+    _m.compose(_pv.set(s * -0.20, -0.06, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
 
-  // upper arm armour, tapering into the elbow
-  b.box('armor', MASK.BASE, 0.52, L * 0.84, 0.56, 0.05, 0, -L * 0.52, 0.0, 0, 0, 0,
-    { taperX: 1.22, taperZ: 1.18 });
+  // Upper arm armour. 0.66 x 0.78 in section against a 1.40 m drop: an AC's
+  // upper arm is a short thick limb, not a rod. At the previous 0.52 x 0.56 over
+  // 1.50 m the aspect ratio was 1:2.9 and it read as tubing bolted to a pauldron
+  // — the single loudest proportion tell in the hero frame.
+  b.box('armor', MASK.BASE, 0.66, L * 0.86, 0.78, 0.055, 0, -L * 0.52, 0.0, 0, 0, 0,
+    { taperX: 1.10, taperZ: 1.06 });
   // front bicep plate — breaks up the long flat run down to the elbow
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.40, L * 0.52, { tl: 0.14, tr: 0.14, bl: 0.08, br: 0.08 }), 0.09, 0.024),
-    _m.compose(_pv.set(0, -L * 0.50, -0.30), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
-  // outer shell plate
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.80, 0.44, { tl: 0.20, bl: 0.10, tr: 0.20, br: 0.10 }), 0.10, 0.026),
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.50, L * 0.54, { tl: 0.14, tr: 0.14, bl: 0.08, br: 0.08 }), 0.10, 0.026),
+    _m.compose(_pv.set(0, -L * 0.50, -0.41), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  // outer shell plate — the outermost armour on the whole frame
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.86, 0.52, { tl: 0.20, bl: 0.10, tr: 0.20, br: 0.10 }), 0.11, 0.028),
     _m.compose(_pv.set(s * 0.30, -L * 0.48, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, Math.PI * 0.5)), _sc.set(1, 1, 1)));
   // inner actuator + hose
-  b.addM('mech', MASK.TRIM, chamferCyl(0.10, 0.10, L * 0.7, 10, 0.02),
-    _m.compose(_pv.set(s * -0.22, -L * 0.5, 0.06), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  b.addM('mech', MASK.TRIM, chamferCyl(0.11, 0.11, L * 0.7, 10, 0.022),
+    _m.compose(_pv.set(s * -0.30, -L * 0.5, 0.08), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
   if (d) {
     b.addM('mech', MASK.TRIM, cable([
-      [s * -0.20, -0.12, 0.26], [s * -0.26, -L * 0.5, 0.32], [s * -0.18, -L * 0.94, 0.24],
-    ], 0.040, 10, 6), null);
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.29, -L * 0.5, 0.0, 0.44, 0.6, rng, { cols: 2, rows: 3, depth: 0.03, fill: 0.6 });
-    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.5, 0.31, 0.4, 0.7, rng, { cols: 2, rows: 3, depth: 0.032, accent: 0.04 });
-    boltRing(b, 'mech', MASK.TRIM, s > 0 ? 'px' : 'nx', s * 0.32, -0.06, 0, 0.20, 7, 0.024, 0.016);
+      [s * -0.28, -0.14, 0.34], [s * -0.34, -L * 0.5, 0.40], [s * -0.26, -L * 0.94, 0.32],
+    ], 0.042, 10, 6), null);
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.35, -L * 0.5, 0.0, 0.52, 0.62, rng, { cols: 2, rows: 3, depth: 0.032, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.5, 0.40, 0.50, 0.72, rng, { cols: 2, rows: 3, depth: 0.034, accent: 0.04 });
+    boltRing(b, 'mech', MASK.TRIM, s > 0 ? 'px' : 'nx', s * 0.38, -0.08, 0, 0.22, 7, 0.026, 0.018);
   }
   return { b, anchors: { elbow: [0, -L, 0] } };
 }
@@ -1007,58 +1022,67 @@ export function buildForeArm(o = {}) {
   const b = new GeoBuilder(rng);
 
   // --- exposed elbow: actuator drum + piston + cable loom -----------------
-  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.19, 0.46, 14);
-  b.addM('mech', MASK.TRIM, ring(0.19, 0.27, 0.30, 14, 0.02),
-    _m.compose(_pv.set(s * 0.20, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
-  piston(b, s * -0.10, 0.16, 0.22, s * -0.10, -0.46, 0.30, 0.048);
+  // The drum is deliberately almost as wide as the forearm and proud of it on
+  // both sides. AC elbows are a visible mechanical break between two armoured
+  // masses; at r=0.19 / w=0.46 this one was thinner than the limb it joined and
+  // the arm read as one continuous stick from pauldron to hand.
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.25, 0.66, 16);
+  b.addM('mech', MASK.TRIM, ring(0.25, 0.34, 0.36, 16, 0.024),
+    _m.compose(_pv.set(s * 0.26, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  // inboard bearing cheek, so the joint reads from the body side too
+  b.addM('mech', MASK.TRIM, ring(0.22, 0.30, 0.20, 14, 0.02),
+    _m.compose(_pv.set(s * -0.28, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  piston(b, s * -0.18, 0.20, 0.30, s * -0.18, -0.52, 0.38, 0.056);
   if (d) {
     for (let i = -1; i <= 1; i += 2) {
       b.addM('mech', MASK.TRIM, cable([
-        [s * 0.02 + i * 0.07, 0.20, 0.22], [s * 0.06 + i * 0.09, 0.0, 0.30], [s * 0.02 + i * 0.07, -0.30, 0.24],
-      ], 0.028, 8, 5), null);
+        [s * 0.02 + i * 0.08, 0.22, 0.28], [s * 0.06 + i * 0.10, 0.0, 0.38], [s * 0.02 + i * 0.08, -0.32, 0.30],
+      ], 0.030, 8, 5), null);
     }
-    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.24, 0, 0, 0.13, 6, 0.022, 0.014);
+    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.32, 0, 0, 0.17, 6, 0.024, 0.016);
   }
 
   // --- forearm shell ------------------------------------------------------
-  b.box('armor', MASK.BASE, 0.56, L * 0.80, 0.62, 0.05, 0, -L * 0.50, 0.0, 0, 0, 0,
-    { taperX: 0.86, taperZ: 0.88 });
-  b.box('armor', MASK.TRIM, 0.46, 0.22, 0.54, 0.03, 0, -0.20, 0.0);
+  // 0.72 wide x 0.82 deep: deeper than it is wide, which is what makes a mech
+  // forearm read as a weapon mount rather than a limb.
+  b.box('armor', MASK.BASE, 0.72, L * 0.82, 0.82, 0.055, 0, -L * 0.50, 0.0, 0, 0, 0,
+    { taperX: 0.90, taperZ: 0.92 });
+  b.box('armor', MASK.TRIM, 0.60, 0.26, 0.68, 0.035, 0, -0.22, 0.0);
   // top shell plate, overlapping
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.52, L * 0.66, { tl: 0.16, tr: 0.16, bl: 0.08, br: 0.08 }), 0.10, 0.026),
-    _m.compose(_pv.set(0, -L * 0.50, -0.33), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.64, L * 0.68, { tl: 0.16, tr: 0.16, bl: 0.08, br: 0.08 }), 0.11, 0.028),
+    _m.compose(_pv.set(0, -L * 0.50, -0.43), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
 
   // --- weapon hardpoint on the OUTER face ---------------------------------
-  const hx = s * 0.33;
-  b.box('armor', MASK.BASE, 0.16, 0.62, 0.56, 0.03, hx, -L * 0.46, 0.0);
-  b.box('mech', MASK.TRIM, 0.10, 0.44, 0.40, 0.02, s * 0.42, -L * 0.46, 0.0);
+  const hx = s * 0.41;
+  b.box('armor', MASK.BASE, 0.18, 0.68, 0.62, 0.03, hx, -L * 0.46, 0.0);
+  b.box('mech', MASK.TRIM, 0.10, 0.48, 0.44, 0.02, s * 0.50, -L * 0.46, 0.0);
   for (let i = -1; i <= 1; i += 2) {
-    b.addM('mech', MASK.STEEL, chamferCyl(0.035, 0.035, 0.48, 8, 0.01),
-      _m.compose(_pv.set(s * 0.44, -L * 0.46, i * 0.15), _q.setFromEuler(_e.set(Math.PI * 0.5, 0, 0)), _sc.set(1, 1, 1)));
+    b.addM('mech', MASK.STEEL, chamferCyl(0.035, 0.035, 0.52, 8, 0.01),
+      _m.compose(_pv.set(s * 0.53, -L * 0.46, i * 0.16), _q.setFromEuler(_e.set(Math.PI * 0.5, 0, 0)), _sc.set(1, 1, 1)));
   }
-  b.box('glow', MASK.BASE, 0.03, 0.05, 0.22, 0.008, s * 0.475, -L * 0.24, 0.0);
+  b.box('glow', MASK.BASE, 0.03, 0.05, 0.22, 0.008, s * 0.565, -L * 0.24, 0.0);
 
   // --- wrist + grip claw (weapons cover it, so cheap but not empty) -------
   // The cuff reads as a real wrist break and stops the forearm looking like one
   // undifferentiated block from elbow to fingers.
-  b.addM('mech', MASK.STEEL, ring(0.13, 0.19, 0.16, 12, 0.02),
+  b.addM('mech', MASK.STEEL, ring(0.17, 0.24, 0.18, 12, 0.022),
     _m.compose(_pv.set(0, -L * 0.86, 0), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
-  b.box('armor', MASK.BASE, 0.44, 0.16, 0.48, 0.03, 0, -L * 0.80, 0.0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
-  b.box('mech', MASK.TRIM, 0.34, 0.20, 0.36, 0.03, 0, -L * 0.94, 0.0);
+  b.box('armor', MASK.BASE, 0.56, 0.18, 0.60, 0.035, 0, -L * 0.80, 0.0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
+  b.box('mech', MASK.TRIM, 0.44, 0.22, 0.46, 0.03, 0, -L * 0.94, 0.0);
   for (let i = -1; i <= 1; i += 2) {
-    b.box('mech', MASK.TRIM, 0.09, 0.30, 0.10, 0.02, i * 0.11, -L - 0.12, -0.11, 0.30, 0, 0, { taperX: 0.7, taperZ: 0.7 });
-    b.box('mech', MASK.TRIM, 0.09, 0.26, 0.10, 0.02, i * 0.11, -L - 0.10, 0.12, -0.34, 0, 0, { taperX: 0.7, taperZ: 0.7 });
+    b.box('mech', MASK.TRIM, 0.11, 0.30, 0.12, 0.02, i * 0.14, -L - 0.12, -0.13, 0.30, 0, 0, { taperX: 0.7, taperZ: 0.7 });
+    b.box('mech', MASK.TRIM, 0.11, 0.26, 0.12, 0.02, i * 0.14, -L - 0.10, 0.14, -0.34, 0, 0, { taperX: 0.7, taperZ: 0.7 });
   }
-  b.addM('mech', MASK.STEEL, ring(0.10, 0.16, 0.10, 12, 0.015),
+  b.addM('mech', MASK.STEEL, ring(0.13, 0.20, 0.11, 12, 0.016),
     _m.compose(_pv.set(0, -L * 0.86, 0), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
 
   if (d) {
-    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.50, 0.32, 0.42, L * 0.6, rng, { cols: 2, rows: 4, depth: 0.03, accent: 0.04 });
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'nx' : 'px', s * -0.29, -L * 0.5, 0, 0.44, L * 0.6, rng, { cols: 2, rows: 3, depth: 0.028, fill: 0.55 });
-    ventGrill(b, 'mech', MASK.TRIM, 'nz', 0, -L * 0.72, -0.32, 0.3, 0.26, 3, 0.05);
+    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.50, 0.42, 0.52, L * 0.6, rng, { cols: 2, rows: 4, depth: 0.032, accent: 0.04 });
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'nx' : 'px', s * -0.37, -L * 0.5, 0, 0.52, L * 0.6, rng, { cols: 2, rows: 3, depth: 0.030, fill: 0.55 });
+    ventGrill(b, 'mech', MASK.TRIM, 'nz', 0, -L * 0.72, -0.42, 0.36, 0.28, 3, 0.055);
   }
 
-  return { b, anchors: { muzzle: [s * 0.46, -L * 0.46, -0.62], wrist: [0, -L, 0] } };
+  return { b, anchors: { muzzle: [s * 0.55, -L * 0.46, -0.62], wrist: [0, -L, 0] } };
 }
 
 // ---------------------------------------------------------------------------

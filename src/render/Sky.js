@@ -153,7 +153,7 @@ export class Sky {
       // per-metre extinction. Models a clean basin under a distant dust wall:
       // the first couple of hundred metres of air really are clearer than the
       // column out to the ridges.
-      aerialRamp: 250,
+      aerialRamp: 300,
       sunColor: new THREE.Color(),
     };
 
@@ -291,7 +291,7 @@ export class Sky {
     // the sky's. At 0.94 x horizon the deck was brighter than the shadowed sand
     // it was veiling, so every distant surface got LIGHTER as it receded and the
     // whole lower half of the frame collapsed to one pale value.
-    p.deckColor.copy(c.horizon).lerp(c.sunTint, 0.10).multiplyScalar(0.70);
+    p.deckColor.copy(c.horizon).lerp(c.sunTint, 0.10).multiplyScalar(0.64);
 
     // Smog band: lit from below by the ground bounce, so warmer again — and it
     // sits higher, in cleaner air, so it stays brighter than the deck. That

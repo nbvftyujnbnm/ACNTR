@@ -216,9 +216,27 @@ void main() {
     : pow( acesFilmic( color ), vec3( 1.0 / 2.2 ) );
 
   // ---- 3-way grade, display referred -------------------------------------
-  disp = uGain * ( disp + uLift * ( 1.0 - disp ) );
+  disp = uGain * disp;
   disp = pow( max( disp, vec3( 0.0 ) ), 1.0 / max( uGamma, vec3( 0.01 ) ) );
-  disp = ( disp - 0.5 ) * uContrast + 0.5;
+
+  // Filmic S-contrast, pivoted at 0.5.
+  //
+  // This used to be the textbook (x - 0.5) * c + 0.5, which is a straight
+  // line: at c = 1.2 EVERY value below 0.083 maps to negative and clamps to
+  // pure black. That single line was the biggest contributor to the mech's
+  // unlit flank reading as a silhouette — the lift meant to keep the toe open
+  // was applied BEFORE it and got clipped away along with the detail. Mixing
+  // toward a smoothstep is monotonic, fixes the 0.5 pivot, and cannot leave
+  // [0,1] at either end, so shadow separation is compressed rather than
+  // destroyed and highlights gain contrast without a new clip point.
+  vec3 sc = disp * disp * ( 3.0 - 2.0 * disp );
+  disp = mix( disp, sc, clamp( ( uContrast - 1.0 ) * 2.0, -0.9, 0.9 ) );
+
+  // Black floor, applied AFTER the contrast so nothing downstream can crush it.
+  // AC6 shadows are deep but never zero; this is the value they bottom out at,
+  // and it is blue-weighted so the darkest part of the frame is also its
+  // coolest — the other half of the warm-key / cool-shadow split.
+  disp = uLift + ( vec3( 1.0 ) - uLift ) * clamp( disp, 0.0, 1.0 );
 
   float l = luma( disp );
   disp = l + ( disp - l ) * uSaturation;

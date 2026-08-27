@@ -27,45 +27,53 @@ import { clamp } from '../core/MathUtils.js';
  * term — a base darker than ~0.09 linear (roughly #4a4f55 in sRGB) has no
  * headroom left and collapses to black the moment the key light softens.
  *
- * Every `base` now sits at **0.12..0.46 linear, most of them near 0.23**. The
+ * Every `base` now sits at **0.10..0.46 linear, most of them near 0.19**. The
  * previous set bottomed out at 0.06 (vespers) and averaged 0.15, which survived
  * direct sun but went to pure black on the shadow side — all the panel work,
  * chipping and stencilling this file exists to produce was simply not there on
- * half of every frame. Grime, seam AO and the ACES shoulder still take the look
- * back down; what they can no longer do is take it to zero.
+ * half of every frame. Grime, seam AO and the tonemap still take the look back
+ * down; what they can no longer do is take it to zero.
+ *
+ * `base` is the albedo of an AVERAGE texel, and the average is dragged down by
+ * grime and seams, so a CLEAN plate renders about 1.25x this (the baked map's
+ * 75th-90th percentile sits at ratio 1.14-1.35 against `armorMean`; re-measure
+ * that if you retune the forge parameters). 0.19 here therefore paints a
+ * clean plate at ~0.24 linear, which is real battleship grey. An earlier pass at
+ * 0.235 put clean plates at 0.29 and the sunlit side of the arms went to a white
+ * slab that read as unpainted metal.
  */
 export const MECH_PALETTES = {
   raven: {
-    label: 'RAVEN', base: '#7f8690', accent: '#a64739', trim: '#4f545b',
-    steel: '#a8aeb6', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
+    label: 'RAVEN', base: '#737982', accent: '#9b4235', trim: '#4a4e55',
+    steel: '#a4aab2', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
   },
   balteus: {
-    label: 'BALTEUS', base: '#5f6975', accent: '#4b83a6', trim: '#3f464f',
-    steel: '#a4aab2', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
+    label: 'BALTEUS', base: '#58626d', accent: '#3d6f8f', trim: '#3c424b',
+    steel: '#9ea4ab', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
   },
   baws: {
-    label: 'BAWS', base: '#978446', accent: '#64676d', trim: '#515458',
-    steel: '#a9aeb3', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
+    label: 'BAWS', base: '#8e7c41', accent: '#5b5e64', trim: '#4c4e52',
+    steel: '#a5aab0', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
   },
   rad: {
-    label: 'RaD', base: '#bab5a8', accent: '#c07c3a', trim: '#555450',
-    steel: '#a9aeb4', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
+    label: 'RaD', base: '#bab5a8', accent: '#b6702f', trim: '#4f4e4b',
+    steel: '#a5aab0', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
   },
   arquebus: {
-    label: 'ARQUEBUS', base: '#5f6b88', accent: '#a8956a', trim: '#454d59',
-    steel: '#a6adb5', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
+    label: 'ARQUEBUS', base: '#58647f', accent: '#9d8a5c', trim: '#414954',
+    steel: '#a0a6af', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
   },
   schneider: {
-    label: 'SCHNEIDER', base: '#7e868e', accent: '#6ba5b2', trim: '#4f545a',
-    steel: '#a8aeb5', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
+    label: 'SCHNEIDER', base: '#737a81', accent: '#5f97a4', trim: '#494f54',
+    steel: '#a4aab1', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
   },
   vespers: {
-    label: 'VESPERS', base: '#665b72', accent: '#7b579d', trim: '#493f51',
-    steel: '#a09aaa', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
+    label: 'VESPERS', base: '#5f556a', accent: '#715090', trim: '#453c4d',
+    steel: '#9b94a4', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
   },
   elcano: {
-    label: 'ELCANO', base: '#728471', accent: '#849e5b', trim: '#49524a',
-    steel: '#a4aaa5', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
+    label: 'ELCANO', base: '#6a7b69', accent: '#77914f', trim: '#454e46',
+    steel: '#9ea49f', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
   },
 };
 
@@ -144,9 +152,10 @@ float acChipG = 0.0;
 // taking the tint, which is what stops dark palettes eating all the wear detail.
 //
 // The tint is applied around the texture's MEASURED mean (see MechMaterials.bake),
-// so `uSlots[n]` is literally the albedo of a clean, averagely-lit patch of that
-// paint. Authoring the palette then means picking real paint colours instead of
-// guessing what survives an unknown texture gain.
+// so `uSlots[n]` is literally the albedo of an AVERAGE texel of that paint.
+// Authoring the palette then means picking real paint values instead of guessing
+// what survives an unknown texture gain — bearing in mind that the average is
+// pulled down by grime and seams, so a clean plate lands ~1.25x the palette value.
 const RECOLOR = /* glsl */`
 #include <map_fragment>
 {
@@ -179,11 +188,17 @@ const RECOLOR = /* glsl */`
   // seams to ~3% of the paint's albedo — a black hole, not a shadowed groove.
   float acRatio = clamp( acLum / uTexMean, 0.22, 2.6 );
   vec3 acTint = acSlot * acRatio;
-  acChipG = smoothstep( 1.32, 2.05, acRatio );
+  // Chip onset, expressed against the baked map's MEASURED distribution rather
+  // than guessed. The old 1.32 -> 2.05 window looked conservative and was not:
+  // 10% of every armour texel sits above ratio 1.32, and the map's maximum is
+  // only ~2.1, so a tenth of the surface got a low-grade dose of neutral alloy
+  // and no chip ever reached even half strength. The result was armour whose
+  // hue quietly drained out on the lit side — pale, plasticky, and nothing
+  // anywhere that read as an actual chip. 1.44 -> 1.80 puts the onset at the
+  // 97.6th percentile and full strength at the 99.9th: ~2.4% of the map takes
+  // any alloy at all, and the texels that do are the real chip cells.
+  acChipG = smoothstep( 1.44, 1.80, acRatio );
   // Chipped paint reveals bare alloy: hue drops out, value tracks the texture.
-  // Both the threshold and the alloy's own value are deliberately conservative —
-  // let the chip go too bright or too common and the armour reads as if someone
-  // shook salt over it rather than as a machine that has been shot at.
   diffuseColor.rgb = mix( acTint, vec3( 0.26, 0.265, 0.275 ) * min( acRatio, 1.5 ), acChipG * 0.70 );
   // Panel seams are the single most important read on a mech. The baked map
   // already darkens them; this pushes the contrast further in linear space so
@@ -388,16 +403,21 @@ export class MechMaterials {
   }
 
   /**
-   * Bake the shared texture sets. Yields between passes so a boot progress bar can
-   * paint — each armorPanel call is hundreds of milliseconds of noise generation.
+   * Bake the shared texture sets.
    *
-   * Sizes are chosen together with MechFactory's TILES_* constants so all three
-   * sets land on the SAME texels-per-metre (see MechFactory). The absolute number
-   * matters as much as the consistency: the previous bake ran at ~690 texels/m,
-   * which put a whole plate inside 22 cm and meant that at any real viewing
-   * distance every seam, rivet and stencil averaged away into flat grey. These
-   * cover 3–4 m per tile, so a plate is ~0.5–1.1 m and its seam is a line you can
-   * actually see from 20 m.
+   * BOTH sets are baked at `MECH_TEX_SIZE` and are used on the SAME
+   * `MECH_TILE_METRES` tile, so every surface on every mech lands on one
+   * texels-per-metre AND one feature-size-per-metre. The second half of that
+   * used not to hold: the sets ran at 1024/768/512 on 3.2/2.4/1.6 m tiles, which
+   * is the same density but puts the forge's grime blotches at 40 cm on the
+   * chest and 20 cm on the joint housings. That mismatch is what made the accent
+   * pauldron read coarser and blotchier than the plates bolted next to it.
+   *
+   * The armour and "fine plating" material slots now SHARE one map set. A second
+   * bake at a different seed bought pattern variety, but it cost a third of the
+   * mech's texture memory and it could only ever be scale-consistent by being a
+   * near-copy of the first. Variety comes from per-part UV offsets instead (see
+   * MechFactory._partGeo), which is free.
    */
   async bake(onProgress) {
     if (this._baked) return this;
@@ -412,40 +432,48 @@ export class MechMaterials {
     // its seams, rivets, stencils and chipped paint were quantised into mush.
     // The mech's light channels are modelled geometry in the `glow` bucket, so
     // nothing is lost by leaving the painted-on strips out.
-    onProgress?.(0.1, 'armour panelling');
+    onProgress?.(0.15, 'armour panelling');
     // Baked at a neutral mid grey: the shader recolours from luminance, so one
     // texture set serves every palette in the game.
-    // `panelScale` is plates-per-tile, and a tile is 4 m of mech (see TILES_MAIN).
-    // At 4 the recursive splitter produced ~20 plates per 1024 px, i.e. one plate
-    // per 1-2 m, so the chest was a single seamless slab. 9 lands plates at
-    // 0.2-0.8 m — dense enough that no armour panel is ever a flat rectangle.
     //
-    // `wear` has a hard threshold inside the forge: chips only appear where
-    // (1 - worley) * wear clears 0.6, so anything under ~0.62 produces literally
-    // no chipped paint. The old 0.42 meant the chipping the forge advertises had
-    // never once been visible on a mech.
-    onProgress?.(0.1, 'armour panelling');
-    // Baked at a neutral mid grey: the shader recolours from luminance, so one
-    // texture set serves every palette in the game.
+    // `panelScale` is plates-per-tile and a tile is MECH_TILE_METRES of mech, so
+    // 9 lands plates at 0.2-0.8 m — dense enough that no armour face is ever a
+    // flat rectangle.
+    //
+    // `wear` gates the forge's chipping through a hard threshold: a texel is
+    // chipped where `(1 - worley) * wear + seam * 0.28 * wear` clears 0.6. That
+    // threshold is steep, so `wear` is really a coverage dial: 0.58 produced
+    // literally zero chipped texels, 0.66 produced 0.2% of the map, 0.70
+    // produces 0.4% in the open field plus a broad band along every plate seam
+    // (the seam term contributes 0.196, which drags a fifth of each seam's
+    // neighbourhood over the line). 0.70 is the setting that reads as EDGE
+    // DAMAGE: chips cluster on plate borders where paint actually comes off,
+    // rather than dusting the open field.
+    //
+    // `wear` also scales the forge's `scratch` field, which is a 4-texel white
+    // noise and pure speckle at any real density. That is dealt with in the
+    // shader by frequency (see RECOLOR) instead of by turning `wear` down here,
+    // which is what let the chipping come back up.
+    //
+    // `grime` is up because dirt biases into the seams too: it keeps the
+    // recesses reading dark and loaded next to the brightened paint.
     this.armorTex = this.forge.armorPanel({
-      size: 1024, seed: 1207, baseColor: '#9aa1a8', accentColor: '#8e949b',
-      panelScale: 9, wear: 0.66, grime: 0.52, rivets: true, stencil: true,
-      emissiveDensity: 0, metal: 1.0, baseRough: 0.34,
+      size: MECH_TEX_SIZE, seed: 1207, baseColor: '#9aa1a8', accentColor: '#8e949b',
+      panelScale: 9, wear: 0.70, grime: 0.62, rivets: true, stencil: true,
+      emissiveDensity: 0, metal: 1.0, baseRough: 0.36,
     });
+    // Small parts sample the same plating at the same scale — see the note above.
+    this.armorFineTex = this.armorTex;
     await yieldFrame();
 
-    onProgress?.(0.5, 'fine plating');
-    this.armorFineTex = this.forge.armorPanel({
-      size: 768, seed: 6011, baseColor: '#9aa1a8', accentColor: '#8e949b',
-      panelScale: 12, wear: 0.62, grime: 0.46, rivets: true, stencil: true,
-      emissiveDensity: 0, metal: 1.0, baseRough: 0.30,
-    });
-    await yieldFrame();
-
-    onProgress?.(0.8, 'joint housings');
+    onProgress?.(0.6, 'joint housings');
+    // Joint shrouds, cable looms, actuator sleeves: grimier, rougher, no
+    // stencils. Baked at the SAME size and used on the SAME tile as the armour
+    // (it used to be 512 on a 1.6 m tile, i.e. half-scale panelling on every
+    // joint next to full-scale panelling on every plate).
     this.mechTex = this.forge.armorPanel({
-      size: 512, seed: 3307, baseColor: '#8e9298', accentColor: '#83878d',
-      panelScale: 10, wear: 0.50, grime: 0.74, rivets: false, stencil: false,
+      size: MECH_TEX_SIZE, seed: 3307, baseColor: '#8e9298', accentColor: '#83878d',
+      panelScale: 10, wear: 0.56, grime: 0.72, rivets: false, stencil: false,
       emissiveDensity: 0, metal: 1.0, baseRough: 0.62,
     });
     await yieldFrame();
@@ -483,9 +511,13 @@ export class MechMaterials {
     // aoMap samples UV channel 0 in three >= r151; MechParts.applyBoxUV writes
     // `uv` and aliases `uv1` to the same attribute, so both conventions resolve.
     m.aoMap.channel = 0;
-    // Seam bevels and rivet domes live entirely in the normal map — pushing it
-    // past 1 is what makes them survive at hero distance under a soft key.
-    m.normalScale.set(1.75, 1.75);
+    // Seam bevels and rivet domes live entirely in the normal map, so this stays
+    // above 1 to keep them alive at hero distance under a soft key. It is no
+    // longer 1.75: the forge's `micro` field runs to ~1.3 texels, and amplifying
+    // a one-texel normal that hard turned every armour plate into a field of
+    // specular sparkle that no amount of albedo work could hide. A seam's slope
+    // is roughly 5x the micro field's, so it survives the cut with room to spare.
+    m.normalScale.set(1.30, 1.30);
     return m;
   }
 
@@ -516,11 +548,14 @@ export class MechMaterials {
     // panel gaps through the DAMAGE_GLOW chunk, which adds on top of this.
     const armor = patch(this._standard(this.armorTex, {
       emissive: new THREE.Color(0x000000),
-    }), slotUniforms(pal, rough, metal, this.armorMean ?? 0.26, 0.80), 'acntr-mech-armor');
+    }), slotUniforms(pal, rough, metal, this.armorMean ?? 0.26, 0.70), 'acntr-mech-armor');
 
+    // Same maps as `armor` — the slot roughness runs a touch tighter because the
+    // parts that ask for it (head, hands, feet) are machined, not stamped.
     const armorFine = patch(this._standard(this.armorFineTex, {
       emissive: new THREE.Color(0x000000),
-    }), slotUniforms(pal, rough, metal, this.armorFineMean ?? 0.26, 0.76), 'acntr-mech-armor');
+    }), slotUniforms(pal, [rough[0] - 0.06, rough[1] - 0.06, rough[2] - 0.04, rough[3]],
+      metal, this.armorFineMean ?? 0.26, 0.70), 'acntr-mech-armor');
 
     // Dark mechanical: rubberised booting, cable looms, joint shrouds. Slots 0-2
     // are all dielectric here; slot 3 stays metal so pistons read as bare steel.
@@ -530,7 +565,7 @@ export class MechMaterials {
     const mechPal = { ...pal, base: struct, accent: struct, trim: '#' + new THREE.Color(pal.trim).getHexString() };
     const mech = patch(this._standard(this.mechTex, {}),
       slotUniforms(mechPal, [1.16 + rb, 1.10 + rb, 1.24 + rb, 0.42 + rb], [0, 0, 0, 1],
-        this.mechMean ?? 0.24, 0.60),
+        this.mechMean ?? 0.24, 0.55),
       'acntr-mech-dark');
 
     // Emissive elements. Intensity well above 1 so the bloom pass actually catches

@@ -68,7 +68,7 @@ export class RenderPipeline {
       // Scene radiance went up ~3x when the key took over from the ambient, so
       // the exposure comes down to keep sunlit concrete around 0.6 display and
       // leave headroom for emissives to punch through the tonemap.
-      exposure: 0.655,
+      exposure: 0.645,
       sharpen: 0.30,
       tonemap: 'agx',         // 'agx' | 'aces'
 
@@ -117,19 +117,25 @@ export class RenderPipeline {
         // specular rail into a flat white lens with no roll-off at all. 1.13
         // buys back a stop and a half of highlight shoulder; the mid-tone punch
         // it costs comes back from `contrast`, which pivots at 0.5 and does not
-        // touch the clip point. `power` below 1.18 opens the shadow end, which
-        // is where the mech's unlit flank lives.
-        agxLook: new THREE.Vector4(1.13, 0.0, 1.10, 0.88),
-        // A cool, open toe. AC6's shadows are deep but you can always read what
-        // is in them; a crushed-to-black shadow is the giveaway of a hobby
-        // renderer. Blue-weighted so shadow/key also splits by temperature.
-        // Raised alongside the ambient cut: the rig now has a real key/shadow
-        // ratio, and the toe is what stops that ratio from crushing the mech's
-        // unlit flank to paper black.
-        lift: new THREE.Vector3(0.022, 0.028, 0.046),
+        // touch the clip point.
+        //
+        // `power` is the shadow-targeted knob in this vec4 and the one that
+        // decides whether the mech's unlit flank is readable. Because it is a
+        // pow() on a [0,1] display value it moves the toe hard and the shoulder
+        // barely at all: dropping it from 1.14 to 0.98 raises a 0.07 shadow by
+        // 44% and a 0.80 highlight by 3.6%. Contrast and exposure cannot do
+        // that — they move the whole curve.
+        agxLook: new THREE.Vector4(1.13, 0.0, 0.98, 0.88),
+        // The frame's black point, applied last in the grade (see FINAL_FRAG).
+        // AC6's shadows are deep but you can always read what is in them; a
+        // crushed-to-black shadow is the giveaway of a hobby renderer.
+        // Blue-weighted so the darkest part of the frame is also its coolest.
+        lift: new THREE.Vector3(0.020, 0.026, 0.042),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
         gain: new THREE.Vector3(1.035, 1.0, 0.950),
-        contrast: 1.14,
+        // Reads as before (1.0 = neutral) but drives an S-curve now, so it can
+        // be pushed for real tonal range in the sand without clipping the toe.
+        contrast: 1.20,
         saturation: 0.94,
         splitShadow: new THREE.Vector3(-0.026, -0.006, 0.044),
         splitHighlight: new THREE.Vector3(0.032, 0.012, -0.024),

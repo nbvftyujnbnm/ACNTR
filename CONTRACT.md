@@ -364,3 +364,31 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   all, which is what made a dark palette render as black plastic. Per-slot metalness still
   resolves to a hard 0 or 1 except at the two physical transitions the contract allows:
   chipped paint exposing bare alloy, and thick grime burying metal.
+- 2026-08-27 [mech] `MechMaterials` now exports `MECH_TEXELS_PER_M` (320) and
+  `MECH_TILE_METRES` (3.2). Every mech map is baked at `MECH_TILE_METRES * MECH_TEXELS_PER_M`
+  square and MechFactory derives EVERY part's UV scale from `MECH_TILE_METRES` alone, so
+  there is exactly one tiling number for the whole mech. Holding texels/m constant across
+  three resolutions (1024/768/512) was only half of consistency: the forge specifies its
+  noise in cycles PER TILE and its plate splitter is depth-capped, so a tile's WORLD size —
+  not its resolution — sets how big a plate, a grime blotch or a chip cell is in metres.
+  Three tile sizes (3.2/2.4/1.6 m) put grime blotches at 40 cm on the chest, 30 cm on the
+  arms and 20 cm on the joint housings, which is what made the accent pauldron read visibly
+  coarser than the plates bolted next to it. The `armor` and `armorFine` material slots now
+  share one map set; `armorFor(fine)` is unchanged and still returns two distinct materials.
+- 2026-08-27 [mech] `MechFactory._partGeo` seeds its per-part UV offset from a hash of the
+  PART key, not from `opts.seed`. `opts.seed` is one value for a whole mech, so every part
+  previously received the identical offset and the entire frame sampled one patch of the
+  tile. The hash deliberately excludes the LOD `mode` so a part's hi and lo meshes keep the
+  same offset and the texture cannot jump at the LOD switch.
+- 2026-08-27 [mech] `MECH_DIMS.shoulderX` 1.46 -> 1.26, `elbowDrop` 1.50 -> 1.40,
+  `wristDrop` 1.60 -> 1.48, and the arm sections went up ~30% (upper arm 0.52x0.56 ->
+  0.66x0.78, forearm 0.56x0.62 -> 0.72x0.82). Anything reading these to place a weapon or a
+  hardpoint gets the new numbers automatically; the forearm muzzle anchor moved outboard
+  from `s * 0.46` to `s * 0.55` with the wider shell.
+- 2026-08-27 [render] BUILD BREAK FOUND AND REPAIRED IN A FILE THIS AGENT DOES NOT OWN.
+  `src/render/shaders/grade.js` had two backticks inside a GLSL *comment* in the
+  `FINAL_FRAG` template literal ("the textbook `(x - 0.5) * c + 0.5`"). A backtick closes
+  the template, so the comment's contents were parsed as JavaScript and the module threw
+  `ReferenceError: x is not defined` at import time — every boot, every capture, every
+  pose. Only the two backticks were removed; the grade maths was not touched. Whoever owns
+  the post pipeline: the no-backtick-in-GLSL rule includes comments.

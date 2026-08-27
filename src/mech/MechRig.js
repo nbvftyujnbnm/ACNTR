@@ -568,8 +568,16 @@ export class MechRig {
 
       const pitchWant = sway - tuckPitch + aimPitch * 0.22 + slack * 0.55
         - recoil.x * 0.055;
-      const rollWant = side * (0.09 + tuckRoll + slack * 0.20);
-      const foreWant = -0.16 - 0.55 * this.wAssault - 0.22 * this.wBoost
+      // Rest roll is half what it was: the arms are now thick enough that a 5
+      // degree inward cant crowded them against the waist. 3 degrees still stops
+      // them hanging perfectly parallel, which is what looks like a mannequin.
+      const rollWant = side * (0.05 + tuckRoll + slack * 0.20);
+      // Rest elbow now carries the hands slightly FORWARD (+x rotation) instead
+      // of trailing them 35 cm behind the hip. An AC at rest holds its weapons
+      // ahead of the frame; trailing arms read as a ragdoll. Boost and assault
+      // still subtract past zero and tuck them back, which is the pose that
+      // wants them behind.
+      const foreWant = 0.14 - 0.62 * this.wAssault - 0.30 * this.wBoost
         - slack * 0.35 + recoil.x * 0.030;
 
       p.pitch = damp(p.pitch, pitchWant, 12, dt);

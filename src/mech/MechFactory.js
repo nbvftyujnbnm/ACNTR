@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { bus, EV } from '../core/EventBus.js';
 import { clamp, mulberry32 } from '../core/MathUtils.js';
 import { getForge } from '../render/TextureForge.js';
-import { MechMaterials, MECH_PALETTES } from './MechMaterials.js';
+import { MechMaterials, MECH_PALETTES, MECH_TILE_METRES } from './MechMaterials.js';
 import { MechRig } from './MechRig.js';
 import * as MP from './MechParts.js';
 
@@ -21,32 +21,46 @@ import * as MP from './MechParts.js';
  * — LOD is applied per bone precisely so distant mechs keep their gait.
  */
 
-// Texel density is held constant across three different texture resolutions:
-// 1024 * 0.3125 == 768 * 0.4167 == 512 * 0.625 == 320 texels per metre.
+// ONE tiling for the entire mech. `MECH_TILE_METRES` is 3.2 m and every mech map
+// is baked at 3.2 m * 320 texels/m = 1024², so this single number fixes both
+// texels-per-metre and feature-size-per-metre on every part of every mech.
 //
-// The absolute figure is as important as the consistency. At the previous 691
+// It used to be three numbers — 1024*0.3125, 768*0.4167, 512*0.625 — which agree
+// on 320 texels/m and disagree on everything else. The forge specifies its noise
+// in cycles PER TILE and its plate splitter is depth-capped, so the tile's WORLD
+// size, not its resolution, sets how big a plate, a grime blotch or a chip cell
+// is in metres. Three tile sizes meant grime blotches at 40 cm on the chest, 30
+// on the arms and 20 on the joint housings, which is exactly the "that plate is
+// a different resolution" tell the review rubric fails a frame for.
+//
+// The absolute figure matters as much as the consistency. At the original 691
 // texels/m one armour plate spanned 22 cm, so from any real camera distance a
 // screen pixel covered ten texels and every seam, rivet and stencil mipped away
-// into flat grey — the mech looked untextured even though the texture was there.
-// The tile size is set by the PLATE COUNT, not by the texel budget. The forge's
-// plate splitter caps its recursion at depth 6, so a tile only ever holds ~30-60
-// plates no matter what `panelScale` says; at a 5 m tile that made plates 0.6-1.7 m
-// and most armour faces contained no seam at all, which is why the mech read as
-// flat slabs with lit chamfers and nothing in between. A ~3.2 m tile puts plates
-// at 0.25-1.25 m so every face crosses one or more seams.
+// into flat grey. At 3.2 m per tile the splitter's ~30-60 plates land at
+// 0.25-1.25 m, so every armour face crosses one or more seams.
 //
 // A seam's WORLD width follows from the same number: the forge draws it at
 // (size/512)*2.2 texels, i.e. always 2.2/(512*tiles) metres — 1.4 cm here, with a
 // 2.5 cm bevel in the normal map behind it doing the work at distance.
-const TILES_MAIN = 0.3125;
-const TILES_FINE = 0.3125 * 1024 / 768;
-const TILES_MECH = 0.3125 * 2;
+const TILES_MAIN = 1 / MECH_TILE_METRES;
+const TILES_FINE = TILES_MAIN;
+const TILES_MECH = TILES_MAIN;
 
 const LOD_DIST = 46;
 const TARGET_HEIGHT = 9.0;
 
 const _v = new THREE.Vector3();
 const _box = new THREE.Box3();
+
+/** FNV-1a over a cache key — deterministic per part, stable across runs. */
+function hashKey(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 // ---------------------------------------------------------------------------
 // Entity support types
@@ -286,9 +300,14 @@ export class MechFactory {
     const res = builder({ ...opts, rng, detail: low ? 'low' : 'high' });
     const buckets = res.b.build();
 
-    // per-part UV jitter so two parts never show the identical patch of panelling
-    const jr = mulberry32((opts.seed ?? 1) * 7919 + 13);
-    const ou = jr() * 6, ov = jr() * 6;
+    // Per-part UV offset, so two parts never show the identical patch of
+    // panelling. Seeded off the PART key, not the mech seed — the old version
+    // hashed `opts.seed`, which is one value for the whole mech, so every part
+    // received the same offset and the whole frame sampled one patch of the
+    // tile. `key` deliberately excludes `mode`, so a part's hi and lo LODs get
+    // the same offset and the texture cannot jump at the LOD switch.
+    const jr = mulberry32(hashKey(key) ^ ((opts.seed ?? 1) * 7919 + 13));
+    const ou = jr() * 8, ov = jr() * 8;
 
     if (low || mode === 'merged') {
       const solid = [buckets.armor, buckets.mech].filter(Boolean);
@@ -413,7 +432,7 @@ export class MechFactory {
       arms[`${p}Shoulder`] = shoulder;
       arms[`${p}Arm`] = arm;
       arms[`${p}ForeArm`] = fore;
-      muzzles[p] = fa.muzzle || [side * 0.46, -D.wristDrop * 0.46, -0.62];
+      muzzles[p] = fa.muzzle || [side * 0.55, -D.wristDrop * 0.46, -0.62];
 
       // shoulder weapon mount (the deck on top of the yoke)
       const mount = new THREE.Object3D();
