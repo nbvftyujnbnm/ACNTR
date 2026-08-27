@@ -83,6 +83,20 @@ export class Game {
     this.targeting.setTargets(this.enemies.list);
     this.damage.register(this.player);
 
+    // Projectiles need an explicit collision set and damage sink. Without this
+    // the pooled projectiles fly correctly but pass through every entity, so
+    // nothing in the game can actually be shot. `enemies.list` is held by
+    // reference and stays live as waves spawn and die; the player is added
+    // separately so enemy fire can hit us too.
+    this.projectiles.setDamageSystem(this.damage);
+    this.projectiles.setTargetList(this.enemies.list);
+    this.projectiles.addTarget(this.player);
+
+    // Build-derived stats only reach movement and weapons if we push the
+    // loadout into them; neither reads it on its own.
+    this.weapons.setLoadout(this.loadout);
+    this.controller.setLoadout?.(this.loadout);
+
     step(0.85, 'salvage protocol');
     this.loot = new LootSystem(this.scene, this.player, this.loadout, this.vfx);
 
@@ -117,6 +131,23 @@ export class Game {
     bus.on(EV.ENTITY_KILLED, (e) => {
       if (e.entity === this.player) this._onPlayerDeath();
     });
+
+    // Soft particles need the scene depth buffer to fade against geometry.
+    // The pipeline recreates it on every resize, so re-push whenever it changes
+    // rather than wiring once at init.
+    this._vfxDepthTex = null;
+    this._wireVfxDepth();
+    bus.on('engine:resize', () => this._wireVfxDepth());
+  }
+
+  /** Hand the pipeline's depth texture to the VFX system for soft-particle fade. */
+  _wireVfxDepth() {
+    const p = this.pipeline;
+    const tex = p?.depthTexture || p?._depthTexture || p?.rtScene?.depthTexture || null;
+    if (!tex || tex === this._vfxDepthTex) return;
+    this._vfxDepthTex = tex;
+    const cam = this.engine.camera;
+    this.vfx?.setDepthTexture?.(tex, cam.near, cam.far);
   }
 
   _registerLoop() {

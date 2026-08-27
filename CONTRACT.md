@@ -331,3 +331,8 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   in, `root.y = centre.y - height/2` coming out. The original contract left this unstated and
   both PlayerController and Brain passed feet as centre, which floated every mech half its
   height off the ground. Fixed at both call sites.
+- 2026-08-26 [pipeline] REQUEST: RenderPipeline should expose a public `.depthTexture`
+  getter for the scene depth buffer. Game wires it into `VFX.setDepthTexture()` so soft
+  particles fade against geometry, and currently has to probe `_depthTexture` /
+  `rtScene.depthTexture` defensively. It re-wires on `engine:resize` since the pipeline
+  recreates the texture there.
