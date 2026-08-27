@@ -709,3 +709,20 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   renders as discrete panels and one segment is failing to fade out, so it reads as an opaque
   floating rectangle instead of a subtle boundary shimmer. Whoever next owns Level should
   check the field's per-panel fade/alpha against camera distance and view angle.
+- 2026-08-27 [mech] Painted armour is now MATTE: slot roughness multipliers went
+  base 0.92 -> 1.12, accent 0.84 -> 1.02, trim 1.06 -> 1.18, and `envMapIntensity`
+  1.15 -> 0.95. STEEL deliberately stays at 0.52. This was diagnosed, not guessed:
+  halving the palette's albedo (0.19 -> 0.09 linear) moved the sunlit arm only from 143
+  to 126, which means that surface was showing a specular lobe rather than its own
+  colour — an albedo-independent term no amount of darkening the paint could reach.
+  If a lit surface on this mech is ever "too bright" again, check whether it is diffuse
+  (it will carry the palette's chroma, sat 0.2-0.4) or specular (near-neutral, sat < 0.06)
+  BEFORE touching the palette.
+- 2026-08-27 [mech] MEASUREMENT TRAP, do not chase this a third time. The "pale skirt
+  plate" at the mech's crotch in the hero pose is NOT a mech surface — it is the
+  background seen through the daylight gap between the legs. It reads neutral and bright
+  because the hangar wall behind it is neutral and bright, and it tracks that wall across
+  every exposure the lighting agent has tried (0.91 / 1.06 / 1.13 of wall value over three
+  captures) while the solid pelvis 2 cm to its left reads 66 and the thigh face reads 10.
+  Two separate passes have now "fixed" this in the material system. Sample at
+  (752,462) for real pelvis armour; (772,505) is sky.
