@@ -667,3 +667,22 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   midground. Also note the earlier amendment blaming the chest's "dark smeared streak" on
   TAA and motion blur: that investigation was run through a 3.2 px defocus of the subject,
   so its conclusion should be re-measured before anyone acts on it.
+- 2026-08-27 [mech] Shoulder ordnance anchors `mountL`/`mountR` moved from y 3.02 to
+  **3.14** in core-local space. The yoke's upper mass is now carried 12 cm clear of the
+  lower one on two short posts, opening an 11 cm x 38 cm through-slot in the top of each
+  shoulder — the only gap on the frame guaranteed to have sky behind it rather than more
+  mech. The whole hardpoint stack (base plate, pylons, rail, cleats) moved up with it.
+  Anything that positions shoulder weapons off these anchors follows automatically; anything
+  that hard-codes 3.02 will now float 12 cm low.
+- 2026-08-27 [mech] `MechRig._updateArms` rest roll 0.05 -> **0.095**, and `tuckRoll` flipped
+  sign: `+0.05 * wBoost + 0.14 * wAssault`, was `-0.10 / -0.30`. Positive `rotation.z` swings
+  a downward-hanging arm AWAY from the body on the right side, so the old negative tuck drove
+  the hands 57 cm across the frame and buried both forearms inside the thighs at assault
+  boost (measured: 20 of 40 shared cells interpenetrating). The boost tuck was always meant
+  to be the pitch term; roll's job is keeping the arms clear of the legs while it happens.
+  Measured clearance now: 2.3 cm standing, 13 cm boosting, 30 cm at assault boost.
+- 2026-08-27 [mech] `buildThigh`'s outboard plate moved from 0.44/0.12 to **0.36/0.11**
+  (outer face 1.22 -> 1.135 in torso space). At 1.22 its top corner sat 9-13 cm inside the
+  forearm in the DEFAULT STANDING POSE. The thigh's own box is the widest thing on the leg
+  again; if anyone widens the thigh past 1.13, re-run the arm/leg clearance check before
+  shipping it.

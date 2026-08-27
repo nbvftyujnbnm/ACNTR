@@ -151,7 +151,20 @@ export class RenderPipeline {
       // on the feet of a 9 m subject 19 m away is a visible error on its own.
       dof: { restFocus: 90, subjectRise: 4.5, farScale: 0.10, nearScale: 0.10, maxRadius: 3.2, hex: 0.75 },
       taa: { blend: 0.925, clampGamma: 1.15, jitterScale: 1.0 },
-      chromatic: { amount: 0.85 },
+      // 0.85 -> 0.34. MEASURED: the CA offset in FINAL_FRAG is
+      // `cc * r2 * 4.0 * amount * uTexel`, which at the frame corner
+      // (|cc| = 0.707, r2 = 0.5) is 1.20 texels per channel — a 2.4 px red/blue
+      // split on every edge out there. Binned |R-B| over pixels with a
+      // luminance gradient above 40, by radius, on the vista pose: 16.7 at the
+      // centre rising to 44.8 in the corner. At 1:1 that is a visible rainbow
+      // outline on every gantry rung and every crate edge in the lower right,
+      // which is the single loudest "cheap post filter" tell left in the frame.
+      // 0.34 puts the corner at 0.48 texels — under one pixel, so it survives
+      // as a softening of the extreme corners rather than as coloured fringes.
+      // NOTE this uniform is also driven up at runtime by crit/hit/speed (see
+      // the FINAL uniform sync), where a hard fringe IS the intent; only the
+      // resting value changes here.
+      chromatic: { amount: 0.34 },
       // Down from 0.34. Both review framings put GROUND in the bottom corners,
       // so the vignette was spending most of its darkening on the one part of
       // the frame that was already the hardest to read.
@@ -211,7 +224,19 @@ export class RenderPipeline {
         // sunlit:shadowed sand ratio, which is the cheapest exchange rate any
         // knob in this file offers. Do NOT reach for `contrast` or `exposure`
         // here — both move the sunlit half by as much as the shadows.
-        lift: new THREE.Vector3(0.032, 0.036, 0.052),
+        //
+        // 0.032 -> 0.022, and this is a TRADE, not a revert. `lift` is additive
+        // on the display value — `disp = lift + (1 - lift) * disp` — so every
+        // code value it adds to the floor is bought by compressing everything
+        // above it. A contact shadow that darkens its surround 42% before the
+        // grade darkens it less than 42% after, which is exactly the wrong
+        // direction for the one defect this pass is chasing. The floor it was
+        // holding up is now held up by `Lighting.params.bounceIntensity`, a real
+        // light: multiplicative, so the AO and cascade ratios survive intact and
+        // the contact shadow gets MORE readable as the shadows open, not less.
+        // The 0.010 that comes back off the toe is tonal range returned to the
+        // vista's shadowed sand, which is the other defect on the list.
+        lift: new THREE.Vector3(0.022, 0.025, 0.038),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
         gain: new THREE.Vector3(1.035, 1.0, 0.950),
         // Reads as before (1.0 = neutral) but drives an S-curve now, so it can

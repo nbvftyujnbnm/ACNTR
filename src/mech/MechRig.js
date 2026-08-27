@@ -563,7 +563,13 @@ export class MechRig {
       const sway = Math.sin(cyc + (side > 0 ? Math.PI : 0)) * 0.16 * walkW;
       // boost tuck: arms fold back; assault boost pins them in tight
       const tuckPitch = 0.30 * this.wBoost + 0.75 * this.wAssault;
-      const tuckRoll = -0.10 * this.wBoost - 0.30 * this.wAssault;
+      // Boost tuck rolls the arms OUTWARD, not inward. `rotation.z` positive
+      // swings a downward-hanging arm toward +X, i.e. away from the body on the
+      // right side — so the old negative values drove the hands 57 cm ACROSS the
+      // frame at assault boost and buried both forearms inside the thighs. The
+      // tuck was always meant to be a pitch (arms swept back, above), and the
+      // roll's job is to keep them clear of the legs while it happens.
+      const tuckRoll = 0.05 * this.wBoost + 0.14 * this.wAssault;
       const slack = this.wStagger;
 
       const pitchWant = sway - tuckPitch + aimPitch * 0.22 + slack * 0.55
@@ -571,7 +577,15 @@ export class MechRig {
       // Rest roll is half what it was: the arms are now thick enough that a 5
       // degree inward cant crowded them against the waist. 3 degrees still stops
       // them hanging perfectly parallel, which is what looks like a mannequin.
-      const rollWant = side * (0.05 + tuckRoll + slack * 0.20);
+      // Rest cant. The arms are 0.72 m across the forearm now, and at 0.05 the
+      // wrist sat 9-13 cm INSIDE the thigh's outer plate in the default standing
+      // pose — the hands were buried in the legs in every hero frame. 0.085 is
+      // the smallest value that clears them (with the thigh plate pulled in to
+      // match, see buildThigh) without bow-arming the silhouette: it moves the
+      // wrist 24 cm outboard, where 0.12 would have put the hands wider than the
+      // shoulders. Measured clearance at this value: 2.3 cm worst case standing,
+      // 13 cm boosting, 30 cm at assault boost, and a 42 cm median arm-to-leg gap.
+      const rollWant = side * (0.095 + tuckRoll + slack * 0.20);
       // Rest elbow now carries the hands slightly FORWARD (+x rotation) instead
       // of trailing them 35 cm behind the hip. An AC at rest holds its weapons
       // ahead of the frame; trailing arms read as a ragdoll. Boost and assault

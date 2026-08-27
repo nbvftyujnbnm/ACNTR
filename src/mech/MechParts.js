@@ -816,8 +816,19 @@ export function buildCore(o = {}) {
     // staircase and the top of the shoulder catches a separate highlight.
     b.box('armor', MASK.BASE, 0.90, 0.52, 1.16, 0.06, s * (sx - 0.30), 1.86, 0.02, 0, 0, s * -0.06,
       { taperX: 0.94, taperZ: 0.94 });
-    b.box('armor', MASK.BASE, 0.84, 0.34, 0.96, 0.05, s * (sx - 0.32), 2.28, 0.10, 0, 0, s * -0.06,
+    // DAYLIGHT SLOT. The upper mass is lifted 12 cm clear of the lower one and
+    // carried on two short posts, so an 11 cm slot runs right through the top of
+    // each shoulder. This is the only gap on the frame that is guaranteed to have
+    // SKY behind it rather than more mech: it is above the torso's shoulder line
+    // and outboard of the neck, so at hero framing (80 px/m) it is ~9 px of
+    // background cutting the widest part of the silhouette in half. Stacking the
+    // two blocks flush, as they were, is what made the torso and both yokes read
+    // as one filled rectangle no matter how much surface detail went on them.
+    b.box('armor', MASK.BASE, 0.84, 0.34, 0.96, 0.05, s * (sx - 0.32), 2.40, 0.10, 0, 0, s * -0.06,
       { taperX: 0.90 });
+    for (let r = -1; r <= 1; r += 2) {
+      b.box('mech', MASK.TRIM, 0.16, 0.16, 0.22, 0.02, s * (sx - 0.32), 2.175, 0.10 + r * 0.30);
+    }
     // forward nose block, dropped and raked: the step you actually see head-on
     b.box('armor', MASK.TRIM, 0.66, 0.30, 0.34, 0.04, s * (sx - 0.32), 2.03, -0.50, -0.22, 0, s * -0.06,
       { taperFrontX: 0.82, taperFrontY: 0.8 });
@@ -835,6 +846,16 @@ export function buildCore(o = {}) {
     // an overhanging slab with a thin arm poking through it.
     b.addM('armor', MASK.ACCENT, plate(beveledRectShape(0.96, 0.76, { tl: 0.26, tr: 0.10, bl: 0.20, br: 0.10 }), 0.13, 0.03),
       _m.compose(_pv.set(s * (sx + 0.38), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+    // Raised centre panel on the pauldron. This is the mech's hero colour on its
+    // largest single face, and flat accent paint on a flat plane reads as a
+    // coloured decal rather than as armour — the one part of the frame a reviewer
+    // called "a plain red shape". A 5 cm step gives it a cast shadow along two
+    // edges and a lit chamfer along the other two, at 4 triangles' worth of cost.
+    // It also restores the ordering the yoke depends on: its face lands at 1.755
+    // and the arm's outermost plating at 1.715, so the pauldron still caps the arm.
+    b.addM('armor', MASK.ACCENT, plate(beveledRectShape(0.54, 0.42, { tl: 0.14, tr: 0.06, bl: 0.10, br: 0.06 }), 0.07, 0.022),
+      _m.compose(_pv.set(s * (sx + 0.46), 2.08, 0.04), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+    if (d) boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.50), 2.08, 0.04, 0.20, 5, 0.024, 0.016);
     // HARDPOINT RAIL, standing off the shoulder on two pylons.
     //
     // This used to be a 0.14 base plate with a 0.10 riser sat flush on top of it,
@@ -849,14 +870,15 @@ export function buildCore(o = {}) {
     // rail the ordnance actually bolts to 35 cm above the plate. The two open
     // slots are 27 cm and 2 x 10 cm — at hero framing (78 px per metre) that is
     // 8-21 px of visible sky per shoulder.
+    // (all of this moved up 12 cm with the yoke's upper block below it)
     const mx = s * (sx - 0.16);
-    b.box('armor', MASK.TRIM, 0.52, 0.13, 0.74, 0.028, mx, 2.50, 0.02);
+    b.box('armor', MASK.TRIM, 0.52, 0.13, 0.74, 0.028, mx, 2.62, 0.02);
     for (let r = -1; r <= 1; r += 2) {
-      b.box('mech', MASK.TRIM, 0.16, 0.34, 0.17, 0.022, mx, 2.74, 0.02 + r * 0.22);
+      b.box('mech', MASK.TRIM, 0.16, 0.34, 0.17, 0.022, mx, 2.86, 0.02 + r * 0.22);
     }
-    b.box('armor', MASK.TRIM, 0.44, 0.10, 0.68, 0.024, mx, 2.96, 0.02);
+    b.box('armor', MASK.TRIM, 0.44, 0.10, 0.68, 0.024, mx, 3.08, 0.02);
     // tie-down cleats on the rail, so it reads as a mount and not a floating slab
-    if (d) boltRing(b, 'mech', MASK.STEEL, 'py', mx, 3.01, 0.02, 0.17, 6, 0.022, 0.014);
+    if (d) boltRing(b, 'mech', MASK.STEEL, 'py', mx, 3.13, 0.02, 0.17, 6, 0.022, 0.014);
     // status light channel recessed into the pauldron's leading edge
     b.box('mech', MASK.TRIM, 0.10, 0.14, 0.30, 0.02, s * (sx + 0.31), 2.30, -0.34);
     b.box('glow', MASK.BASE, 0.05, 0.075, 0.24, 0.012, s * (sx + 0.37), 2.30, -0.34);
@@ -865,15 +887,17 @@ export function buildCore(o = {}) {
     axleJoint(b, 'mech', MASK.TRIM, s * (sx + 0.10), 1.72, 0.0, 0.30, 0.34, 14);
     if (d) {
       boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.30), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
-      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.32), 2.45, 0.10, 0.66, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
+      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.32), 2.57, 0.10, 0.66, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
       greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.30), 1.86, 0.60, 0.72, 0.40, rng, { cols: 3, rows: 2, depth: 0.045, accent: 0.04 });
       // EDGE BUSYNESS: a lifting eye and a hose run that project past the yoke's
       // outline. Detail painted on a flat face does nothing for a silhouette —
       // only geometry that crosses the outline against the sky does.
+      // Lifting eye half-sunk into the raised block's top face (2.57), and a hose
+      // run that now arcs OVER the block instead of through where the slot is.
       b.addM('mech', MASK.STEEL, ring(0.055, 0.095, 0.05, 10, 0.012),
-        _m.compose(_pv.set(s * (sx - 0.42), 2.52, 0.22), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+        _m.compose(_pv.set(s * (sx - 0.42), 2.60, 0.22), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
       b.addM('mech', MASK.TRIM, cable([
-        [s * (sx - 0.58), 2.40, 0.46], [s * (sx - 0.30), 2.62, 0.54], [s * (sx + 0.06), 2.44, 0.44],
+        [s * (sx - 0.58), 2.62, 0.46], [s * (sx - 0.30), 2.84, 0.54], [s * (sx + 0.06), 2.66, 0.44],
       ], 0.034, 10, 5), null);
     }
   }
@@ -905,11 +929,14 @@ export function buildCore(o = {}) {
       { taperX: 0.86 });
     for (let i = 0; i < 3; i++) {
       b.addM('mech', MASK.STEEL, ring(0.115, 0.145, 0.055, 10, 0.012),
-        _m.compose(_pv.set(W * 0.44, 1.00 + i * 0.38, cz), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+        _m.compose(_pv.set(W * 0.425, 1.00 + i * 0.38, cz), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
     }
-    // bleed line running off the header, out past the hull's outline
+    // Bleed line running off the header, out past the hull's outline. Its high
+    // point used to reach x 0.962 at y 6.15, which is 1 cm from the upper arm's
+    // shoulder collar — inside the tolerance the arm's own roll eats when it
+    // swings. Pulled to 0.930 so the clearance survives the animation.
     b.addM('mech', MASK.TRIM, cable([
-      [W * 0.45, 1.96, cz - 0.16], [W * 0.50, 1.80, cz - 0.34], [W * 0.46, 1.52, cz - 0.30],
+      [W * 0.44, 1.96, cz - 0.16], [W * 0.475, 1.80, cz - 0.34], [W * 0.45, 1.52, cz - 0.30],
     ], 0.032, 10, 5), null);
 
     // LEFT: a countermeasure/ammo box — a different SHAPE, not a mirrored one.
@@ -1001,8 +1028,8 @@ export function buildCore(o = {}) {
       shoulderL: [-(sx + 0.10), 1.72, 0.0],
       shoulderR: [sx + 0.10, 1.72, 0.0],
       // top of the raised hardpoint rail, not the top of the yoke
-      mountL: [-(sx - 0.16), 3.02, 0.02],
-      mountR: [sx - 0.16, 3.02, 0.02],
+      mountL: [-(sx - 0.16), 3.14, 0.02],
+      mountR: [sx - 0.16, 3.14, 0.02],
       backpack: [0, 1.38, 0.66],
       coreMuzzle: [0, 1.30, -0.86],
     },
@@ -1190,9 +1217,21 @@ export function buildUpperArm(o = {}) {
   // front bicep plate — breaks up the long flat run down to the elbow
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.50, L * 0.54, { tl: 0.14, tr: 0.14, bl: 0.08, br: 0.08 }), 0.10, 0.026),
     _m.compose(_pv.set(0, -L * 0.50, -0.41), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
-  // outer shell plate — the outermost armour on the whole frame
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.86, 0.52, { tl: 0.20, bl: 0.10, tr: 0.20, br: 0.10 }), 0.11, 0.028),
-    _m.compose(_pv.set(s * 0.26, -L * 0.48, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  // Outer shell — the outermost armour on the whole frame, and the one face on
+  // the mech that points straight at the key light. As a single 0.86 x 0.52 m
+  // plate it was the brightest thing in every frame AND completely unbroken: a
+  // pale slab that no amount of texture detail could rescue, because a flat plane
+  // under a directional light has exactly one value on it. Split into two plates
+  // with a 10 cm channel between them, so the run is cut by a hard shadow line
+  // and the two halves catch fractionally different amounts of sun. Same outer
+  // extent (0.315), same silhouette — the difference is entirely in the shading.
+  for (let q = -1; q <= 1; q += 2) {
+    b.addM('armor', MASK.BASE, plate(beveledRectShape(0.38, 0.52,
+      { tl: q > 0 ? 0.20 : 0.05, tr: q > 0 ? 0.20 : 0.05, bl: q < 0 ? 0.14 : 0.05, br: q < 0 ? 0.14 : 0.05 }), 0.11, 0.028),
+    _m.compose(_pv.set(s * 0.26, -L * 0.48 + q * 0.24, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  }
+  // strap across the channel, so the split reads as two plates on a frame
+  b.box('mech', MASK.TRIM, 0.10, 0.09, 0.30, 0.016, s * 0.30, -L * 0.48, 0.0);
   // inner actuator + hose
   b.addM('mech', MASK.TRIM, chamferCyl(0.11, 0.11, L * 0.7, 10, 0.022),
     _m.compose(_pv.set(s * -0.30, -L * 0.5, 0.08), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
@@ -1301,8 +1340,13 @@ export function buildThigh(o = {}) {
   // outer / front armour plates
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.60, L * 0.60, { tl: 0.20, tr: 0.20, bl: 0.12, br: 0.12 }), 0.12, 0.03),
     _m.compose(_pv.set(0, -L * 0.48, (rev ? 0.52 : -0.48)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.52, L * 0.52, { tl: 0.18, bl: 0.18, tr: 0.10, br: 0.10 }), 0.12, 0.03),
-    _m.compose(_pv.set(s * 0.44, -L * 0.46, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+  // OUTBOARD plate. Pulled in from 0.44/0.12 (outer face 1.22 in torso space):
+  // that put the top corner of this plate 9-13 cm inside the forearm at the rest
+  // pose, so the hands were buried in the thighs in every standing frame. At
+  // 0.36/0.11 its outer face is 1.135 and the thigh's own box is the widest thing
+  // on the leg again, which is also 8 cm more daylight between arm and leg.
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.52, L * 0.52, { tl: 0.18, bl: 0.18, tr: 0.10, br: 0.10 }), 0.11, 0.03),
+    _m.compose(_pv.set(s * 0.36, -L * 0.46, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
 
   // knee actuator arm + hydraulics
   const kz = rev ? -0.34 : 0.34;

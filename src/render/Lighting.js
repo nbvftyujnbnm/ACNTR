@@ -8,6 +8,7 @@ let _active = null;
 
 /** Module-scope scratch — the frame path must not allocate. */
 const _fillDir = new THREE.Vector3();
+const _bounceDir = new THREE.Vector3();
 
 /**
  * Scale a colour so its largest channel is 1. The sky palette stores radiances,
@@ -145,6 +146,42 @@ export class Lighting {
       // the sand. No exposure, gamma or contrast setting can do that, because
       // those move the whole frame together.
       fillElevation: 0.13,
+      // GROUND BOUNCE — the second half of the fill, and the only light in this
+      // rig that is FREE on the terrain.
+      //
+      // `fillElevation` buys asymmetry by being nearly horizontal (0.13 of
+      // itself lands on the plain, 0.99 on a vertical flank). Taking the
+      // elevation NEGATIVE takes that trade to its limit: at -0.11 the light
+      // arrives from 6.3 degrees BELOW the horizon, so n.l on an up-facing
+      // surface is negative and clamps to zero. The plain — the single largest
+      // up-facing surface in every pose, and the one the contract keeps warning
+      // about — receives exactly nothing from this light no matter how hard it
+      // is pushed. What it does reach is what the sky fill cannot: the
+      // DOWNWARD-facing half of the mech (measured on the hero pose, the
+      // darkest regions in the frame are the shins and feet at mean display
+      // 23.3 against a full-frame mean of 57.9) plus every vertical flank.
+      //
+      // Physically this is the sand bouncing the key back up, so it takes the
+      // sky's `groundFillColor` — warm ochre — against the cool `skyFillColor`
+      // of the horizontal fill. Warm from below, cool from the side, warm key:
+      // the shadow side gets a temperature GRADIENT instead of one flat tint.
+      //
+      // Why this rather than more `grade.lift`: lift is additive on the display
+      // value, so it raises the shadow floor by COMPRESSING everything above it
+      // — a contact shadow that darkens the ground 42% before the grade darkens
+      // it less than 42% after. Light added at the source is multiplicative:
+      // the AO and cascade ratios survive intact and the contact shadow gets
+      // MORE readable as the floor comes up, not less. `grade.lift` is dropped
+      // 0.032 -> 0.022 in the same pass to pay for this in tonal range.
+      bounceIntensity: 2.1,
+      bounceElevation: -0.11,
+      // Azimuth offset from the anti-sun direction, in radians. The horizontal
+      // fill sits exactly opposite the key, which leaves a dead zone: a flank
+      // at 90 degrees to the sun's azimuth gets cos(90) = 0 from BOTH the key
+      // and the fill, and falls back on the hemisphere's 0.22. Offsetting the
+      // bounce by 54 degrees puts a second lobe in the middle of that gap, so
+      // the worst-lit azimuth goes from 0.22 of undirected light to ~1.2.
+      bounceAzimuth: 0.95,
       cascades: 4,
       shadowMapSize: 2048,
       // The camera's near plane is 0.35 m, which drags every automatic split
@@ -195,8 +232,10 @@ export class Lighting {
     this.hemi.name = 'ACNTR.SkyFill';
     scene.add(this.hemi);
 
-    /** @type {THREE.DirectionalLight|null} shadowless bounce/fill */
+    /** @type {THREE.DirectionalLight|null} shadowless sky fill, near-horizontal */
     this.fill = null;
+    /** @type {THREE.DirectionalLight|null} shadowless ground bounce, below horizon */
+    this.bounce = null;
 
     scene.environmentIntensity = this.params.envIntensity;
 
@@ -281,13 +320,16 @@ export class Lighting {
   }
 
   /**
-   * A single shadowless directional bounce, opposite and above the key.
+   * The two shadowless directional fills: a cool sky fill just ABOVE the
+   * horizon opposite the key, and a warm ground bounce just BELOW it, offset in
+   * azimuth. See `fillElevation` / `bounceElevation` for why the signs matter.
    *
    * ORDER MATTERS: three indexes `directionalShadow[]` by a light's position in
    * the full directional list, then truncates that list to the shadow count. A
    * non-shadow directional light added *before* the cascades therefore shifts
-   * every cascade's shadow map by one and drops the last one entirely. It has
-   * to be added after the CSM lights, so this re-adds it whenever CSM is built.
+   * every cascade's shadow map by one and drops the last one entirely. They
+   * have to be added after the CSM lights, so this re-adds them whenever CSM is
+   * built.
    */
   _ensureFill() {
     if (this.fill) {
@@ -295,11 +337,22 @@ export class Lighting {
       this.scene.remove(this.fill.target);
     } else {
       this.fill = new THREE.DirectionalLight(0xffffff, this.params.fillIntensity);
-      this.fill.name = 'ACNTR.Bounce';
+      this.fill.name = 'ACNTR.SkyFillDir';
       this.fill.castShadow = false;
     }
     this.scene.add(this.fill);
     this.scene.add(this.fill.target);
+
+    if (this.bounce) {
+      this.scene.remove(this.bounce);
+      this.scene.remove(this.bounce.target);
+    } else {
+      this.bounce = new THREE.DirectionalLight(0xffffff, this.params.bounceIntensity);
+      this.bounce.name = 'ACNTR.GroundBounce';
+      this.bounce.castShadow = false;
+    }
+    this.scene.add(this.bounce);
+    this.scene.add(this.bounce.target);
   }
 
   _createFallbackSun() {
@@ -473,6 +526,30 @@ export class Lighting {
       if (this.sky?.skyFillColor) normaliseHue(f.color.copy(this.sky.skyFillColor));
       f.intensity = this.params.fillIntensity;
     }
+
+    const b = this.bounce;
+    if (b) {
+      // Anti-sun azimuth, rotated by `bounceAzimuth` about +Y, then pushed
+      // BELOW the horizon. Rotating in the XZ plane by hand rather than with
+      // Vector3.applyAxisAngle keeps this allocation-free and makes the sign
+      // convention explicit: (x, z) -> (x cos + z sin, -x sin + z cos).
+      const ax = -this._sunDir.x;
+      const az = -this._sunDir.z;
+      const inv = 1 / Math.max(Math.hypot(ax, az), 1e-4);
+      const ux = ax * inv;
+      const uz = az * inv;
+      const ca = Math.cos(this.params.bounceAzimuth);
+      const sa = Math.sin(this.params.bounceAzimuth);
+      _bounceDir.set(ux * ca + uz * sa, this.params.bounceElevation, -ux * sa + uz * ca);
+      _bounceDir.normalize();
+      b.position.copy(this._focus).addScaledVector(_bounceDir, 220);
+      b.target.position.copy(this._focus);
+      b.target.updateMatrixWorld();
+      // The ground hemisphere colour IS this light's hue by construction — it
+      // is the sky module's own estimate of what the terrain bounces back.
+      if (this.sky?.groundFillColor) normaliseHue(b.color.copy(this.sky.groundFillColor));
+      b.intensity = this.params.bounceIntensity;
+    }
   }
 
   /**
@@ -555,6 +632,12 @@ export class Lighting {
       this.scene.remove(this.fill);
       this.fill.dispose?.();
       this.fill = null;
+    }
+    if (this.bounce) {
+      this.scene.remove(this.bounce.target);
+      this.scene.remove(this.bounce);
+      this.bounce.dispose?.();
+      this.bounce = null;
     }
     this.scene.remove(this.hemi);
     this.hemi.dispose?.();

@@ -199,12 +199,37 @@ void main() {
   color.b = texture2D( tColor, uv - caOff ).b;
 
   // ---- unsharp mask: buys back the micro-contrast TAA softens -------------
+  //
+  // LUMA high-pass, applied as a RATIO. Two reasons, and the first one is a
+  // bug fix.
+  //
+  // (1) The four neighbour taps are read at the UNSHIFTED uv, but 'color' has
+  // already been split per channel by the chromatic aberration above. The old
+  // per-channel form therefore differenced a shifted red against an unshifted
+  // red and added the mismatch back in at uSharpen strength — i.e. the sharpen
+  // pass was AMPLIFYING the CA fringe by a further 30%, and putting a hard
+  // ring around it, everywhere off the frame centre. Differencing luminance
+  // only cannot do that: the high-pass is one scalar, so it cannot invent a
+  // colour that was not in the pixel.
+  //
+  // (2) A ratio preserves hue exactly where an additive high-pass does not. On
+  // a saturated pixel the additive form pushes all three channels by the same
+  // amount, which desaturates a sharpened highlight and oversaturates a
+  // sharpened shadow — visible on the mech as coloured haloes along the plate
+  // edges that carry the accent paint.
+  //
+  // To first order the two are identical, so 'sharpen' keeps its meaning and
+  // does not need retuning. The clamp only guards the near-black case, where
+  // dividing by luma is unstable.
   if ( uSharpen > 0.001 ) {
     vec3 n = texture2D( tColor, uv + vec2( uTexel.x, 0.0 ) ).rgb
            + texture2D( tColor, uv - vec2( uTexel.x, 0.0 ) ).rgb
            + texture2D( tColor, uv + vec2( 0.0, uTexel.y ) ).rgb
            + texture2D( tColor, uv - vec2( 0.0, uTexel.y ) ).rgb;
-    color = max( color + ( color - n * 0.25 ) * uSharpen, vec3( 0.0 ) );
+    float c0 = luma( color );
+    float hp = c0 - luma( n ) * 0.25;
+    float k = 1.0 + uSharpen * hp / max( c0, 1e-4 );
+    color = max( color * clamp( k, 0.2, 2.0 ), vec3( 0.0 ) );
   }
 
   // ---- bloom -------------------------------------------------------------
