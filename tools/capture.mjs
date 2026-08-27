@@ -51,10 +51,43 @@ async function waitForServer(url, timeoutMs = 90000) {
   return false;
 }
 
+function run(cmd, args) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (out += d));
+    p.on('close', (code) => resolve({ code, out }));
+  });
+}
+
 let server = null;
+/**
+ * Capture against a PRODUCTION BUILD served by `vite preview`, not the dev
+ * server. The dev server has HMR: an agent editing a source file while a
+ * capture is in flight reloads the page mid-run and the capture dies with a
+ * misleading error. A built bundle is immutable for the life of the run, so
+ * concurrent editing is safe — which matters because several agents edit and
+ * capture at the same time.
+ *
+ * Pass --dev to opt back into the HMR dev server.
+ */
 async function startServer() {
   const port = 5200 + Math.floor(Math.random() * 600);
-  server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  const useDev = !!arg('dev', false);
+
+  if (!useDev) {
+    const b = await run('npx', ['vite', 'build']);
+    if (b.code !== 0) {
+      console.error('=== BUILD FAILED ===\n' + b.out.slice(-4000));
+      process.exit(3);
+    }
+  }
+
+  const args = useDev
+    ? ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
+    : ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'];
+  server = spawn('npx', args, {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NO_COLOR: '1' },
@@ -64,7 +97,7 @@ async function startServer() {
   server.stderr.on('data', (d) => (log += d.toString()));
   const url = `http://127.0.0.1:${port}/`;
   if (!(await waitForServer(url))) {
-    console.error('vite failed to start:\n' + log);
+    console.error('server failed to start:\n' + log);
     process.exit(3);
   }
   return url;

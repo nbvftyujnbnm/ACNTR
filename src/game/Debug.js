@@ -203,6 +203,28 @@ export class Debug {
     return this;
   }
 
+  /**
+   * Fill the inventory with rolled parts so garage/loot UI can be reviewed.
+   * Lives here rather than in the pose script because pose scripts run against
+   * a production bundle, where raw `/src/...` module paths do not resolve.
+   */
+  async seedInventory(count = 24, seed = 20240826) {
+    try {
+      const [{ rollPart }, { mulberry32 }] = await Promise.all([
+        import('../loot/PartsDB.js'),
+        import('../core/MathUtils.js'),
+      ]);
+      const rng = mulberry32(seed);
+      const inv = this.game.loadout?.inventory;
+      if (!inv) return this;
+      for (let i = 0; i < count; i++) inv.push(rollPart(1 + (i % 5), rng));
+      this.game.loadout?.recompute?.();
+    } catch (e) {
+      console.warn('[debug] seedInventory failed', e);
+    }
+    return this;
+  }
+
   /** Renderer/scene statistics for the perf budget. */
   stats() {
     const e = this.game.engine;
