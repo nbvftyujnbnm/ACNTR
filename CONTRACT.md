@@ -392,3 +392,31 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   `ReferenceError: x is not defined` at import time — every boot, every capture, every
   pose. Only the two backticks were removed; the grade maths was not touched. Whoever owns
   the post pipeline: the no-backtick-in-GLSL rule includes comments.
+- 2026-08-27 [mech] The armour shader now samples its albedo map at TWO scales. The macro
+  layer is the 3.2 m tile; a DETAIL layer repeats `DETAIL_SCALE` (3.11) times inside it, so
+  its plates land at ~0.19 m against the macro layer's ~0.58 m. Reason: the forge's plate
+  splitter is depth-capped at ~30 plates per tile whatever `panelScale` says, which fixes a
+  plate at 0.58 m on EVERY part. That is right for a chest (1.86 x 1.56 m, ~3 x 3 plates)
+  and useless for a pauldron face (0.96 x 0.76 m, ~1 plate) — measured, not guessed. Small
+  parts rendered as one flat colour with a couple of bolts next to a fully panelled chest.
+  Rescaling small parts' UVs would have fixed coverage by reintroducing the texel-density
+  defect, so the second scale is applied IDENTICALLY to every part instead: metres per
+  feature stays the invariant, there are simply two scales of it everywhere. Only the
+  detail tap's luminance RATIO is used (it modulates, never replaces) and it is clamped
+  asymmetrically to [0.34, 1.38] — it may darken freely for sub-panel seams and recess
+  grime but cannot brighten past the chip gate, which is also what keeps the one tap the
+  speckle guard does not cover from adding speckle at a new frequency. Mean gain measured
+  at 1.001, so it does not shift overall brightness. `acDetail` is also read by the
+  roughness chunk; without that the layer reads as a decal rather than as surface.
+- 2026-08-27 [mech] `MaterialSet.m.armorFine` is now THE SAME OBJECT as `m.armor`, not a
+  sibling. Once both were baked on one tile the only difference left was a 0.06 roughness
+  offset, which showed up as two adjacent parts of one model rendering to visibly different
+  specular. `armorFor(fine)` is unchanged and still correct to call. `MaterialSet.list` is
+  de-duplicated through a Set so `setDamage` and `dispose` still run exactly once per
+  material — anything constructing a MaterialSet must not assume `list.length === 5`.
+- 2026-08-27 [mech] Palette `base` values carry real chroma now (raven 0.115 -> 0.197
+  saturation) at EXACTLY unchanged luminance — the boost pushes each channel away from the
+  colour's own luminance, which leaves `dot(luminanceWeights, rgb)` invariant. A
+  near-neutral paint has nothing to hold on to under a warm key, so the lit side of every
+  part took the colour of the sun and read as unpainted plastic. Keep any future palette
+  edit above ~0.18 saturation for the same reason.

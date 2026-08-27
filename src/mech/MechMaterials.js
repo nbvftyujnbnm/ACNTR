@@ -141,7 +141,7 @@ const SPECKLE_LOD = 2.6;
  * of it everywhere instead of one.
  */
 const DETAIL_SCALE = 3.11;
-const DETAIL_MIX = 0.55;
+const DETAIL_MIX = 0.48;
 
 // ---------------------------------------------------------------------------
 // Shader injection
@@ -226,14 +226,14 @@ const RECOLOR = /* glsl */`
   //
   // Only the detail tap's LUMINANCE RATIO is used, so it MODULATES the macro
   // layer rather than replacing it, and the ratio is clamped asymmetrically:
-  // it may darken to 0.30 (sub-panel seams, grime in recesses, which is what
-  // sub-panel detail actually looks like) but brighten only to 1.40, which is
+  // it may darken to 0.34 (sub-panel seams, grime in recesses, which is what
+  // sub-panel detail actually looks like) but brighten only to 1.38, which is
   // below the chip gate. That asymmetry is also what stops the detail tap — the
   // one sample the speckle guard above does not cover — from reintroducing
   // bright speckle at a new frequency.
   vec3 acDet = texture2D( map, vMapUv * uDetailScale ).rgb;
   float acDetLum = max( dot( acDet, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
-  acDetail = clamp( acDetLum / uTexMean, 0.30, 1.40 );
+  acDetail = clamp( acDetLum / uTexMean, 0.34, 1.38 );
   acTex *= mix( 1.0, acDetail, uDetail );
 #endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
