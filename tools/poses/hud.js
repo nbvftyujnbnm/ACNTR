@@ -3,6 +3,7 @@
 (async () => {
   const { debug, game } = window.__ACNTR__;
   debug.setHudVisible(true);
+  debug.unpause(); // headless never holds pointer lock, so the HUD would sit paused
   debug.releaseCamera();
   debug.clearEnemies();
   debug.placePlayerOnGround(0, 30, 0, 16); // 16 m above terrain

@@ -210,6 +210,52 @@ export class Debug {
     return this;
   }
 
+  /**
+   * Clear the pause overlay.
+   *
+   * The HUD pauses whenever pointer lock is released, which in a headless
+   * capture is *always* — so every gameplay/HUD review frame came back with a
+   * "SYSTEM PAUSED" panel across the middle of it. Poses that show the HUD must
+   * call this after setting up.
+   */
+  /**
+   * Restore the player to a clean, full-health state.
+   *
+   * Every pose runs in ONE browser session, so whatever a pose does to game
+   * state leaks into all the poses after it. That is how the VFX review frame
+   * ended up drowned in the low-AP red vignette — the HUD pose before it had
+   * set AP to 23%. capture.mjs calls this between poses.
+   */
+  resetState() {
+    const s = this.game.player?.stats;
+    if (s) {
+      s.ap = s.apMax;
+      s.acs = 0;
+      s.en = s.enMax;
+      s.staggered = false;
+      s.staggerTimer = 0;
+      s.heat = 0;
+    }
+    const c = this.game.controller?.state;
+    if (c) {
+      c.boosting = false;
+      c.assaultBoost = false;
+      c.enRecovering = false;
+      c.speed = 0;
+    }
+    if (this.game.targeting) this.game.targeting.lockProgress = 0;
+    this.game.engine.timeScale = 1;
+    return this;
+  }
+
+  unpause() {
+    try {
+      this.game.hud?.setPaused?.(false);
+      this.game.hud?.hideGameOver?.();
+    } catch { /* HUD may not be ready */ }
+    return this;
+  }
+
   /** Hide the HUD so pure-render frames can be judged without interface. */
   setHudVisible(v) {
     const root = document.getElementById('ui-root');

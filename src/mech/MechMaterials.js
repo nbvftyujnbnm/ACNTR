@@ -41,38 +41,46 @@ import { clamp } from '../core/MathUtils.js';
  * clean plate at ~0.24 linear, which is real battleship grey. An earlier pass at
  * 0.235 put clean plates at 0.29 and the sunlit side of the arms went to a white
  * slab that read as unpainted metal.
+ *
+ * Chroma matters as much as value. Every base has since been pushed away from
+ * its own luminance (which leaves `dot(luminanceWeights, rgb)` exactly unchanged)
+ * until it carries real hue: raven went from 0.115 to 0.197 saturation at an
+ * identical 0.189 linear. A near-neutral paint has nothing to hold on to when a
+ * warm key hits it, so the lit side of every part collapsed to the colour of the
+ * sun and read as bare plastic while the shadow side, lit by the blue sky term,
+ * stayed blue. Paint with chroma keeps its identity in both.
  */
 export const MECH_PALETTES = {
   raven: {
-    label: 'RAVEN', base: '#737982', accent: '#9b4235', trim: '#4a4e55',
+    label: 'RAVEN', base: '#6e7989', accent: '#9b4235', trim: '#484e58',
     steel: '#a4aab2', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
   },
   balteus: {
-    label: 'BALTEUS', base: '#58626d', accent: '#3d6f8f', trim: '#3c424b',
+    label: 'BALTEUS', base: '#546372', accent: '#3d6f8f', trim: '#39424f',
     steel: '#9ea4ab', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
   },
   baws: {
-    label: 'BAWS', base: '#8e7c41', accent: '#5b5e64', trim: '#4c4e52',
+    label: 'BAWS', base: '#8e7c41', accent: '#5b5e64', trim: '#4b4e54',
     steel: '#a5aab0', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
   },
   rad: {
-    label: 'RaD', base: '#bab5a8', accent: '#b6702f', trim: '#4f4e4b',
+    label: 'RaD', base: '#beb59c', accent: '#b6702f', trim: '#4f4e4a',
     steel: '#a5aab0', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
   },
   arquebus: {
-    label: 'ARQUEBUS', base: '#58647f', accent: '#9d8a5c', trim: '#414954',
+    label: 'ARQUEBUS', base: '#536488', accent: '#9d8a5c', trim: '#3d4959',
     steel: '#a0a6af', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
   },
   schneider: {
-    label: 'SCHNEIDER', base: '#737a81', accent: '#5f97a4', trim: '#494f54',
+    label: 'SCHNEIDER', base: '#6d7b87', accent: '#5f97a4', trim: '#474f56',
     steel: '#a4aab1', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
   },
   vespers: {
-    label: 'VESPERS', base: '#5f556a', accent: '#715090', trim: '#453c4d',
+    label: 'VESPERS', base: '#625372', accent: '#715090', trim: '#473a52',
     steel: '#9b94a4', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
   },
   elcano: {
-    label: 'ELCANO', base: '#6a7b69', accent: '#77914f', trim: '#454e46',
+    label: 'ELCANO', base: '#627e60', accent: '#77914f', trim: '#424f43',
     steel: '#9ea49f', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
   },
 };
@@ -120,6 +128,21 @@ const MECH_TEX_SIZE = Math.round(MECH_TILE_METRES * MECH_TEXELS_PER_M); // 1024
 const SPECKLE_CUT = 0.80;
 const SPECKLE_LOD = 2.6;
 
+/**
+ * Detail layer (see RECOLOR). `DETAIL_SCALE` is how many times per macro tile
+ * the second tap repeats, so its tile is 3.2 / 3.11 = 1.03 m and its plates land
+ * at ~0.19 m — small enough that a 0.5 m pauldron face crosses two or three of
+ * them instead of sitting inside one 0.58 m macro plate. It is deliberately not
+ * a round number: 3.2 would put the two layers back in phase every 5 tiles.
+ *
+ * This is the ONLY sanctioned way to add feature scales to the mech. It is
+ * applied identically to every part, so metres-per-feature — the invariant the
+ * tile unification exists to protect — still holds; there are simply two scales
+ * of it everywhere instead of one.
+ */
+const DETAIL_SCALE = 3.11;
+const DETAIL_MIX = 0.55;
+
 // ---------------------------------------------------------------------------
 // Shader injection
 // ---------------------------------------------------------------------------
@@ -141,9 +164,14 @@ uniform vec3 uDamageGlow;
 uniform float uSeamDark;
 uniform float uSpeckle;
 uniform float uSpeckleLod;
+uniform float uDetail;
+uniform float uDetailScale;
 // Written by the recolour chunk, read again by roughness/metalness further down
 // the chunk order: 1 where the paint has been abraded off to bare metal.
 float acChipG = 0.0;
+// Detail-layer luminance ratio, also written by the recolour chunk and read by
+// the roughness chunk so sub-panel structure breaks up the specular too.
+float acDetail = 1.0;
 `;
 
 // Recolour: preserve the baked texture's luminance structure (panel seams, grime,
@@ -179,6 +207,34 @@ const RECOLOR = /* glsl */`
   // subtracted away.
   vec3 acLo = texture2D( map, vMapUv, uSpeckleLod ).rgb;
   acTex -= clamp( acTex - acLo, vec3( 0.0 ), vec3( 0.10 ) ) * uSpeckle;
+
+  // --- detail layer -------------------------------------------------------
+  // One armour tile covers MECH_TILE_METRES (3.2 m) and the forge's splitter is
+  // depth-capped at ~30 plates inside it, so a plate is ~0.58 m ACROSS EVERY
+  // PART. That is correct for a chest, which spans a full tile and crosses six
+  // seams, and useless for a pauldron or a forearm shell: a 0.5 m face lands
+  // inside a SINGLE plate and renders as one flat colour with a couple of bolts.
+  // Measured: the core's armour spans 1.01 x 1.10 tiles over 30 plates, the
+  // forearm's 0.30 x 0.57 over 9 — and any one FACE of it sits inside one.
+  //
+  // Rescaling small parts' UVs would fix the coverage by breaking texel density,
+  // which is the defect the tile unification just removed. So add a SECOND scale
+  // of the same map instead, at a fixed fraction of the tile — constant in
+  // metres per feature, on every part, exactly like the macro layer. Big parts
+  // gain sub-panel plating; small parts, which see only a flat patch of the
+  // macro layer, take their entire read from it.
+  //
+  // Only the detail tap's LUMINANCE RATIO is used, so it MODULATES the macro
+  // layer rather than replacing it, and the ratio is clamped asymmetrically:
+  // it may darken to 0.30 (sub-panel seams, grime in recesses, which is what
+  // sub-panel detail actually looks like) but brighten only to 1.40, which is
+  // below the chip gate. That asymmetry is also what stops the detail tap — the
+  // one sample the speckle guard above does not cover — from reintroducing
+  // bright speckle at a new frequency.
+  vec3 acDet = texture2D( map, vMapUv * uDetailScale ).rgb;
+  float acDetLum = max( dot( acDet, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
+  acDetail = clamp( acDetLum / uTexMean, 0.30, 1.40 );
+  acTex *= mix( 1.0, acDetail, uDetail );
 #endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   vec3 acSlot = uSlots[0] * vMask.x + uSlots[1] * vMask.y + uSlots[2] * vMask.z + uSlots[3] * vMask.w;
@@ -216,6 +272,12 @@ const ROUGH = /* glsl */`
 roughnessFactor *= dot( uSlotRough, vMask );
 // abraded metal is burnished smoother than the paint that used to cover it
 roughnessFactor *= mix( 1.0, 0.66, acChipG );
+// The detail layer moves the specular as well as the albedo. Without this it is
+// a pattern PRINTED on the plate; with it, sub-panel seams and grime dull the
+// highlight and sub-panel plating catches it, which is what makes the extra
+// scale read as surface rather than as decal. Inverted and gentle: dark detail
+// (recess, dirt) is rougher, bright detail (proud plating) is tighter.
+roughnessFactor *= mix( 1.0, clamp( 2.05 - acDetail, 0.80, 1.22 ), uDetail );
 roughnessFactor = clamp( mix( roughnessFactor, 0.93, uDamage * 0.55 ), 0.045, 1.0 );
 `;
 

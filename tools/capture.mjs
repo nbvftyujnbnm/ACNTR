@@ -179,7 +179,12 @@ async function startServer() {
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
       try {
-        window.__ACNTR__.debug.releaseCamera().freeze(false).setHudVisible(true);
+        window.__ACNTR__.debug
+          .releaseCamera()
+          .freeze(false)
+          .setHudVisible(true)
+          .resetState()
+          .clearEnemies();
       } catch { /* noop */ }
     });
   }

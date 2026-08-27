@@ -3,6 +3,7 @@
 (async () => {
   const { debug, game } = window.__ACNTR__;
   debug.setHudVisible(true);
+  debug.unpause(); // headless never holds pointer lock, so the HUD would sit paused
   debug.clearEnemies();
   await debug.seedInventory(24);
   game.openGarage();
