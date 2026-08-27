@@ -1,0 +1,1342 @@
+/* ===========================================================================
+   ACNTR interface layer — Armored Core VI vector-cockpit language.
+   Hairlines, corner brackets, monospaced numerals, wide tracking, no fills
+   heavier than a 60% ink wash. Everything lives inside #ui-root which is
+   pointer-events:none; interactive elements opt back in explicitly.
+   =========================================================================== */
+
+.acntr-hud,
+.acntr-garage {
+  --c: var(--hud-cyan, #6ff2ff);
+  --a: var(--hud-amber, #ffb038);
+  --r: var(--hud-red, #ff4d3d);
+  --d: var(--hud-dim, rgba(150, 190, 205, 0.55));
+  --ink: rgba(5, 9, 13, 0.62);
+  --ink-2: rgba(5, 9, 13, 0.86);
+  --hair: rgba(111, 242, 255, 0.22);
+  --hair-soft: rgba(111, 242, 255, 0.1);
+  position: absolute;
+  inset: 0;
+  font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  text-transform: uppercase;
+  color: #cfe9f2;
+  pointer-events: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.acntr-hud {
+  z-index: 1;
+  transition: opacity 160ms linear;
+}
+/* combat HUD steps aside while the garage owns the screen */
+.acntr-hud.off {
+  opacity: 0;
+}
+.acntr-garage {
+  z-index: 5;
+}
+
+.acntr-hud .mono,
+.acntr-garage .mono {
+  font-family: 'Share Tech Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+/* --- world-tracking canvas ------------------------------------------------ */
+.hud-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* --- generic chrome ------------------------------------------------------- */
+.hud-lab {
+  font-size: clamp(8px, 0.72vmin, 10px);
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  color: var(--d);
+  line-height: 1;
+}
+
+.hud-rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--hair), rgba(111, 242, 255, 0.02));
+}
+
+/* corner-bracket decoration (never a full border box) */
+.brk {
+  position: relative;
+}
+.brk::before,
+.brk::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  pointer-events: none;
+}
+.brk::before {
+  left: -4px;
+  top: -4px;
+  border-left: 1px solid var(--hair);
+  border-top: 1px solid var(--hair);
+}
+.brk::after {
+  right: -4px;
+  bottom: -4px;
+  border-right: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+}
+
+/* =====================  MISSION LOG (top-left)  =========================== */
+.hud-log {
+  position: absolute;
+  left: clamp(16px, 1.6vw, 30px);
+  top: clamp(14px, 1.6vh, 26px);
+  width: clamp(258px, 22vw, 362px);
+  padding-left: 10px;
+  border-left: 1px solid var(--hair);
+}
+.hud-log .hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.hud-log .hdr .tag {
+  font-size: clamp(8px, 0.72vmin, 10px);
+  letter-spacing: 0.36em;
+  font-weight: 700;
+  color: rgba(111, 242, 255, 0.72);
+}
+.hud-log .hdr .sig {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: rgba(150, 190, 205, 0.34);
+}
+.hud-log .lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hud-log .ln {
+  font-family: 'Share Tech Mono', ui-monospace, monospace;
+  font-size: clamp(9px, 0.86vmin, 11.5px);
+  letter-spacing: 0.045em;
+  line-height: 1.42;
+  color: rgba(190, 226, 236, 0.9);
+  text-transform: none;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: ln-in 220ms ease-out both;
+}
+.hud-log .ln .t {
+  color: rgba(150, 190, 205, 0.42);
+}
+.hud-log .ln.warn {
+  color: var(--a);
+}
+.hud-log .ln.crit {
+  color: var(--r);
+}
+.hud-log .ln.old {
+  opacity: 0.42;
+}
+.hud-log .ln.older {
+  opacity: 0.2;
+}
+@keyframes ln-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+    filter: brightness(2.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* =====================  OBJECTIVE (top-right)  ============================ */
+.hud-obj {
+  position: absolute;
+  right: clamp(16px, 1.6vw, 30px);
+  top: clamp(14px, 1.6vh, 26px);
+  width: clamp(180px, 16vw, 250px);
+  text-align: right;
+  padding-right: 10px;
+  border-right: 1px solid var(--hair);
+}
+.hud-obj .op {
+  font-size: clamp(9px, 0.8vmin, 11px);
+  letter-spacing: 0.3em;
+  font-weight: 700;
+  color: rgba(111, 242, 255, 0.78);
+}
+.hud-obj .sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: rgba(150, 190, 205, 0.4);
+  text-transform: none;
+  margin-top: 2px;
+}
+.hud-obj .rows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hud-obj .row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 10px;
+}
+.hud-obj .row .k {
+  font-size: clamp(8px, 0.7vmin, 9.5px);
+  letter-spacing: 0.24em;
+  color: var(--d);
+}
+.hud-obj .row .v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(11px, 1.05vmin, 14px);
+  letter-spacing: 0.08em;
+  color: #d8f4fb;
+  min-width: 4.2em;
+  text-align: right;
+}
+.hud-obj .row.hot .v {
+  color: var(--a);
+}
+
+/* =====================  STATUS CLUSTER (bottom-left)  ===================== */
+.hud-status {
+  position: absolute;
+  left: clamp(16px, 1.6vw, 30px);
+  bottom: clamp(16px, 2.2vh, 34px);
+  width: clamp(322px, 30vw, 452px);
+}
+
+.hud-status .ap-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+.hud-status .ap-head .lab {
+  font-size: clamp(9px, 0.8vmin, 11px);
+  font-weight: 700;
+  letter-spacing: 0.36em;
+  color: rgba(111, 242, 255, 0.8);
+  padding-bottom: 3px;
+}
+.hud-status .ap-head .val {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(24px, 2.5vmin, 34px);
+  line-height: 0.9;
+  letter-spacing: 0.04em;
+  color: #e6fbff;
+  /* glow + chromatic fringe (never a drop shadow) */
+  text-shadow: 0 0 14px rgba(111, 242, 255, 0.4), -1px 0 0 rgba(255, 60, 80, 0.3), 1px 0 0 rgba(90, 220, 255, 0.32);
+}
+.hud-status .ap-head .max {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(10px, 0.95vmin, 13px);
+  color: rgba(150, 190, 205, 0.5);
+  padding-bottom: 3px;
+}
+.hud-status .ap-head .warn {
+  margin-left: auto;
+  font-size: clamp(8px, 0.72vmin, 10px);
+  letter-spacing: 0.28em;
+  color: var(--r);
+  opacity: 0;
+  padding-bottom: 4px;
+}
+.hud-status.low .ap-head .val {
+  color: #ffd9d3;
+  text-shadow: 0 0 16px rgba(255, 77, 61, 0.55);
+}
+.hud-status.crit .ap-head .warn {
+  animation: blink 0.62s steps(2, end) infinite;
+  opacity: 1;
+}
+
+.bar {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--hair);
+  background: rgba(111, 242, 255, 0.07);
+  overflow: hidden;
+}
+.bar > i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: block;
+  width: 0%;
+  transform-origin: left center;
+}
+.bar > i.fill {
+  background: var(--c);
+  box-shadow: 0 0 10px rgba(111, 242, 255, 0.4);
+}
+.bar > i.ghost {
+  background: rgba(255, 77, 61, 0.62);
+}
+/* segment gaps punched over the fill */
+.bar > b.seg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0 var(--seg, 9px),
+    #05070a var(--seg, 9px),
+    #05070a calc(var(--seg, 9px) + 2px)
+  );
+  pointer-events: none;
+}
+/* chromatic fringing on the gauge edges — the CRT is not perfectly converged */
+.hud-status .bar,
+.g-load .bar {
+  box-shadow: 1px 0 0 rgba(255, 60, 80, 0.13), -1px 0 0 rgba(90, 220, 255, 0.15);
+}
+.bar > b.tip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  left: 0;
+  background: #ffffff;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.hud-status .bar.ap {
+  height: clamp(10px, 1.15vmin, 14px);
+}
+.hud-status .row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.hud-status .row2 .k {
+  width: 30px;
+  flex: none;
+  font-size: clamp(8px, 0.7vmin, 9.5px);
+  letter-spacing: 0.26em;
+  color: var(--d);
+}
+.hud-status .row2 .n {
+  flex: none;
+  width: 46px;
+  text-align: right;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(9px, 0.82vmin, 11px);
+  color: rgba(190, 226, 236, 0.72);
+}
+.hud-status .bar.acs {
+  height: clamp(5px, 0.6vmin, 7px);
+}
+.hud-status .bar.acs > i.fill {
+  background: var(--a);
+  box-shadow: 0 0 8px rgba(255, 176, 56, 0.45);
+}
+.hud-status .bar.en {
+  height: clamp(7px, 0.8vmin, 10px);
+}
+.hud-status .bar.en > i.fill {
+  background: #8de9f5;
+  box-shadow: 0 0 8px rgba(141, 233, 245, 0.4);
+}
+.hud-status.en-recover .bar.en {
+  border-color: rgba(255, 77, 61, 0.6);
+  animation: blink-soft 0.4s steps(2, end) infinite;
+}
+.hud-status.en-recover .bar.en > i.fill {
+  background: var(--r);
+  box-shadow: 0 0 10px rgba(255, 77, 61, 0.55);
+}
+.hud-status.en-recover .row2.en .k {
+  color: var(--r);
+}
+.hud-status.acs-break .bar.acs > i.fill {
+  background: var(--r);
+}
+.hud-status.acs-break .bar.acs {
+  animation: blink-soft 0.24s steps(2, end) infinite;
+}
+
+.hud-status .flags {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+  height: 14px;
+}
+.hud-status .flags span {
+  font-size: clamp(7.5px, 0.66vmin, 9px);
+  letter-spacing: 0.22em;
+  padding: 2px 6px 1px;
+  border: 1px solid rgba(111, 242, 255, 0.16);
+  color: rgba(150, 190, 205, 0.34);
+  line-height: 1;
+}
+.hud-status .flags span.on {
+  color: #05070a;
+  background: var(--c);
+  border-color: var(--c);
+}
+.hud-status .flags span.on.amber {
+  background: var(--a);
+  border-color: var(--a);
+}
+.hud-status .flags span.on.red {
+  background: var(--r);
+  border-color: var(--r);
+  color: #fff;
+}
+
+/* =====================  WEAPONS (bottom-right)  =========================== */
+.hud-weapons {
+  position: absolute;
+  right: clamp(16px, 1.6vw, 30px);
+  bottom: clamp(16px, 2.2vh, 34px);
+  width: clamp(272px, 25vw, 372px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hud-weapons .whdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--hair);
+  margin-bottom: 2px;
+}
+.hud-weapons .whdr .tag {
+  font-size: clamp(8px, 0.72vmin, 10px);
+  letter-spacing: 0.34em;
+  font-weight: 700;
+  color: rgba(111, 242, 255, 0.72);
+}
+.hud-weapons .whdr .sig {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  color: rgba(150, 190, 205, 0.34);
+  text-transform: none;
+}
+
+.wrow {
+  display: grid;
+  grid-template-columns: 4.6em 1fr auto auto 15px;
+  grid-template-rows: auto 3px;
+  column-gap: 7px;
+  align-items: center;
+  padding: 3px 0 2px;
+  border-right: 1px solid transparent;
+}
+.wrow .slot {
+  grid-row: 1;
+  font-size: clamp(7.5px, 0.68vmin, 9.5px);
+  letter-spacing: 0.18em;
+  color: rgba(111, 242, 255, 0.55);
+}
+.wrow .nm {
+  grid-row: 1;
+  font-size: clamp(10px, 0.95vmin, 13px);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #d6f2fa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wrow .st {
+  grid-row: 1;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(8px, 0.72vmin, 10px);
+  letter-spacing: 0.1em;
+  color: rgba(111, 242, 255, 0.62);
+  text-transform: uppercase;
+  min-width: 5.6em;
+  text-align: right;
+}
+.wrow .am {
+  grid-row: 1;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(11px, 1.05vmin, 14px);
+  color: #e6fbff;
+  min-width: 4.4em;
+  text-align: right;
+  letter-spacing: 0.02em;
+}
+.wrow .am i {
+  color: rgba(150, 190, 205, 0.42);
+  font-style: normal;
+  font-size: 0.76em;
+}
+/* reload / charge progress ring */
+.wrow .ring {
+  grid-row: 1;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: conic-gradient(var(--rc, var(--c)) calc(var(--p, 0) * 360deg), rgba(111, 242, 255, 0.1) 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 4.6px, #000 5.4px 6.6px, transparent 7px);
+  mask: radial-gradient(circle, transparent 0 4.6px, #000 5.4px 6.6px, transparent 7px);
+  opacity: 0.9;
+}
+/* heat / charge strip under the row */
+.wrow .strip {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  height: 2px;
+  background: rgba(111, 242, 255, 0.09);
+  position: relative;
+  overflow: hidden;
+}
+.wrow .strip > i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: var(--a);
+}
+.wrow .strip > i.chg {
+  background: #b7f7ff;
+  box-shadow: 0 0 8px rgba(183, 247, 255, 0.7);
+}
+.wrow.reloading .st {
+  color: var(--a);
+}
+.wrow.overheat .st,
+.wrow.overheat .am {
+  color: var(--r);
+}
+.wrow.overheat {
+  animation: blink-soft 0.36s steps(2, end) infinite;
+}
+.wrow.charged .st {
+  color: #ffffff;
+}
+.wrow.active {
+  border-right: 1px solid var(--c);
+  background: linear-gradient(90deg, rgba(111, 242, 255, 0) 40%, rgba(111, 242, 255, 0.07));
+}
+.wrow.empty .nm,
+.wrow.empty .slot,
+.wrow.empty .st,
+.wrow.empty .am {
+  color: rgba(150, 190, 205, 0.22);
+}
+.wrow.empty .ring,
+.wrow.empty .strip {
+  opacity: 0.2;
+}
+
+/* =====================  WARNINGS / SLAMS  ================================= */
+.hud-slam {
+  position: absolute;
+  left: 50%;
+  top: 33%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+}
+.hud-slam .t {
+  font-size: clamp(22px, 3.2vmin, 46px);
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--r);
+  text-shadow: 0 0 26px rgba(255, 77, 61, 0.6);
+  line-height: 1;
+}
+.hud-slam .s {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(9px, 0.9vmin, 12px);
+  letter-spacing: 0.34em;
+  color: rgba(255, 176, 56, 0.8);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.hud-slam .bar {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, var(--r), transparent);
+  margin: 8px auto 0;
+  width: 100%;
+}
+.hud-slam.show {
+  animation: slam 900ms cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+.hud-slam.amber .t {
+  color: var(--a);
+  text-shadow: 0 0 26px rgba(255, 176, 56, 0.55);
+}
+.hud-slam.amber .bar {
+  background: linear-gradient(90deg, transparent, var(--a), transparent);
+}
+@keyframes slam {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.5);
+    filter: blur(6px);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.02);
+  }
+}
+
+/* =====================  FULL-SCREEN FEEDBACK  ============================= */
+.hud-vig {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 100% at 50% 50%, rgba(255, 40, 30, 0) 42%, rgba(255, 40, 30, 0.42) 100%);
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+.hud-crt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(150, 225, 240, 0.035) 0px,
+    rgba(150, 225, 240, 0.035) 1px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0) 3px
+  );
+}
+.hud-crt::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 26%;
+  background: linear-gradient(to bottom, rgba(140, 230, 245, 0) 0%, rgba(140, 230, 245, 0.045) 50%, rgba(140, 230, 245, 0) 100%);
+  animation: crt-sweep 8.5s linear infinite;
+}
+@keyframes crt-sweep {
+  0% {
+    top: -30%;
+  }
+  100% {
+    top: 105%;
+  }
+}
+.hud-flicker {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(140, 230, 245, 0.05);
+  opacity: 0;
+  animation: interference 13s steps(1, end) infinite;
+}
+@keyframes interference {
+  0%,
+  96.4%,
+  100% {
+    opacity: 0;
+  }
+  96.6% {
+    opacity: 0.5;
+  }
+  96.8% {
+    opacity: 0;
+  }
+  97.4% {
+    opacity: 0.32;
+  }
+  97.6% {
+    opacity: 0;
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.08;
+  }
+}
+@keyframes blink-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* =====================  BOOT SEQUENCE  ==================================== */
+.acntr-hud.booting .hud-log,
+.acntr-hud.booting .hud-obj,
+.acntr-hud.booting .hud-status,
+.acntr-hud.booting .hud-weapons {
+  animation: boot-el 620ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.acntr-hud.booting .hud-log {
+  animation-delay: 120ms;
+}
+.acntr-hud.booting .hud-obj {
+  animation-delay: 240ms;
+}
+.acntr-hud.booting .hud-status {
+  animation-delay: 360ms;
+}
+.acntr-hud.booting .hud-weapons {
+  animation-delay: 470ms;
+}
+@keyframes boot-el {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+    filter: brightness(3.5) saturate(0);
+  }
+  40% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    filter: brightness(2.2) saturate(0.4);
+    transform: translateX(3px);
+  }
+  55% {
+    transform: translateX(-2px);
+  }
+  100% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    filter: none;
+    transform: none;
+  }
+}
+.hud-bootwipe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(to bottom, rgba(111, 242, 255, 0) 0%, rgba(111, 242, 255, 0.16) 48%, rgba(111, 242, 255, 0) 100%);
+}
+.acntr-hud.booting .hud-bootwipe {
+  animation: bootwipe 900ms ease-out both;
+}
+@keyframes bootwipe {
+  0% {
+    opacity: 1;
+    clip-path: inset(50% 0 50% 0);
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* =====================  OVERLAYS  ========================================= */
+.hud-over {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: rgba(3, 6, 9, 0.62);
+  backdrop-filter: blur(2px) saturate(0.7);
+}
+.hud-over.show {
+  display: flex;
+  animation: over-in 260ms ease-out both;
+}
+@keyframes over-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.hud-over .panel {
+  min-width: min(560px, 74vw);
+  padding: 26px 34px 28px;
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(8, 14, 19, 0.72), rgba(5, 9, 13, 0.5));
+  text-align: center;
+  position: relative;
+}
+.hud-over .panel::before,
+.hud-over .panel::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+}
+.hud-over .panel::before {
+  left: -1px;
+  top: -1px;
+  border-left: 1px solid var(--c);
+  border-top: 1px solid var(--c);
+}
+.hud-over .panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 1px solid var(--c);
+  border-bottom: 1px solid var(--c);
+}
+.hud-over .ttl {
+  font-size: clamp(20px, 2.8vmin, 40px);
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: #e8fbff;
+  line-height: 1;
+}
+.hud-over .sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(9px, 0.9vmin, 12px);
+  letter-spacing: 0.3em;
+  color: var(--d);
+  margin-top: 10px;
+  text-transform: uppercase;
+}
+.hud-over .keys {
+  margin: 20px auto 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 18px;
+  max-width: 460px;
+  text-align: left;
+}
+.hud-over .keys dt {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: var(--c);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+.hud-over .keys dd {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(190, 226, 236, 0.6);
+}
+.hud-over.fail .ttl {
+  color: var(--r);
+  text-shadow: 0 0 30px rgba(255, 77, 61, 0.5);
+}
+.hud-over.fail .panel::before,
+.hud-over.fail .panel::after {
+  border-color: var(--r);
+}
+.hud-over.win .ttl {
+  color: var(--a);
+  text-shadow: 0 0 30px rgba(255, 176, 56, 0.45);
+}
+.hud-over.win .panel::before,
+.hud-over.win .panel::after {
+  border-color: var(--a);
+}
+.hud-over .results {
+  margin: 18px auto 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 460px;
+}
+.hud-over .results .cell {
+  border-top: 1px solid var(--hair);
+  padding-top: 6px;
+}
+.hud-over .results .k {
+  font-size: 8.5px;
+  letter-spacing: 0.3em;
+  color: var(--d);
+}
+.hud-over .results .v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(15px, 1.7vmin, 22px);
+  color: #e6fbff;
+  margin-top: 3px;
+}
+.hud-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  margin-top: 22px;
+  display: inline-block;
+  padding: 9px 30px 8px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: clamp(11px, 1vmin, 14px);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  color: #05070a;
+  background: var(--c);
+  border: 1px solid var(--c);
+  transition: background 120ms linear, color 120ms linear, box-shadow 120ms linear;
+}
+.hud-btn:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+  box-shadow: 0 0 24px rgba(111, 242, 255, 0.5);
+}
+.hud-over.fail .hud-btn {
+  background: var(--r);
+  border-color: var(--r);
+  color: #fff;
+}
+.hud-over.fail .hud-btn:hover {
+  background: #ff8677;
+  border-color: #ff8677;
+}
+
+/* =====================  GARAGE  =========================================== */
+.acntr-garage {
+  display: none;
+  grid-template-columns: clamp(214px, 19vw, 300px) minmax(0, 1fr) clamp(272px, 27vw, 400px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(8px, 1vh, 16px) clamp(10px, 1.2vw, 22px);
+  padding: clamp(10px, 1.6vh, 22px) clamp(12px, 1.6vw, 26px);
+  background: radial-gradient(58% 62% at 44% 52%, rgba(4, 7, 10, 0) 0%, rgba(4, 7, 10, 0.7) 62%, rgba(4, 7, 10, 0.9) 100%);
+}
+.acntr-garage.open {
+  display: grid;
+  pointer-events: auto;
+}
+.acntr-garage .g-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  border-bottom: 1px solid var(--hair);
+  padding-bottom: 6px;
+}
+.acntr-garage .g-head .t {
+  font-size: clamp(13px, 1.5vmin, 20px);
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  color: #e6fbff;
+}
+.acntr-garage .g-head .s {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(8px, 0.8vmin, 11px);
+  letter-spacing: 0.2em;
+  color: var(--d);
+  text-transform: uppercase;
+}
+.acntr-garage .g-head .close {
+  margin-left: auto;
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--c);
+  border: 1px solid var(--hair);
+  padding: 4px 12px 3px;
+}
+.acntr-garage .g-head .close:hover {
+  background: var(--c);
+  color: #05070a;
+}
+
+.g-col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.g-col .ch {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: clamp(8px, 0.74vmin, 10px);
+  letter-spacing: 0.34em;
+  font-weight: 700;
+  color: rgba(111, 242, 255, 0.7);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hair);
+  margin-bottom: 6px;
+  flex: none;
+}
+.g-col .ch em {
+  font-style: normal;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: rgba(150, 190, 205, 0.4);
+}
+.g-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(111, 242, 255, 0.3) transparent;
+}
+.g-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.g-scroll::-webkit-scrollbar-thumb {
+  background: rgba(111, 242, 255, 0.28);
+}
+
+/* slot list */
+.g-slot {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 8px 4px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.g-slot:hover {
+  background: rgba(111, 242, 255, 0.06);
+}
+.g-slot.sel {
+  border-left-color: var(--c);
+  background: rgba(111, 242, 255, 0.1);
+}
+.g-slot .k {
+  grid-column: 1;
+  font-size: clamp(7.5px, 0.66vmin, 9px);
+  letter-spacing: 0.26em;
+  color: var(--d);
+}
+.g-slot .n {
+  grid-column: 1 / -1;
+  font-size: clamp(10px, 0.95vmin, 12.5px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #d3eef7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-slot .w {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  color: rgba(150, 190, 205, 0.45);
+}
+.g-slot.void .n {
+  color: rgba(150, 190, 205, 0.25);
+}
+
+/* preview — deliberately transparent: the mech is rendered by the game's own
+   renderer underneath this panel (see Garage.js) */
+.g-view {
+  position: relative;
+  flex: 1 1 auto;
+  border: 1px solid var(--hair-soft);
+  min-height: 0;
+  pointer-events: auto;
+  cursor: grab;
+}
+.g-view .cn {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+}
+.g-view .cn.a {
+  left: -1px;
+  top: -1px;
+  border-left: 1px solid var(--c);
+  border-top: 1px solid var(--c);
+}
+.g-view .cn.b {
+  right: -1px;
+  top: -1px;
+  border-right: 1px solid var(--c);
+  border-top: 1px solid var(--c);
+}
+.g-view .cn.c {
+  left: -1px;
+  bottom: -1px;
+  border-left: 1px solid var(--c);
+  border-bottom: 1px solid var(--c);
+}
+.g-view .cn.d {
+  right: -1px;
+  bottom: -1px;
+  border-right: 1px solid var(--c);
+  border-bottom: 1px solid var(--c);
+}
+.g-view .vlab {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: rgba(150, 190, 205, 0.5);
+  text-transform: uppercase;
+}
+.g-view .vspec {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  text-align: right;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9.5px;
+  line-height: 1.6;
+  letter-spacing: 0.1em;
+  color: rgba(150, 190, 205, 0.5);
+  text-transform: uppercase;
+}
+.g-view .vspec b {
+  color: #cdeef8;
+  font-weight: 400;
+}
+
+/* inventory */
+.g-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 6px;
+  flex: none;
+}
+.g-filters span {
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: clamp(7.5px, 0.66vmin, 9px);
+  letter-spacing: 0.16em;
+  padding: 3px 7px 2px;
+  border: 1px solid rgba(111, 242, 255, 0.16);
+  color: rgba(150, 190, 205, 0.5);
+  line-height: 1;
+}
+.g-filters span:hover {
+  border-color: var(--c);
+  color: var(--c);
+}
+.g-filters span.on {
+  background: var(--c);
+  border-color: var(--c);
+  color: #05070a;
+}
+.g-item {
+  pointer-events: auto;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 3px 1fr auto;
+  gap: 0 8px;
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid rgba(111, 242, 255, 0.07);
+}
+.g-item:hover {
+  background: rgba(111, 242, 255, 0.06);
+}
+.g-item.sel {
+  background: rgba(111, 242, 255, 0.11);
+}
+.g-item .pip {
+  grid-row: 1 / span 2;
+  background: var(--rc, #9fb3bd);
+  box-shadow: 0 0 8px var(--rc, #9fb3bd);
+}
+.g-item .n {
+  font-size: clamp(10px, 0.92vmin, 12.5px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #d3eef7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-item .t {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--rc, #9fb3bd);
+  text-transform: uppercase;
+  text-align: right;
+}
+.g-item .m {
+  grid-column: 2 / -1;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: rgba(150, 190, 205, 0.42);
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-item.equipped .n::after {
+  content: ' ◂ EQUIPPED';
+  color: var(--a);
+  font-size: 0.72em;
+  letter-spacing: 0.18em;
+}
+
+/* comparison */
+.g-cmp {
+  flex: none;
+  margin-top: 6px;
+  border-top: 1px solid var(--hair);
+  padding-top: 6px;
+  max-height: 34%;
+  overflow: hidden;
+}
+.g-cmp .hd {
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  color: var(--d);
+  margin-bottom: 4px;
+}
+.g-cmp .r {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.g-cmp .r .k {
+  color: rgba(150, 190, 205, 0.55);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-cmp .r .v {
+  color: #cdeef8;
+}
+.g-cmp .r .d.up {
+  color: #7fe3a2;
+}
+.g-cmp .r .d.dn {
+  color: var(--r);
+}
+.g-cmp .r .d.eq {
+  color: rgba(150, 190, 205, 0.25);
+}
+
+/* footer constraints */
+.g-foot {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: clamp(10px, 1.4vw, 26px);
+  border-top: 1px solid var(--hair);
+  padding-top: 8px;
+}
+.g-loads {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.g-load {
+  display: grid;
+  grid-template-columns: 5.4em 1fr 8.6em;
+  align-items: center;
+  gap: 9px;
+}
+.g-load .k {
+  font-size: clamp(7.5px, 0.66vmin, 9px);
+  letter-spacing: 0.22em;
+  color: var(--d);
+}
+.g-load .v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(9px, 0.82vmin, 11px);
+  color: #cdeef8;
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+.g-load .bar {
+  height: 6px;
+}
+.g-load.over .k,
+.g-load.over .v {
+  color: var(--r);
+}
+.g-load.over .bar {
+  border-color: rgba(255, 77, 61, 0.6);
+}
+.g-load.over .bar > i.fill {
+  background: var(--r);
+  box-shadow: 0 0 10px rgba(255, 77, 61, 0.5);
+}
+.g-derived {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 4px 12px;
+  align-content: start;
+}
+.g-derived .cell {
+  border-top: 1px solid rgba(111, 242, 255, 0.12);
+  padding-top: 3px;
+}
+.g-derived .k {
+  font-size: 7.5px;
+  letter-spacing: 0.24em;
+  color: var(--d);
+  white-space: nowrap;
+}
+.g-derived .v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(11px, 1.05vmin, 14px);
+  color: #e0f6fd;
+  letter-spacing: 0.02em;
+}
+.g-status {
+  grid-column: 1 / -1;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--a);
+  text-transform: uppercase;
+  min-height: 14px;
+  margin-top: 2px;
+}
+
+/* narrow / short viewport trims — 4:3 and small windows */
+@media (max-aspect-ratio: 14/10) {
+  .hud-log {
+    width: clamp(220px, 26vw, 300px);
+  }
+  .hud-status {
+    width: clamp(280px, 34vw, 380px);
+  }
+  .hud-weapons {
+    width: clamp(240px, 30vw, 330px);
+  }
+}
+@media (max-height: 720px) {
+  .hud-over .keys {
+    display: none;
+  }
+  .acntr-garage .g-derived {
+    grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
+  }
+}

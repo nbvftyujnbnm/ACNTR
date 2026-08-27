@@ -296,3 +296,32 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
 
 ## Contract Amendments
 <!-- append: `- YYYY-MM-DD [module] added X because Y` -->
+
+- 2026-08-26 [player] `Entity.aimYaw` / `Entity.aimPitch` (numbers, radians) — CameraRig writes
+  them every late-update; PlayerController reads them at the start of its update and re-applies
+  the same frame's raw mouse delta, so movement direction has zero-frame latency while the camera
+  keeps aim authority (lock-on assist included). MechRig may read them too.
+- 2026-08-26 [player] `Entity.moveState` — PlayerController publishes its live `.state` object
+  onto the player entity so CameraRig/HUD/audio can read `{ grounded, airborne, boosting,
+  assaultBoost, quickBoost, hovering, ascending, enRecovering, staggered, qbTimer, qbCooldown,
+  qbReserve, assaultRamp, landing, speed, verticalSpeed, enRatio, moveX, moveZ, heightAboveGround }`
+  without importing the controller. Mutated in place — never cached by value.
+- 2026-08-26 [player] `Entity.iframes` (seconds, counts down) — set by PlayerController on a quick
+  boost (0.12 s). DamageSystem may honour it; ignoring it is also fine.
+- 2026-08-26 [player] `Entity.physics` — PlayerController stores its Physics reference on the
+  player entity so TargetingSystem (whose contract constructor is `(camera, player)`) can do
+  line-of-sight and aim convergence without extra wiring.
+- 2026-08-26 [player] PlayerController writes `player.root.quaternion` (body yaw only, Y axis).
+  MechRig owns the bones; the root transform belongs to the controller.
+- 2026-08-26 [player] TargetingSystem additions: `.setPhysics(physics)`, `.setInput(input)`,
+  `.getAimRay(out)`, `.getLeadPoint(entity, speed, out)`, `.candidates`, `.reticle`,
+  `.softTarget`, `.missileLock`, `.reset()`. It owns the Tab key itself (no other module in the
+  contract does); `toggleHardLock()` is debounced 40 ms so a second wiring cannot double-toggle.
+- 2026-08-26 [player] CameraRig additions: `.reset()`, `.cfg` (tunables), `.trauma`, `.pivot`.
+  It listens on `EV.SHAKE`, `EV.WEAPON_FIRED`, `EV.QUICK_BOOST`, `EV.LANDED`, `EV.ASSAULT_BOOST`,
+  `EV.PLAYER_HIT`, `EV.EN_EMPTY` and turns them into shake/recoil/whip/FOV. Landing and quick-boost
+  shake are already handled here — VFX/audio should not also emit `EV.SHAKE` for those two.
+- 2026-08-26 [player] Control resolution for Space (one key, three jobs): the movement stick picks
+  the thrust axis. **Space + a direction = horizontal thrust** (ground-boost hover skim near the
+  ground, glide in the air). **Space + neutral = vertical thrust** (jump impulse on the press edge,
+  then sustained climb). No hold timers or double taps, so every transition is same-frame.

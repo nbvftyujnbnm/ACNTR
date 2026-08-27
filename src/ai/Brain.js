@@ -35,6 +35,8 @@ const _right = new THREE.Vector3();
 const _upv = new THREE.Vector3();
 const _tan = new THREE.Vector3();
 const _rad = new THREE.Vector3();
+const _probeF = new THREE.Vector3();
+const _probeT = new THREE.Vector3();
 const _moveOut = { position: new THREE.Vector3(), grounded: false, normal: new THREE.Vector3(0, 1, 0), hitWall: false };
 
 /** Yaw such that the object's local -Z (mech forward) points along (dx,dz). */
@@ -375,13 +377,15 @@ export const Steering = {
     if (!physics?.raycast) return 0;
     let strength = 0;
     outDir.set(0, 0, 0);
+    // `forward` may alias a caller scratch vector — copy it before we touch any
+    _probeF.copy(forward);
     for (let i = -1; i <= 1; i++) {
       const a = i * 0.45;
       const c = Math.cos(a);
       const s = Math.sin(a);
-      _dir.set(forward.x * c - forward.z * s, 0, forward.x * s + forward.z * c).normalize();
+      _dir.set(_probeF.x * c - _probeF.z * s, 0, _probeF.x * s + _probeF.z * c).normalize();
       const hit = physics.raycast(origin, _dir, dist);
-      if (!hit?.hit && !hit?.point) continue;
+      if (!hit || (hit.hit === false && !hit.point)) continue;
       const hd = hit.distance ?? dist;
       const w = 1 - M.clamp(hd / dist, 0, 1);
       if (w <= strength && i !== 0) continue;
@@ -389,9 +393,9 @@ export const Steering = {
       // slide along the surface rather than bouncing off it
       const n = hit.normal;
       if (n) {
-        _v1.set(-n.z, 0, n.x);
-        if (_v1.dot(forward) < 0) _v1.multiplyScalar(-1);
-        outDir.add(_v1);
+        _probeT.set(-n.z, 0, n.x);
+        if (_probeT.dot(_probeF) < 0) _probeT.multiplyScalar(-1);
+        outDir.add(_probeT);
       } else {
         outDir.x += -_dir.z * (i >= 0 ? 1 : -1);
         outDir.z += _dir.x * (i >= 0 ? 1 : -1);
@@ -438,9 +442,12 @@ export class Brain {
     this.thinkTimer = 0;
     this.thinkInterval = this.arch?.reaction?.think ?? 0.12;
 
-    // per-agent weapon runtime state
+    // tier-scaled speed; archetypes may override at runtime (boss phases)
+    this.speedMul = ctx?.speedMul ?? this.arch?.combat?.speedMul ?? 1;
+
+    // per-agent weapon runtime state — defs are tier-scaled clones from Archetypes
     this.weapons = [];
-    const defs = this.arch?.weapons;
+    const defs = ctx?.weapons || this.arch?.weapons;
     if (defs) {
       for (let i = 0; i < defs.length; i++) {
         this.weapons.push({
@@ -464,6 +471,9 @@ export class Brain {
     this._aimDir = new THREE.Vector3(0, 0, -1);
     this._shotDir = new THREE.Vector3();
     this._telegraphHandle = null;
+    this._boostOn = false;
+    this._boostIntensity = 0;
+    this._boostReq = 0;
     this.memory = Object.create(null); // free-form archetype scratch (phase, counters)
   }
 
@@ -502,6 +512,21 @@ export class Brain {
     out.x += -Math.sin(yaw) * 1.6;
     out.z += -Math.cos(yaw) * 1.6;
     return out;
+  }
+
+  /**
+   * Toggle the boost plume. Deduplicated: VFX only hears about real changes, so
+   * archetype states can call this every tick without spamming the VFX pool.
+   */
+  setBoost(intensity) {
+    this._boostReq = Math.max(this._boostReq, intensity ?? 1);
+  }
+
+  _applyBoost(on, intensity) {
+    if (on === this._boostOn && Math.abs(intensity - this._boostIntensity) < 0.3) return;
+    this._boostOn = on;
+    this._boostIntensity = intensity;
+    this.manager?.vfx?.boostFlame?.(this.agent.hardpoints?.core || this.agent.root, on, intensity);
   }
 
   setState(name) {
@@ -608,6 +633,11 @@ export class Brain {
       bb.hasLOS = this._raycastLOS(pp);
       bb.losAge = 0;
     } else if (!inCone) {
+      // release an unused grant so agents facing away can't starve the budget
+      if (this._losGranted) {
+        this._losGranted = false;
+        this._losTimer = 0.3;
+      }
       if (bb.losAge > 0.6) bb.hasLOS = false;
     }
 
@@ -773,7 +803,7 @@ export class Brain {
     bb.dodgeCooldown = (react?.dodgeCooldown ?? 1.2) * (0.85 + this.rng() * 0.4);
     bb.dodgeTimer = 0.28;
     bus.emit(EV.QUICK_BOOST, { entity: this.agent, direction: _v3 });
-    this.manager?.vfx?.boostFlame?.(this.agent.hardpoints?.core || this.agent.root, true, 1.2);
+    this.setBoost(1.6);
     return true;
   }
 
@@ -1050,7 +1080,7 @@ export class Brain {
     _v1.copy(bb.desired);
     const hover = !!move.hover;
     if (!hover) _v1.y = 0;
-    const maxS = (move.speed ?? 14) * (this.arch?.combat?.speedMul ?? 1) * staggerMul;
+    const maxS = (move.speed ?? 14) * this.speedMul * staggerMul;
     const dl = _v1.length();
     if (dl > maxS) _v1.multiplyScalar(maxS / dl);
 
@@ -1065,6 +1095,11 @@ export class Brain {
         _v1.z -= (p.z / (r || 1)) * push * maxS * 0.4;
       }
     }
+
+    // boost plume follows demanded speed unless a state asked for more
+    const boosting = this._boostReq > 0 || dl > maxS * 0.6;
+    this._applyBoost(boosting && !this.stats?.staggered, Math.max(this._boostReq, 1));
+    this._boostReq = 0;
 
     const accel = (move.accel ?? 9) * staggerMul;
     v.x = M.damp(v.x, _v1.x, accel, dt);
