@@ -101,7 +101,20 @@ export class RenderPipeline {
       // white. That difference is most of what separates "atmospheric glow"
       // from "someone smeared white paint on the lens".
       bloom: {
-        threshold: 1.45, knee: 0.60, strength: 1.00, radius: 1.35,
+        // `threshold` 1.45 -> 1.90, and this is the flare fix. The threshold is
+        // in SCENE-LINEAR radiance (the prefilter runs before exposure), and
+        // mapping it through exposure 0.662 + AgX puts 1.45 at display 225 and
+        // 1.90 at display 239. The sky's Mie lobe around a 13.5-degree sun peaks
+        // near 3.0 linear / display 237 across roughly a sixth of the vista
+        // frame — so at 1.45 the SKY ITSELF was the largest bloom emitter in the
+        // shot, dumping a broad, low-contrast source into every mip. That is
+        // what produced a white smear instead of a flare: the glow was not the
+        // sun's falloff, it was a quarter of the sky bleeding sideways. At 1.90
+        // the broad lobe drops out and the emitters are the sun disc (120
+        // linear), specular glints and emissives — all of them one to two orders
+        // of magnitude clear of the threshold, which is what a hot core with a
+        // structured skirt requires.
+        threshold: 1.90, knee: 0.60, strength: 1.00, radius: 1.35,
         clamp: 4, mipTaper: 0.74,
         tint: new THREE.Vector3(1.06, 0.72, 0.42), tintCore: 2.2,
       },
@@ -160,12 +173,30 @@ export class RenderPipeline {
         // barely at all: dropping it from 1.14 to 1.04 raises a 0.07 shadow by
         // 40% and a 0.80 highlight by 2.4%. Contrast and exposure cannot do
         // that — they move the whole curve.
-        agxLook: new THREE.Vector4(1.13, 0.0, 1.00, 0.88),
+        // power 1.00 -> 0.94. `power` is a pow() on the sigmoid's [0,1] output,
+        // so it is almost purely a TOE control: measured on the curve, 0.94
+        // raises a 0.15 shadow by 12%, a 0.45 mid by 5% and a 0.85 highlight by
+        // 1%. That is the trade the hero pose needs — 21.6% of that frame was
+        // below display 14 and 12.5% below 8 — and it is affordable now only
+        // because the midground haze cut (Sky.fogParams) took MORE than 12% of
+        // lift back off the vista's shadowed sand in the same pass. Raising the
+        // toe on its own would have re-flattened the plain this iteration is
+        // trying to open up.
+        agxLook: new THREE.Vector4(1.13, 0.0, 0.94, 0.88),
         // The frame's black point, applied last in the grade (see FINAL_FRAG).
         // AC6's shadows are deep but you can always read what is in them; a
         // crushed-to-black shadow is the giveaway of a hobby renderer.
         // Blue-weighted so the darkest part of the frame is also its coolest.
-        lift: new THREE.Vector3(0.026, 0.030, 0.046),
+        //
+        // 0.026 -> 0.032. `lift` is the most toe-selective knob in the grade
+        // because it is purely additive and scaled by (1 - disp): measured on
+        // the curve it moves a display-9 black by +18% and a display-146 sunlit
+        // sand by +0.7%. That buys back most of the hero pose's pure black
+        // (9.3% of the frame under display 8) for a 2.7% cost in the vista's
+        // sunlit:shadowed sand ratio, which is the cheapest exchange rate any
+        // knob in this file offers. Do NOT reach for `contrast` or `exposure`
+        // here — both move the sunlit half by as much as the shadows.
+        lift: new THREE.Vector3(0.032, 0.036, 0.052),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
         gain: new THREE.Vector3(1.035, 1.0, 0.950),
         // Reads as before (1.0 = neutral) but drives an S-curve now, so it can
@@ -221,11 +252,11 @@ export class RenderPipeline {
     this._fogDensity = 0.0029;
     this._fogHeight = 2;
     this._fogFalloff = 0.115;
-    this._bandDensity = 0.0013;
+    this._bandDensity = 0.0008;
     this._bandHeight = 55;
     this._bandThickness = 16;
-    this._aerialDensity = 0.0016;
-    this._aerialRamp = 520;
+    this._aerialDensity = 0.0024;
+    this._aerialRamp = 1000;
     this._damageColor = new THREE.Color(0.85, 0.06, 0.05);
 
     this._jitter = new Float32Array(JITTER_COUNT * 2);

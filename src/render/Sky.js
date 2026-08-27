@@ -159,9 +159,20 @@ export class Sky {
       bandColor: new THREE.Color(),
       // A tight stratum well clear of the deck. The gap of clean air between
       // the two is what makes each of them read as a LAYER instead of as fog.
-      // Thinned: at 0.0028 it was contributing more optical depth at 250 m than
-      // the true aerial term, i.e. the "layer" was doing the distance fog's job.
-      bandDensity: 0.0013,
+      //
+      // Thinned again, 0.0013 -> 0.0008, and this is the measured fix for the
+      // milky midground. The band's optical depth is LINEAR in distance, and
+      // from an elevated camera it is linear with a large coefficient: the vista
+      // pose sits at y=78, the band at 55 +/- 16, so every sight line down to
+      // the plain crosses the stratum near its peak. Simpson over that ray gives
+      // 0.30 of full band density *whatever the range*, which at 400 m made the
+      // band 44% of the total tau on a structure — more than the deck and the
+      // aerial term put together, and carrying the brightest of the three
+      // colours. That is the definition of a flat wash: a constant-per-metre
+      // veil with a bright terminator. The band still draws its haze line across
+      // the towers (that is a HEIGHT effect and survives a density cut); what it
+      // no longer does is set the midground's contrast.
+      bandDensity: 0.0008,
       bandHeight: 55,
       bandThickness: 16,
       aerialColor: new THREE.Color(),
@@ -169,7 +180,14 @@ export class Sky {
       // it ramps in with range (see `aerialRamp`) instead of accumulating from
       // the camera. Net effect versus the old numbers: ~40% less veiling at
       // 150-250 m, ~15% more past 700 m.
-      aerialDensity: 0.0016,
+      //
+      // Raised with the ramp pushed out (see `aerialRamp`) so the pair steepens
+      // rather than just brightening. Optical depth on this term goes as
+      // d^3 / (ramp^2 + d^2): at ramp 520 the 400 m : 800 m : 2000 m tau ratios
+      // were 1 : 3.8 : 21, at ramp 1000 they are 1 : 5.7 : 29. The same total
+      // extinction on the ridges therefore costs a third as much on the
+      // midground, which is the whole trade this term exists to make.
+      aerialDensity: 0.0024,
       // Range in metres at which the aerial term reaches half of its full
       // per-metre extinction. Models a clean basin under a distant dust wall:
       // the first couple of hundred metres of air really are clearer than the
@@ -177,7 +195,14 @@ export class Sky {
       // in COMPOSITE_FRAG is quadratic and has no floor — the pair moves haze
       // OUT of the 100-250 m midground and into the 600 m+ background, which
       // is where an AC6 frame actually keeps it.
-      aerialRamp: 520,
+      //
+      // 520 -> 1000. Measured on the vista pose (camera y=78, ridges at 2 km):
+      // total veiling on a structure at 400 m goes 34.6% -> 22%, on the plain at
+      // 800 m 77% -> 69%, and on the ridges 98.8% -> 98.6%. The far distance is
+      // unchanged and the midground gets a third of its contrast back. The
+      // limiting factor is now the DECK, which is correct — the far ground plane
+      // is supposed to dissolve while the things standing on it do not.
+      aerialRamp: 1000,
       sunColor: new THREE.Color(),
     };
 
@@ -320,7 +345,12 @@ export class Sky {
     // Smog band: lit from below by the ground bounce, so warmer again — and it
     // sits higher, in cleaner air, so it stays brighter than the deck. That
     // difference is what draws the visible haze line across the towers.
-    p.bandColor.copy(c.horizon).lerp(c.sunTint, 0.15).multiplyScalar(0.86);
+    //
+    // 0.86 -> 0.78. It only has to out-run the DECK to draw the line; it must
+    // not out-run the shadowed ground it crosses, or the line stops reading as
+    // a stratum of dust and starts reading as a bright bar painted over the
+    // frame. At 0.86 its luminance was 0.285 against sunlit sand at ~0.25.
+    p.bandColor.copy(c.horizon).lerp(c.sunTint, 0.15).multiplyScalar(0.78);
 
     // Aerial perspective: cool and pale. This is the term that separates a
     // distant ridge from the one in front of it — if it is warm like the rest,

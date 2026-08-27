@@ -92,7 +92,16 @@ export class Lighting {
       // landing at display 17/255 with 64% of the lower-left quadrant below 16.
       // Sunlit ground pays 5% for it; ground in shadow gains 25%, because the
       // sun is 4.1 and the ambient it is being added to is 1.1.
-      hemiIntensity: 0.30,
+      //
+      // 0.30 -> 0.22. This is the ONLY term in the rig with no direction at all,
+      // so it is the only one that costs the terrain contrast at full rate: the
+      // plain is one enormous up-facing surface, and an omnidirectional 0.30
+      // against a horizontal-ground key of 4.08 is 7% of the lit value but 31%
+      // of the shadowed value. The 0.08 taken out comes back on `fillIntensity`,
+      // which delivers 0.13 of itself to horizontal ground and 0.99 to a
+      // vertical flank — so the swap is a straight transfer of ambient off the
+      // sand and onto the mech's plating.
+      hemiIntensity: 0.22,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
       // Amendments), so the environment feeds DIFFUSE on every surface in the
@@ -107,7 +116,14 @@ export class Lighting {
       // AC6 shadows are deep but never crushed; this is what keeps them open.
       // Carries much more of the ambient budget than it used to — see
       // `fillElevation` for why that does NOT flatten the ground.
-      fillIntensity: 2.75,
+      //
+      // 2.75 -> 3.35, paid for out of `hemiIntensity`. At a 7.5-degree
+      // elevation this adds 0.59 to a vertical unlit flank and 0.078 to
+      // horizontal ground; the hemisphere cut removes 0.08 from both. Net: the
+      // mech's shadow side gains ~16% of its ambient, the sand plain loses ~0.2%
+      // of its lit value and ~0.3% of its shadowed value. That asymmetry is the
+      // entire reason this light is nearly horizontal.
+      fillIntensity: 3.35,
       // The SINE of the bounce's elevation above the horizon, and the single
       // most useful number in this rig — because it is the only knob that
       // separates "shadow on the mech" from "shadow on the ground".
@@ -135,12 +151,26 @@ export class Lighting {
       // scheme into uselessness: 'practical' put the first cascade break at
       // 79 m, so a 9 m mech got 2 cm... of a 180 m cascade. Explicit splits,
       // tuned for a mech-scale subject with a city-scale background.
-      shadowMaxFar: 420,
-      // Pulled in from [22, 66, 170, 460]. Cascade 0 is the one that draws the
-      // contact shadow under a 9 m mech, and its texel size is (extent / 2048):
-      // 18 m of frustum is ~9 mm/texel, tight enough that the shadow meets the
-      // foot instead of hovering a hand's width off it.
-      splits: [18, 50, 140, 420],
+      // 420 -> 560. In the vista pose the camera stands at y=78 and the plain
+      // runs out to the refinery at ~500 m, so a 420 m shadow range stopped
+      // casting roughly where the frame's midground begins: past that line the
+      // sand had no cast shadow on it at all, which is a large part of why the
+      // lower half read as one flat sheet. Cascade 3 pays ~340 mm/texel at the
+      // new far edge, which at 560 m is a third of a screen pixel.
+      shadowMaxFar: 560,
+      // MEASURED DEFECT, and the reason the hero pose's contact shadow was soft.
+      // CSM splits on VIEW DEPTH, not radial distance. The hero camera sits at
+      // the player + (12, 6.4, 14) looking at (0, 4.7, 0), so its forward axis
+      // puts the mech's FEET — exactly where the contact shadow is drawn — at a
+      // view depth of 18.95 m. Cascade 0 ended at 18. The subject of the shot
+      // was therefore being shadowed by cascade 1 at ~3.5x coarser texels, and,
+      // because `fade` is on, inside the blend band between two cascades of
+      // different resolution: a soft, doubled contact edge.
+      //
+      // 28 m puts the whole mech and its ground contact at 68% of cascade 0,
+      // clear of the fade margin, at ~17 mm/texel. The later splits are moved
+      // out in proportion to carry the new `shadowMaxFar`.
+      splits: [28, 78, 200, 560],
       lightNear: 1,
       lightFar: 2200,
       lightMargin: 180,

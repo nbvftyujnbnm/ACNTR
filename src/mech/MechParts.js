@@ -702,6 +702,20 @@ export function buildHead(o = {}) {
         [i * 0.17, 0.04, 0.24], [i * 0.23, -0.12, 0.32], [i * 0.16, -0.30, 0.24],
       ], 0.034, 6, 5), null);
     }
+    // RANGEFINDER, left temple only. The single most recognisable piece of
+    // Armored Core head furniture, and the cheapest asymmetry on the whole
+    // frame: everything else up here is mirrored, so one boxy pod cantilevered
+    // off one temple is what stops the head reading as a symmetrical helmet.
+    // It hangs FORWARD of the cheek so it breaks the head's outline in profile
+    // rather than sitting flush against it.
+    if (!crude) {
+      b.box('mech', MASK.TRIM, 0.09, 0.10, 0.13, 0.02, -0.42, 0.52, -0.22);
+      b.box('armor', MASK.BASE, 0.15, 0.20, 0.34, 0.028, -0.50, 0.52, -0.32, 0, 0.14, -0.10,
+        { taperFrontX: 0.78, taperFrontY: 0.82 });
+      b.box('glow', MASK.BASE, 0.035, 0.10, 0.09, 0.012, -0.575, 0.53, -0.46, 0, 0.14, -0.10);
+      // counterweight stub on the opposite temple — related hardware, not a mirror
+      b.box('mech', MASK.TRIM, 0.10, 0.13, 0.18, 0.02, 0.45, 0.55, 0.10, 0, 0, 0.10);
+    }
   }
 
   return { b, anchors: { optic: [0, 0.405, -0.49] }, top: 1.22 };
@@ -836,6 +850,60 @@ export function buildCore(o = {}) {
     }
   }
 
+  // --- ASYMMETRIC FLANK ASSEMBLIES ---------------------------------------
+  // The torso was a mirror of itself from the waist up, and its flanks between
+  // the hip and the shoulder were an unbroken tapered box — the two things a
+  // reviewer means by "procedural robot, not an Armored Core". Real ACs carry
+  // DIFFERENT hardware on their two flanks, and that hardware stands proud of
+  // the hull so the waist-to-shoulder run has a profile instead of an edge.
+  //
+  // Both assemblies live in the rear third of the flank (z 0.30..0.60), clear of
+  // the raked strake at z -0.30 and the heat-sink vent at z -0.21..0.41, and both
+  // run y 0.9..2.0 so they physically bridge waist to shoulder. The hull tapers
+  // inward with height and these do not, so each one emerges further from the
+  // surface as it climbs — the profile widens toward the shoulder for free.
+  if (d && !crude) {
+    // RIGHT: armoured coolant conduit, clamped to the hull at three points.
+    const cz = 0.44;
+    b.box('mech', MASK.TRIM, 0.19, 1.26, 0.23, 0.028, W * 0.485, 1.38, cz, 0.05, 0, 0);
+    // header tank capping it under the shoulder
+    b.box('armor', MASK.BASE, 0.27, 0.32, 0.31, 0.035, W * 0.50, 2.02, cz - 0.03, 0, 0, -0.09,
+      { taperX: 0.86 });
+    for (let i = 0; i < 3; i++) {
+      b.addM('mech', MASK.STEEL, ring(0.115, 0.155, 0.055, 10, 0.012),
+        _m.compose(_pv.set(W * 0.485, 1.00 + i * 0.38, cz), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+    }
+    // bleed line running off the header, out past the hull's outline
+    b.addM('mech', MASK.TRIM, cable([
+      [W * 0.50, 1.96, cz - 0.16], [W * 0.62, 1.80, cz - 0.34], [W * 0.52, 1.52, cz - 0.30],
+    ], 0.032, 10, 5), null);
+
+    // LEFT: a countermeasure/ammo box — a different SHAPE, not a mirrored one.
+    // Sits ABOVE and BEHIND the flank heat sink (which occupies y 0.82..1.28,
+    // z -0.21..0.41) so it never grows out of the vent bezel, and its hinged lid
+    // is the accent slot so it reads as a serviceable sub-assembly.
+    b.box('armor', MASK.BASE, 0.28, 0.62, 0.36, 0.04, -W * 0.50, 1.52, 0.48, 0, 0, 0.06,
+      { taperZ: 0.94 });
+    b.box('armor', MASK.ACCENT, 0.30, 0.10, 0.38, 0.022, -W * 0.51, 1.87, 0.48, 0, 0, 0.06);
+    // stub exhaust off its back face, canted down and outboard
+    _e.set(Math.PI * 0.5 - 0.5, 0, -0.30); _q.setFromEuler(_e); _sc.set(1, 1, 1);
+    _pv.set(-W * 0.545, 1.34, 0.64); _m.compose(_pv, _q, _sc);
+    b.addM('mech', MASK.TRIM, nozzle(0.055, 0.095, 0.17, 12), _m);
+    boltRing(b, 'mech', MASK.STEEL, 'nx', -W * 0.545, 1.52, 0.48, 0.14, 6, 0.022, 0.014);
+
+    // Whip antenna off the RIGHT yoke's rear corner, raked back and outboard.
+    // A 1.2 m mast against the sky is worth more to a silhouette than any amount
+    // of surface detail, and it costs 60 triangles.
+    _e.set(-0.24, 0, -0.20); _q.setFromEuler(_e);
+    _pv.set(sx + 0.10, 2.94, 0.52); _m.compose(_pv, _q, _sc);
+    b.addM('mech', MASK.TRIM, chamferCyl(0.026, 0.008, 1.16, 5, 0.007), _m);
+    _pv.set(sx + 0.22, 3.50, 0.66); _m.compose(_pv, _q, _sc);
+    b.addM('glow', MASK.BASE, chamferCyl(0.016, 0.012, 0.05, 6, 0.005), _m);
+    // and a stubby blade antenna on the LEFT yoke, so the two never match
+    b.box('mech', MASK.TRIM, 0.045, 0.46, 0.20, 0.014, -(sx + 0.06), 2.72, 0.44, -0.16, 0, 0.10,
+      { taperX: 0.5, taperZ: 0.6 });
+  }
+
   // --- neck: a load-bearing column, not an anchor point -------------------
   // The head bone origin is the TOP of this column (anchors.neck below) and the
   // head's sleeve slides down over it, so there is a 0.3 m telescoping overlap
@@ -921,6 +989,30 @@ export function buildPelvis(o = {}) {
     // skirt plates: front and rear, angled outward
     b.addM('armor', MASK.BASE, plate(beveledRectShape(0.50, 0.72, { bl: 0.20, br: 0.20 }), 0.10, 0.026),
       _m.compose(_pv.set(s * 0.40, -0.34, -0.50), _q.setFromEuler(_e.set(0.18, s * 0.22, 0)), _sc.set(1, 1, 1)));
+    // Hardware ON the front skirt. This is the largest unbroken plate on the
+    // whole frame and it hangs clear of the hip cavity, so it is the one surface
+    // the sky can reach unoccluded — measured at 129,127,129 in the hero frame
+    // while the armour immediately behind it sat at 28,31,45. A plate that
+    // bright cannot also be empty or it reads as a blank shield bolted to the
+    // pelvis. Greebles cannot be used here (the plate is rotated on two axes and
+    // greebleFace only builds axis-aligned frames), so the detail is placed by
+    // composing the plate's own transform and then translating along its face.
+    if (d) {
+      _q.setFromEuler(_e.set(0.18, s * 0.22, 0)); _sc.set(1, 1, 1);
+      const onSkirt = (bucket, mask, geo, lx, ly) => {
+        _pv.set(s * 0.40, -0.34, -0.50);
+        _m.compose(_pv, _q, _sc);
+        _mr.makeTranslation(lx, ly, -0.072);
+        _m.multiply(_mr);
+        b.addM(bucket, mask, geo, _m);
+      };
+      onSkirt('armor', MASK.BASE, chamferBox(0.11, 0.20, 0.05, 0.012), -0.13, 0.12);
+      onSkirt('armor', MASK.BASE, chamferBox(0.09, 0.13, 0.045, 0.011), 0.02, 0.19);
+      onSkirt('armor', MASK.BASE, chamferBox(0.13, 0.16, 0.05, 0.012), 0.14, 0.08);
+      // stencilled hazard strip: the accent slot, so it also breaks the hue
+      onSkirt('armor', MASK.ACCENT, chamferBox(0.34, 0.065, 0.035, 0.010), 0, -0.10);
+      onSkirt('mech', MASK.TRIM, chamferBox(0.30, 0.05, 0.04, 0.010), 0, -0.22);
+    }
     b.addM('armor', MASK.BASE, plate(beveledRectShape(0.46, 0.64, { bl: 0.18, br: 0.18 }), 0.10, 0.026),
       _m.compose(_pv.set(s * 0.44, -0.30, 0.48), _q.setFromEuler(_e.set(-0.16, s * -0.20, 0)), _sc.set(1, 1, 1)));
     // hip thruster: nozzle rearward + emissive core

@@ -506,3 +506,134 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   roughness in that structure's material. Whoever owns the conveyor: raise its roughness (0.35+)
   or break it up along its length. No exposure, tonemap or bloom setting can fix a source that
   runs several stops past the shoulder along 300 m of continuous geometry.
+- 2026-08-27 [mech] Torso asymmetry. `buildCore` now hangs a DIFFERENT assembly on
+  each flank — a clamped coolant conduit + header tank + bleed line on the right, a
+  stepped countermeasure box with a hinged accent lid and a stub exhaust on the left —
+  plus a 1.2 m whip antenna off the right yoke and a short blade antenna off the left.
+  `buildHead` gains a left-temple rangefinder pod (with a counterweight stub, not a
+  mirror, on the right). Together with the shoulder ordnance these mean no two halves
+  of the frame match. All of it is gated behind `detail !== 'low'` and `!crude`, so MTs
+  and the LOD meshes are unaffected. Both flank assemblies deliberately run y 0.9..2.0
+  against a hull that tapers inward with height, so each stands further proud as it
+  climbs and the waist-to-shoulder run gains a profile instead of a single edge.
+- 2026-08-27 [render] DIAGNOSIS, NOT A FIX — the "smeared dark streak" on the mech's
+  upper chest is the DEPTH OF FIELD pass defocusing the subject, not a mech texture,
+  UV or normal problem. Measured with `q.dof` on vs off on the `mech_detail` pose
+  (mean |Laplacian| per region, higher = sharper):
+      region      dof on   dof off
+      streak       12.37     23.45
+      pauldron     10.67     24.89
+      chest        11.51     33.68
+      background   15.00     14.93   <-- unchanged
+  The mech loses half to two thirds of its high-frequency detail while the background
+  keeps all of its. That is backwards, and it is what turns a 3 cm cable and a plate
+  edge into a soft dark band that reads as a stretched texture. Cause is in
+  `src/render/Pipeline.js`: `params.dof.restFocus` is 90 m and `_dyn.focus` only leaves
+  that value when something drives it, while every review camera sits 8-20 m from the
+  mech. Whoever owns the pipeline: focus wants to track the subject (a depth probe at
+  the reticle, or the player's distance from the camera). Ruled out on the mech side —
+  per-triangle UV density measured across every part of every builder is 0.4-1.0 of
+  target with no texel below 0.4 and no degenerate triangles, so nothing is stretched.
+- 2026-08-27 [mech] The chip gate in `MechMaterials.RECOLOR` now has a SECOND,
+  locality term. Testing a texel's brightness against the map MEAN alone cannot
+  distinguish a chip from a plate that is merely bright: `TextureForge.armorPanel`
+  tints every plate independently by up to +16%, so a plate at the top of that
+  spread clears the onset across its whole area and renders as one hue-free slab of
+  bare alloy. Measured in the hero frame: the pelvis skirt came out at saturation
+  0.019 while every other lit surface on the mech read 0.23-0.44, and the alloy
+  colour is the only neutral this shader can produce. The gate now also samples the
+  albedo at `uChipLod` (mip bias 5.5, ~45 texels ~ 14 cm — between a chip cell and a
+  plate) and requires the texel to be brighter than its own plate, which is
+  scale-invariant. The two smoothsteps multiply, so this can only ever remove chip
+  coverage relative to the macro gate alone, never add it.
+- 2026-08-27 [mech] The pale plate on the pelvis is NOT a mask bug. Rendered with each
+  mask slot flat-tinted (base=red, accent=green, trim=blue, steel=white), the front hip
+  skirt samples 198,99,87 against the chest's 175,99,88 — both plainly `MASK.BASE`, as
+  authored. It reads pale because it is the one plate on the frame that hangs clear of
+  the hip cavity, so it is unoccluded to the sky while everything behind it is deeply
+  occluded (129,127,129 against 28,31,45), and the sky is neutral where the key is warm.
+  The AO/ambient contrast is the lighting owner's call; what WAS a mech defect is that a
+  surface that bright carried no hardware at all, so `buildPelvis` now bolts three
+  raised blocks, an accent hazard strip and a trim rail onto it. Note for anyone adding
+  detail to a doubly-rotated plate: `greebleFace` only builds axis-aligned frames, so
+  compose the plate's own transform and post-multiply a translation along its face.
+- 2026-08-27 [render] `Sky.fogParams` retuned to move haze OUT of the midground:
+  `bandDensity` 0.0013 -> 0.0008, `bandColor` multiplier 0.86 -> 0.78,
+  `aerialDensity` 0.0016 -> 0.0024, `aerialRamp` 520 -> 1000. The finding behind it:
+  the BAND, not the deck and not the aerial term, was what made 100-400 m read as milk.
+  Its optical depth is linear in distance, and from an elevated camera it is linear with
+  a large coefficient — the vista pose sits at y=78 with the stratum at 55 +/- 16, so
+  every sight line down to the plain crosses it near its peak and Simpson returns ~0.30
+  of full band density AT EVERY RANGE. At 400 m that was 44% of the total tau on a
+  structure, more than the deck and the aerial term combined, carrying the brightest of
+  the three colours. A constant-per-metre veil with a bright terminator is the definition
+  of a flat wash. Measured on the vista pose: total veiling on a structure at 400 m
+  34.6% -> 22%, on the plain at 800 m 77% -> 69%, on the 2 km ridges 98.8% -> 98.6%.
+  Frame result, 100-400 m band: mean 79.7 -> 67.2 with standard deviation 16.6 -> 19.3.
+  The band still draws its haze line across the towers — that is a HEIGHT effect and
+  survives a density cut. `aerialRamp` is the knob that makes this trade cheap: tau on
+  that term goes as d^3 / (ramp^2 + d^2), so the 400 : 800 : 2000 m ratios go from
+  1 : 3.8 : 21 at ramp 520 to 1 : 5.7 : 29 at ramp 1000 — the same burial on the ridges
+  for a third of the cost on the midground.
+- 2026-08-27 [render] MEASURED DEFECT in `Lighting.params.splits`, now fixed: CSM splits
+  on VIEW DEPTH, not radial distance, and the hero pose put its subject on a cascade
+  boundary. The camera sits at player + (12, 6.4, 14) looking at (0, 4.7, 0), which puts
+  the mech's FEET — exactly where the contact shadow is drawn — at a view depth of
+  18.95 m against a first split of 18. The contact shadow of the hero shot was therefore
+  being drawn by cascade 1 at ~3.5x coarser texels AND inside the `fade` blend band
+  between two cascades of different resolution. Splits are now [28, 78, 200, 560] with
+  `shadowMaxFar` 420 -> 560: the mech sits at 68% of cascade 0, clear of the fade margin,
+  at ~17 mm/texel. Anyone adding a review pose should check its subject distance against
+  `splits[0]` — landing on a split is invisible in code and obvious in the frame.
+  `shadowMaxFar` went out because at 420 m the vista stopped casting roughly where its
+  midground begins; the cost is +25 draw calls on that pose (199 -> 224 of a 400 budget).
+- 2026-08-27 [render] `Pipeline.params.bloom.threshold` 1.45 -> 1.90, and this is the
+  fix for the vista's blown sun. The threshold is in SCENE-LINEAR radiance — the
+  prefilter runs before exposure — and through exposure 0.662 + AgX, 1.45 lands at
+  display 225 and 1.90 at display 239. The sky's Mie lobe around a 13.5-degree sun peaks
+  near 3.0 linear / display 237 across roughly a sixth of the vista frame, so at 1.45
+  THE SKY ITSELF was the largest bloom emitter in the shot, feeding every mip a broad
+  low-contrast source. The white smear was not the sun's falloff, it was a quarter of the
+  sky bleeding sideways. Frame result: pixels above display 240 went 0.45% -> 0.13%.
+  When tuning this knob, convert it to a display value first — the number is meaningless
+  in isolation because everything interesting in the frame lives within 30 code values
+  of it.
+- 2026-08-27 [render] MEASURED, and it generalises the existing "a blown highlight is
+  fixed at the source" note: near the sun the AgX shoulder makes display value almost
+  INDEPENDENT of radiance. Halving the sky's radiance 6 degrees off the sun moves the
+  frame by 4 code values out of 255; cutting it to 25% moves it by 57. Any attempt to put
+  structure into a flare by mixing a colour into it therefore does nothing visible — the
+  sky-side dust in `shaders/sky.js` had to become an EXTINCTION at 0.90 before it drew a
+  silhouette at all. Same reason the aerial-perspective colour work in this file only ever
+  shows up below ~display 200. If a change is meant to be visible above that, express it
+  as a multiplier on radiance, not as a mix toward a colour.
+- 2026-08-27 [render] DO NOT "FIX" THE AgX MATRICES IN `shaders/lib.js` BY TRANSPOSING
+  THEM. `AGX_IN` / `AGX_OUT` are written so that GLSL's column-major `mat3(...)`
+  constructor produces the CORRECT matrix: read that way both have row sums of exactly
+  1.0000 and the pair round-trips a saturated colour to within 3%. The identical
+  constants in three.js are fed to `Matrix3.set()`, which is ROW-major — so the same
+  nine numbers mean transposed things in the two places, and reading these as row-major
+  gives row sums of 1.106 / 0.933 / 0.961, which tints every neutral in the game warm.
+  Checked because the vista's sun quadrant renders R exactly equal to G; that turned out
+  to be ordinary highlight desaturation, not a matrix bug.
+- 2026-08-27 [render] `Pipeline.params.grade.lift` 0.026 -> 0.032 and `agxLook.power`
+  1.00 -> 0.94, with the exchange rates measured on the curve so the next person does not
+  have to rediscover them. `lift` is purely additive and scaled by (1 - disp), which makes
+  it the most toe-selective knob in the grade: +18% on a display-9 black, +0.7% on
+  display-146 sunlit sand. `power` is a pow() on the sigmoid's [0,1] output and targets
+  the MID shadows instead: +12% at display 38, +5% at display 115, +1% at display 217 —
+  which is where a mech's unlit plating lives. `contrast` and `exposure` are NOT
+  substitutes for either; both move the sunlit half of the frame by as much as the
+  shadows, and on these poses the sunlit half has no headroom.
+- 2026-08-27 [world] DEFECT FOUND, not owned by this agent, and it is the reason the hero
+  pose has no readable contact shadow. The mech in `tools/poses/hero.js` stands INSIDE the
+  cast shadow of the large building behind it — measured, the sand around the mech reads
+  display 17-27 with RGB (18, 20, 32), i.e. pure cool fill and no sun, while the dunes
+  60 m further back read 75 with RGB (88, 73, 67). At a 13.5-degree sun a 25 m building
+  throws a 104 m shadow, so the whole apron is in it. The ambient occlusion IS working
+  there — walking away from a barrel base the sand goes 15.4 -> 26.6, a 42% contact
+  darkening — but 11 code values in the black end of the curve is invisible, and no
+  lighting or grade knob can fix that without flattening the vista's sand, which is the
+  higher priority. A contact shadow reads because the ground AROUND it is lit. Whoever
+  owns the pose or that building's placement: move the hero framing so the mech stands in
+  sun, and the contact shadow appears for free.

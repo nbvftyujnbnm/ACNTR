@@ -82,7 +82,11 @@ void main() {
   sky += uSunTint * phaseM * uMieStrength * ( 0.22 + 1.15 * hz ) * sunUp;
 
   // Broad, low-frequency warm wash on the sun side of the sky.
-  sky += uSunTint * pow( max( mu, 0.0 ), 5.0 ) * 0.28 * sunUp;
+  // Tightened from pow 5 to pow 7: at 37 degrees off the sun the old exponent
+  // still delivered a third of its peak, which spread a featureless pale field
+  // across most of the sun quadrant and left the flare with nothing to fall off
+  // against. The peak is raised slightly to keep the near-sun energy.
+  sky += uSunTint * pow( max( mu, 0.0 ), 7.0 ) * 0.31 * sunUp;
 
   // ---- layered dust strata near the horizon ------------------------------
   // Anisotropic 3D noise (26x vertical squash) -> long horizontal bands with no
@@ -95,6 +99,48 @@ void main() {
   float bandMask = exp( - max( up, 0.0 ) * 7.5 ) * smoothstep( -0.14, 0.01, up );
   vec3 bandCol = mix( uHorizon * 1.22, uSunTint * 1.7, pow( max( mu, 0.0 ), 3.0 ) * sunUp );
   sky = mix( sky, bandCol, clamp( strat * bandMask * uBandStrength, 0.0, 0.9 ) );
+
+  // ---- high dust silhouetted across the sun's glow -----------------------
+  // The band above dies out within ~8 degrees of the horizon, so it never
+  // reached a 13.5-degree sun: the Mie lobe was left as a smooth radial blob
+  // with nothing crossing it, which is what made the flare read as painted on.
+  //
+  // This term is an EXTINCTION, not a tint, and that distinction is the whole
+  // reason the first attempt at this failed. Near the sun the sky sits on the
+  // flat top of the AgX shoulder, where display value is almost independent of
+  // radiance: measured on the curve, halving the radiance 6 degrees off the sun
+  // moves the frame by 4 code values out of 255. Mixing dust COLOUR in there
+  // does nothing visible. Multiplying the radiance down by 90% where a stratum
+  // is dense moves it by 26, which is a silhouette.
+  //
+  // Three gates shape it into a flare rather than a smear:
+  //   sunSide  broad, so the structure follows the glow out to ~65 degrees;
+  //   sunCore  pow 70 protects the first ~10 degrees, so the hot core stays a
+  //            hot core -- REVIEW fails bloom with no hot core, and a stratum
+  //            cutting the middle out of the sun would be exactly that;
+  //   the smoothstep in elevation hands the first couple of degrees back to
+  //            the band above, so low strata glow and high strata silhouette.
+  // Net across the skirt: 0 at the core, -26 at 12-18 degrees, -7 at 65.
+  //
+  // Its own noise, coarser and 11x squashed rather than 26x, so the bars land
+  // ~5 degrees apart across the glow instead of the ~2 degrees the horizon
+  // field uses -- at 26x they read as a fine stripe pattern, not as weather.
+  vec3 hp = V * vec3( 1.9, 11.0, 1.9 );
+  hp.y -= uTime * 0.011;
+  hp.z += uTime * 0.008;
+  float hstrat = smoothstep( 0.42, 0.76, fbm3_3( hp ) );
+
+  float sunSide = pow( max( mu, 0.0 ), 1.4 );
+  float sunCore = pow( max( mu, 0.0 ), 70.0 );
+  float veil = hstrat * sunSide * ( 1.0 - sunCore )
+             * exp( - max( up, 0.0 ) * 0.8 )
+             * smoothstep( 0.04, 0.16, up ) * sunUp;
+  veil = clamp( veil, 0.0, 0.85 );
+
+  // The dust is backlit, so it is not black: it keeps a fifth of the band
+  // colour as its own forward-scattered glow. That is what stops the bars
+  // reading as holes punched in the sky.
+  sky = sky * ( 1.0 - 0.90 * veil ) + bandCol * 0.20 * veil;
 
   // ---- cloud / smog deck -------------------------------------------------
   // Pseudo-perspective projection of the direction vector: continuous

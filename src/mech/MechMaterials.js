@@ -129,6 +129,14 @@ const SPECKLE_CUT = 0.80;
 const SPECKLE_LOD = 2.6;
 
 /**
+ * Mip bias of the chip gate's PLATE-SCALE reference tap (see RECOLOR). 5.5 is a
+ * ~45-texel neighbourhood — 14 cm of hull at MECH_TEXELS_PER_M, which sits
+ * between a chip cell (9-20 texels) and a plate (100-300), so a chip stands out
+ * against it while a whole tinted plate does not.
+ */
+const CHIP_LOD = 5.5;
+
+/**
  * Detail layer (see RECOLOR). `DETAIL_SCALE` is how many times per macro tile
  * the second tap repeats, so its tile is 3.2 / 3.11 = 1.03 m and its plates land
  * at ~0.19 m — small enough that a 0.5 m pauldron face crosses two or three of
@@ -169,12 +177,16 @@ uniform float uSpeckleLod;
 uniform float uDetail;
 uniform float uDetailScale;
 uniform float uDetailNormal;
+uniform float uChipLod;
 // Written by the recolour chunk, read again by roughness/metalness further down
 // the chunk order: 1 where the paint has been abraded off to bare metal.
 float acChipG = 0.0;
 // Detail-layer luminance ratio, also written by the recolour chunk and read by
 // the roughness chunk so sub-panel structure breaks up the specular too.
 float acDetail = 1.0;
+// Luminance of a PLATE-SCALE tap of the albedo map. 0 means "no map bound", in
+// which case the chip gate's locality test is skipped rather than failed.
+float acPlateLum = 0.0;
 `;
 
 // Recolour: preserve the baked texture's luminance structure (panel seams, grime,
@@ -240,6 +252,14 @@ const RECOLOR = /* glsl */`
   float acDetLum = max( dot( acDet, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   acDetail = clamp( acDetLum / uTexMean, 0.31, 1.38 );
   acTex *= mix( 1.0, acDetail, uDetail );
+
+  // --- plate-scale reference tap ------------------------------------------
+  // Deliberately far coarser than the speckle guard's: ~45 texels, i.e. 14 cm of
+  // hull, which sits between a chip cell (9-20 texels) and a plate (100-300).
+  // The chip gate uses it to ask "is this texel brighter than the PLATE it is
+  // on", which is a question the map mean cannot answer. See the gate below.
+  acPlateLum = max( dot( texture2D( map, vMapUv, uChipLod ).rgb,
+    vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
 #endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   vec3 acSlot = uSlots[0] * vMask.x + uSlots[1] * vMask.y + uSlots[2] * vMask.z + uSlots[3] * vMask.w;
@@ -272,7 +292,24 @@ const RECOLOR = /* glsl */`
   // drained to neutral grey under a brighter environment. Reading the macro
   // ratio also means DETAIL_MIX and DETAIL_SCALE can be retuned freely without
   // silently repainting the mech in bare metal.
-  acChipG = smoothstep( 1.44, 1.80, acMacro );
+  //
+  // SECOND GATE — locality. A single threshold against the map MEAN cannot tell
+  // a chip from a plate that is simply bright: the forge tints every plate
+  // independently by up to +16%, so a plate sitting at the top of that spread
+  // clears 1.44 across its WHOLE area and comes out as one hue-free slab of
+  // alloy. That is not hypothetical — it is what the pelvis skirt was doing,
+  // measured at saturation 0.019 in the hero frame while every other lit surface
+  // on the mech read 0.23-0.44. The alloy colour below is the only neutral in
+  // this shader, so a neutral surface under a warm sun can only have come from
+  // here. Asking instead whether the texel is brighter than ITS OWN PLATE makes
+  // the test scale-invariant: a uniformly bright plate scores ~1.0 and stays
+  // paint, while a chip scores ~1.6 against the plate it has been knocked off
+  // and still passes. Multiplying the two gates can only ever REMOVE chip
+  // coverage relative to the macro gate alone, never add it.
+  float acLocal = acPlateLum > 0.0
+    ? ( acLum / mix( 1.0, acDetail, uDetail ) ) / acPlateLum
+    : 2.0;
+  acChipG = smoothstep( 1.44, 1.80, acMacro ) * smoothstep( 1.12, 1.42, acLocal );
   // Chipped paint reveals bare alloy: hue drops out, value tracks the texture.
   diffuseColor.rgb = mix( acTint, vec3( 0.26, 0.265, 0.275 ) * min( acRatio, 1.5 ), acChipG * 0.70 );
   // Panel seams are the single most important read on a mech. The baked map
@@ -361,6 +398,7 @@ function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55, sp
     uDetail: { value: DETAIL_MIX },
     uDetailScale: { value: DETAIL_SCALE },
     uDetailNormal: { value: DETAIL_NORMAL },
+    uChipLod: { value: CHIP_LOD },
     uDamage: { value: 0 },
     uSoot: { value: c(palette.soot) },
     uDamageGlow: { value: c(palette.glowHot).multiplyScalar(1.4) },
