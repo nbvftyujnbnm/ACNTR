@@ -11,7 +11,7 @@
  * Exits 2 if the game fails to boot (and prints the real error), 1 if any
  * WebGL/shader/runtime console errors occurred, 0 on a clean run.
  */
-import { chromium } from '@playwright/test';
+import { launch } from './browser.mjs';
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
@@ -75,19 +75,7 @@ async function startServer() {
   const outDir = resolve(ROOT, OUT_DIR);
   mkdirSync(outDir, { recursive: true });
 
-  const browser = await chromium.launch({
-    args: [
-      '--use-gl=angle',
-      '--use-angle=swiftshader',
-      '--enable-unsafe-swiftshader',
-      '--ignore-gpu-blocklist',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--hide-scrollbars',
-      '--mute-audio',
-      '--js-flags=--max-old-space-size=4096',
-    ],
-  });
+  const browser = await launch();
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 
   const consoleErrors = [];
@@ -110,8 +98,20 @@ async function startServer() {
     process.exit(2);
   }
 
+  // Captures run on SwiftShader (software raster). The engine's adaptive
+  // resolution would read the low fps and quietly downscale, which would make
+  // every review frame soft and blame the art for a harness artefact. Pin it.
+  await page.evaluate(() => {
+    const e = window.__ACNTR__?.engine;
+    if (!e) return;
+    e.adaptiveResolution = false;
+    e.resolutionScale = 1;
+    e.maxPixelRatio = 1;
+    e.resize();
+  });
+
   // Warm-up: let shaders compile, textures upload, and the first frames settle.
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3500);
 
   const report = { out: OUT_DIR, viewport: [W, H], shots: [], consoleErrors: [] };
 

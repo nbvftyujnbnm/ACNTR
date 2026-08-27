@@ -12,7 +12,7 @@
  * Exits non-zero and prints the page error if the game failed to boot — so a
  * broken build can never be mistaken for a bad-looking one.
  */
-import { chromium } from '@playwright/test';
+import { launch } from './browser.mjs';
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -73,20 +73,7 @@ async function startServer() {
 (async () => {
   const url = URL_ARG || (await startServer());
 
-  const browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || undefined,
-    args: [
-      '--use-gl=angle',
-      '--use-angle=swiftshader',
-      '--enable-unsafe-swiftshader',
-      '--ignore-gpu-blocklist',
-      '--enable-gpu-rasterization',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--hide-scrollbars',
-      '--mute-audio',
-    ],
-  });
+  const browser = await launch();
   const page = await browser.newPage({
     viewport: { width: W, height: H },
     deviceScaleFactor: 1,
