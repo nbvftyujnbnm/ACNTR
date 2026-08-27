@@ -6,6 +6,9 @@ import { CSM } from 'three/examples/jsm/csm/CSM.js';
 /** Only one Lighting is ever live; the pipeline pokes it through this. */
 let _active = null;
 
+/** Module-scope scratch — the frame path must not allocate. */
+const _fillDir = new THREE.Vector3();
+
 /**
  * Register every lit material in `scene` with the active CSM.
  *
@@ -53,15 +56,32 @@ export class Lighting {
     this.sky = sky;
 
     this.params = {
-      sunIntensity: 3.15,
-      hemiIntensity: 0.55,
-      envIntensity: 1.0,
+      // A 17-degree sun delivers only sin(17) = 0.29 of its normal irradiance
+      // to horizontal ground, so the key has to be scaled UP hard to stay
+      // dominant there. At 3.15 the ground's sun term and its ambient term were
+      // within a factor of ~1.2 of each other, which is why the shadows the
+      // cascades were correctly rendering could not be seen at all in frame.
+      // Lit ground : shadowed ground is now roughly 3.5 : 1.
+      sunIntensity: 11.0,
+      hemiIntensity: 0.10,
+      // Every mech surface is metalness 1.0, so it is lit ENTIRELY by the
+      // environment — diffuse is identically zero. At 1.0 the PMREM was too
+      // dim to show a single panel seam.
+      envIntensity: 2.2,
+      // Cool bounce from the opposite side so the shadow side stays readable.
+      // AC6 shadows are deep but never crushed; this is what keeps them open.
+      fillIntensity: 0.62,
       cascades: 4,
       shadowMapSize: 2048,
-      shadowMaxFar: 620,
+      // The camera's near plane is 0.35 m, which drags every automatic split
+      // scheme into uselessness: 'practical' put the first cascade break at
+      // 79 m, so a 9 m mech got 2 cm... of a 180 m cascade. Explicit splits,
+      // tuned for a mech-scale subject with a city-scale background.
+      shadowMaxFar: 460,
+      splits: [22, 66, 170, 460],
       lightNear: 1,
-      lightFar: 3000,
-      lightMargin: 260,
+      lightFar: 2200,
+      lightMargin: 180,
       fade: true,
     };
 
@@ -82,6 +102,9 @@ export class Lighting {
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, this.params.hemiIntensity);
     this.hemi.name = 'ACNTR.SkyFill';
     scene.add(this.hemi);
+
+    /** @type {THREE.DirectionalLight|null} shadowless bounce/fill */
+    this.fill = null;
 
     scene.environmentIntensity = this.params.envIntensity;
 
@@ -133,7 +156,14 @@ export class Lighting {
       parent: this.scene,
       cascades: p.cascades,
       maxFar: p.shadowMaxFar,
-      mode: 'practical',
+      mode: 'custom',
+      customSplitsCallback: (amount, near, far, target) => {
+        target.length = 0;
+        for (let i = 0; i < amount; i++) {
+          const end = i === amount - 1 ? far : Math.min(p.splits[i] || far, far);
+          target.push(end / far);
+        }
+      },
       shadowMapSize: p.shadowMapSize,
       shadowBias: -0.00008,
       lightDirection: this._lightDir.copy(this._sunDir).multiplyScalar(-1).normalize(),
@@ -142,6 +172,9 @@ export class Lighting {
       lightFar: p.lightFar,
       lightMargin: p.lightMargin,
     });
+    // fade has to be set before updateFrustums: _updateShadowBounds reads it to
+    // expand each cascade by the blend margin, and _updateUniforms syncs the
+    // CSM_FADE define off it.
     this.csm.fade = p.fade;
     this.csm.updateFrustums();
 
@@ -151,7 +184,30 @@ export class Lighting {
       this.sunLights[i].name = `ACNTR.SunCascade${i}`;
     }
     this._tuneShadows();
+    this._ensureFill();
     this._applySunColor();
+  }
+
+  /**
+   * A single shadowless directional bounce, opposite and above the key.
+   *
+   * ORDER MATTERS: three indexes `directionalShadow[]` by a light's position in
+   * the full directional list, then truncates that list to the shadow count. A
+   * non-shadow directional light added *before* the cascades therefore shifts
+   * every cascade's shadow map by one and drops the last one entirely. It has
+   * to be added after the CSM lights, so this re-adds it whenever CSM is built.
+   */
+  _ensureFill() {
+    if (this.fill) {
+      this.scene.remove(this.fill);
+      this.scene.remove(this.fill.target);
+    } else {
+      this.fill = new THREE.DirectionalLight(0xffffff, this.params.fillIntensity);
+      this.fill.name = 'ACNTR.Bounce';
+      this.fill.castShadow = false;
+    }
+    this.scene.add(this.fill);
+    this.scene.add(this.fill.target);
   }
 
   _createFallbackSun() {
@@ -199,8 +255,13 @@ export class Lighting {
       const cam = l.shadow.camera;
       const texel = Math.max((cam.right - cam.left) / size, 1e-4);
 
-      l.shadow.normalBias = clamp(texel * 1.6, 0.015, 0.5);
-      l.shadow.bias = -(texel * 2.5) / depthRange - 0.00002;
+      // normalBias is a WORLD-SPACE offset along the surface normal. The old
+      // clamp allowed 0.5 m, which is thicker than most of the geometry casting
+      // the shadow — every contact shadow detached and small props stopped
+      // casting at all. One texel of slope compensation is the correct scale.
+      l.shadow.normalBias = clamp(texel * 1.05, 0.012, 0.14);
+      // Depth bias is in normalised ortho depth, so a metre costs 1/depthRange.
+      l.shadow.bias = -(texel * 1.4) / depthRange - 0.000015;
       l.shadow.camera.updateProjectionMatrix();
     }
   }
@@ -296,6 +357,25 @@ export class Lighting {
       if (col) l.color.copy(col);
       l.intensity = this.params.sunIntensity;
     }
+
+    const f = this.fill;
+    if (f) {
+      // Sky-coloured, from the anti-sun side and higher up: this is skylight
+      // bounced back into the shadow side, not a second key. Keep it cool so
+      // the shadow/key split also reads as a temperature split.
+      _fillDir.copy(this._sunDir).multiplyScalar(-1);
+      _fillDir.y = Math.abs(_fillDir.y) + 0.85;
+      _fillDir.normalize();
+      f.position.copy(this._focus).addScaledVector(_fillDir, 220);
+      f.target.position.copy(this._focus);
+      f.target.updateMatrixWorld();
+      if (this.sky?.skyFillColor) f.color.copy(this.sky.skyFillColor);
+      // The sky fill colour is a radiance, not a hue — renormalise so the knob
+      // controls intensity and the colour only carries the tint.
+      const m = Math.max(f.color.r, f.color.g, f.color.b, 1e-4);
+      f.color.multiplyScalar(1 / m);
+      f.intensity = this.params.fillIntensity;
+    }
   }
 
   /**
@@ -305,11 +385,11 @@ export class Lighting {
    *        shadow frustum (CSM re-centres itself off the camera frustum).
    */
   update(dt, elapsed, focusPos) {
+    if (focusPos) this._focus.copy(focusPos);
+
     this._ensureSun();
     this._syncFromSky();
     this._applySunColor();
-
-    if (focusPos) this._focus.copy(focusPos);
 
     if (this.csm) {
       this._lightDir.copy(this._sunDir).multiplyScalar(-1).normalize();
@@ -373,6 +453,12 @@ export class Lighting {
       this.csm = null;
     }
     this._destroyFallbackSun();
+    if (this.fill) {
+      this.scene.remove(this.fill.target);
+      this.scene.remove(this.fill);
+      this.fill.dispose?.();
+      this.fill = null;
+    }
     this.scene.remove(this.hemi);
     this.hemi.dispose?.();
     this.sun = null;

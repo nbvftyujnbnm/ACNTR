@@ -336,3 +336,31 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   particles fade against geometry, and currently has to probe `_depthTexture` /
   `rtScene.depthTexture` defensively. It re-wires on `engine:resize` since the pipeline
   recreates the texture there.
+- 2026-08-27 [mech/render] BUG FOUND IN `TextureForge.armorPanel`, worked around from the
+  caller side. When `emissiveDensity > 0` the generator composites the emissive canvas over
+  the finished albedo with `globalCompositeOperation = 'multiply'` at `globalAlpha = 0.85`.
+  That canvas is BLACK everywhere except the few light strips, so the intent ("paint the
+  light channels dark, unlit glass is near-black") instead multiplies **every albedo texel
+  by 0.15**. The mech was rendering at 15% of its authored albedo and its panel lines,
+  rivets, stencils and chipped paint were quantised into the bottom ~20 of 255 sRGB code
+  values, which is why they were invisible. `MechMaterials.bake()` now passes
+  `emissiveDensity: 0` and gets its emissive accents from modelled `glow` geometry instead.
+  **`hullPlating()` does not pass `emissiveDensity`, so it inherits the 0.12 default and the
+  level's plating is crushed the same way** — whoever owns TextureForge should clip the
+  multiply to the strips (draw them into an otherwise-white canvas, or composite only inside
+  the stroked paths). Second, smaller issue in the same function: `new THREE.Color(baseColor)`
+  decodes to LINEAR under ColorManagement but the result is written straight into a canvas
+  that is then tagged `SRGBColorSpace`, so every `baseColor`/`accentColor` argument lands
+  about one gamma darker than the hex implies; the hard-coded wear constants
+  (`bare`, scratch 0.55, rivet 0.42) are NOT colour-managed, so they are relative to that
+  darkened paint rather than to the hex you passed.
+- 2026-08-27 [mech] `MechMaterials` measures the baked albedo's mean linear luminance at
+  bake time (`armorMean`/`armorFineMean`/`mechMean`) and feeds it to the recolour shader's
+  `uTexMean`, replacing a hard-coded 0.26 that was off by a factor of ~30. Palette `base`
+  values are now the literal albedo of an average-lit patch of that paint, so tuning a
+  scheme no longer means guessing at an unknown texture gain.
+- 2026-08-27 [mech] Painted armour is now `metalness = 0` (dielectric); only the `steel`
+  mask slot is a conductor. The previous all-metal setup gave the armour no diffuse lobe at
+  all, which is what made a dark palette render as black plastic. Per-slot metalness still
+  resolves to a hard 0 or 1 except at the two physical transitions the contract allows:
+  chipped paint exposing bare alloy, and thick grime burying metal.

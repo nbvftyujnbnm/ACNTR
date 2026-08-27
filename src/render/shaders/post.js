@@ -275,8 +275,26 @@ void main() {
 `;
 
 /* ---------------------------------------------------------------------------
- * Scene composite — folds AO and SSR into the HDR frame and adds the
- * low-altitude dust layer that FogExp2 (height-independent) cannot express.
+ * Scene composite — folds AO and SSR into the HDR frame, then applies aerial
+ * perspective as THREE superposed participating media instead of one fog.
+ *
+ * One exponential fog can only produce a uniform wash: everything past a
+ * certain distance converges on the same colour and the frame turns to milk.
+ * Depth reads as depth when different media dominate at different ranges and
+ * altitudes, and when they are not the same COLOUR:
+ *
+ *   deck   — low, dense, warm ground dust. Analytic integral of an exponential
+ *            height profile (Wenzel), so it is exact and stable under motion.
+ *            Buries the far ground plane, leaves skylines standing.
+ *   band   — a thin smog stratum at a fixed altitude, gaussian in height,
+ *            Simpson-integrated over three samples. This is the visible haze
+ *            LINE that cuts across tall structures — the strongest single cue
+ *            that the air has layers.
+ *   aerial — thin, height-independent, cool and pale. Rayleigh-ish: it lifts
+ *            and DESATURATES the far distance while keeping local contrast.
+ *
+ * Colours are blended by optical depth, so what dominates changes with the
+ * sight line: warm near the ground, cool toward the ridges.
  * ------------------------------------------------------------------------- */
 export const COMPOSITE_FRAG = /* glsl */ `
 ${GLSL_COMMON}
@@ -291,14 +309,39 @@ uniform vec3  uCameraPos;
 uniform vec3  uSunDir;
 uniform vec3  uFogColor;
 uniform vec3  uFogSunColor;
+uniform vec3  uDeckColor;
+uniform vec3  uBandColor;
+uniform vec3  uAerialColor;
 uniform float uFogDensity;
 uniform float uFogHeight;
 uniform float uFogFalloff;
+uniform float uBandDensity;
+uniform float uBandHeight;
+uniform float uBandThickness;
+uniform float uAerialDensity;
 uniform float uFogStrength;
 uniform float uAOEnabled;
 uniform float uSSREnabled;
 uniform float uSSRIntensity;
 varying vec2 vUv;
+
+/**
+ * Optical depth through rho(y) = density * exp( -falloff * (y - baseY) ),
+ * integrated in closed form along the segment. The exponent is clamped because
+ * a camera far below the deck base would otherwise overflow to inf.
+ */
+float deckTau( float y0, float y1, float dist ) {
+  float a0 = clamp( - uFogFalloff * ( y0 - uFogHeight ), -9.0, 5.0 );
+  float dy = ( y1 - y0 ) * uFogFalloff;
+  float base = uFogDensity * exp( a0 ) * dist;
+  if ( abs( dy ) < 1e-3 ) return base;
+  return base * ( 1.0 - exp( - clamp( dy, -9.0, 9.0 ) ) ) / dy;
+}
+
+float bandRho( float y ) {
+  float t = ( y - uBandHeight ) / max( uBandThickness, 1e-3 );
+  return exp( - t * t );
+}
 
 void main() {
   vec3 color = texture2D( tScene, vUv ).rgb;
@@ -324,16 +367,37 @@ void main() {
     float dist = length( toP );
     vec3 dir = toP / max( dist, 1e-4 );
 
-    // Average of the endpoint densities — a cheap stand-in for integrating the
-    // exponential height profile along the ray, and stable enough to animate.
-    float hA = exp( - max( wp.y - uFogHeight, 0.0 ) * uFogFalloff );
-    float hB = exp( - max( uCameraPos.y - uFogHeight, 0.0 ) * uFogFalloff );
-    float dens = uFogDensity * 0.5 * ( hA + hB );
-    float f = 1.0 - exp( - dist * dens );
+    float tDeck = deckTau( uCameraPos.y, wp.y, dist );
 
+    float midY = ( uCameraPos.y + wp.y ) * 0.5;
+    float tBand = uBandDensity * dist *
+      ( bandRho( uCameraPos.y ) + 4.0 * bandRho( midY ) + bandRho( wp.y ) ) * ( 1.0 / 6.0 );
+
+    float tAir = uAerialDensity * dist;
+
+    float tau = ( tDeck + tBand + tAir ) * uFogStrength;
+
+    // Colour weighted by which medium the ray actually spent its length in.
+    vec3 inscat = ( uDeckColor * tDeck + uBandColor * tBand + uAerialColor * tAir )
+                / max( tDeck + tBand + tAir, 1e-5 );
+
+    // Forward-scattering lobe: haze glows toward the sun and ONLY there. A
+    // broad lobe tips the whole frame warm, and then near and far are the same
+    // hue again — which is the flat-wash failure this pass exists to avoid.
     float mu = max( dot( dir, uSunDir ), 0.0 );
-    vec3 inscat = mix( uFogColor, uFogSunColor, pow( mu, 5.0 ) * 0.85 );
-    color = mix( color, inscat, clamp( f * uFogStrength, 0.0, 0.96 ) );
+    float g = 0.82;
+    float g2 = g * g;
+    float den = max( 1.0 + g2 - 2.0 * g * mu, 1e-4 );
+    float hg = ( 1.0 - g2 ) / ( 12.566370614 * den * sqrt( den ) );
+    inscat = mix( inscat, uFogSunColor, clamp( hg * 0.55, 0.0, 0.85 ) );
+
+    // Dither the transmittance, not the colour: a 700 m gradient across 1080
+    // rows steps by well under one 8-bit code, and that is exactly where sky /
+    // fog banding comes from.
+    float dth = ( hash12( gl_FragCoord.xy ) - 0.5 ) * 0.006;
+    float f = clamp( 1.0 - exp( - tau ) + dth, 0.0, 0.985 );
+
+    color = mix( color, inscat, f );
   }
 
   gl_FragColor = vec4( color, 1.0 );

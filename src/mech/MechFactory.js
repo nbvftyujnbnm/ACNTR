@@ -22,10 +22,25 @@ import * as MP from './MechParts.js';
  */
 
 // Texel density is held constant across three different texture resolutions:
-// 768 * 0.9 == 512 * 1.35 == 384 * 1.8 == 691 texels per metre.
-const TILES_MAIN = 0.90;
-const TILES_FINE = 1.35;
-const TILES_MECH = 1.80;
+// 1024 * 0.3125 == 768 * 0.4167 == 512 * 0.625 == 320 texels per metre.
+//
+// The absolute figure is as important as the consistency. At the previous 691
+// texels/m one armour plate spanned 22 cm, so from any real camera distance a
+// screen pixel covered ten texels and every seam, rivet and stencil mipped away
+// into flat grey — the mech looked untextured even though the texture was there.
+// The tile size is set by the PLATE COUNT, not by the texel budget. The forge's
+// plate splitter caps its recursion at depth 6, so a tile only ever holds ~30-60
+// plates no matter what `panelScale` says; at a 5 m tile that made plates 0.6-1.7 m
+// and most armour faces contained no seam at all, which is why the mech read as
+// flat slabs with lit chamfers and nothing in between. A ~3.2 m tile puts plates
+// at 0.25-1.25 m so every face crosses one or more seams.
+//
+// A seam's WORLD width follows from the same number: the forge draws it at
+// (size/512)*2.2 texels, i.e. always 2.2/(512*tiles) metres — 1.4 cm here, with a
+// 2.5 cm bevel in the normal map behind it doing the work at distance.
+const TILES_MAIN = 0.3125;
+const TILES_FINE = 0.3125 * 1024 / 768;
+const TILES_MECH = 0.3125 * 2;
 
 const LOD_DIST = 46;
 const TARGET_HEIGHT = 9.0;
@@ -371,7 +386,7 @@ export class MechFactory {
 
     // --- head ------------------------------------------------------------
     const neck = new THREE.Object3D();
-    neck.position.fromArray(ca.neck || [0, 2.93, 0]);
+    neck.position.fromArray(ca.neck || [0, 2.72, 0.02]);
     torso.add(neck);
     const headYaw = new THREE.Object3D(); neck.add(headYaw);
     const head = new THREE.Object3D(); headYaw.add(head);
@@ -379,7 +394,7 @@ export class MechFactory {
 
     // --- backpack --------------------------------------------------------
     const backpack = new THREE.Object3D();
-    backpack.position.fromArray(ca.backpack || [0, 1.35, 0.62]);
+    backpack.position.fromArray(ca.backpack || [0, 1.38, 0.66]);
     torso.add(backpack);
     const ba = this._attach(backpack, `pack:${seed}`, MP.buildBackpack, { ...common }, mats, false);
 
@@ -389,7 +404,7 @@ export class MechFactory {
     for (const side of [-1, 1]) {
       const p = side < 0 ? 'l' : 'r';
       const shoulder = new THREE.Object3D();
-      shoulder.position.fromArray(side < 0 ? (ca.shoulderL || [-1.42, 1.72, 0]) : (ca.shoulderR || [1.42, 1.72, 0]));
+      shoulder.position.fromArray(side < 0 ? (ca.shoulderL || [-1.46, 1.72, 0]) : (ca.shoulderR || [1.46, 1.72, 0]));
       torso.add(shoulder);
       const arm = new THREE.Object3D(); shoulder.add(arm);
       this._attach(arm, `uarm:${seed}:${side}`, MP.buildUpperArm, { ...common, side }, mats, true);
@@ -475,7 +490,7 @@ export class MechFactory {
       hardpoints[`${p}Shoulder`] = hpSh;
     }
     const hpCore = new THREE.Object3D();
-    hpCore.position.fromArray(ca.coreMuzzle || [0, 1.30, -0.80]);
+    hpCore.position.fromArray(ca.coreMuzzle || [0, 1.30, -0.86]);
     torso.add(hpCore);
     hardpoints.core = hpCore;
     if (cannon) {

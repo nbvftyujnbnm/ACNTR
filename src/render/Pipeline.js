@@ -65,32 +65,49 @@ export class RenderPipeline {
     this.params = {
       maxPixelRatio: 1.5,     // internal buffers are independent of the canvas
       renderScale: 1.0,
-      exposure: 1.08,
-      sharpen: 0.26,
+      // Scene radiance went up ~3x when the key took over from the ambient, so
+      // the exposure comes down to keep sunlit concrete around 0.6 display and
+      // leave headroom for emissives to punch through the tonemap.
+      exposure: 0.66,
+      sharpen: 0.30,
       tonemap: 'agx',         // 'agx' | 'aces'
 
-      bloom: { threshold: 1.0, knee: 0.55, strength: 0.095, radius: 1.0, clamp: 60 },
-      ssao: { radius: 0.85, strength: 0.9, bias: 0.03, power: 1.5 },
+      // Threshold sits just above the brightest lit-metal highlight, so only
+      // emissives, the sun and specular glints bloom. Strength 0.095 was doing
+      // nothing at all; a mip chain this wide needs real weight behind it to
+      // produce the tight-core / wide-skirt shape.
+      bloom: { threshold: 1.4, knee: 0.45, strength: 0.60, radius: 1.15, clamp: 90 },
+      ssao: { radius: 1.1, strength: 0.95, bias: 0.03, power: 1.6 },
       ssr: { intensity: 0.85, maxDistance: 48, thickness: 1.2, roughness: 0.30, upBoost: 1.1 },
       motionBlur: { shutter: 0.6, maxPx: 24 },
-      dof: { restFocus: 70, farScale: 0.45, nearScale: 0.10, maxRadius: 6.5, hex: 0.75 },
+      // Far-field DOF was the single biggest contributor to "distant geometry
+      // dissolves into mush": at farScale 0.45 with a 70 m rest focus, every
+      // ridge and gantry past the midground was blurred by up to 6.5 px BEFORE
+      // the haze touched it. AC6's depth cue is aerial perspective, not defocus.
+      dof: { restFocus: 90, farScale: 0.10, nearScale: 0.10, maxRadius: 3.2, hex: 0.75 },
       taa: { blend: 0.925, clampGamma: 1.15, jitterScale: 1.0 },
-      chromatic: { amount: 1.5 },
-      vignette: { amount: 0.38, smoothness: 0.40 },
-      grain: { amount: 0.032 },
-      scanline: { amount: 0.012, count: 900 },
-      atmosphere: { strength: 0.85 },
+      chromatic: { amount: 0.85 },
+      vignette: { amount: 0.34, smoothness: 0.42 },
+      grain: { amount: 0.030 },
+      scanline: { amount: 0.010, count: 900 },
+      atmosphere: { strength: 1.0 },
 
+      // AgX with a steeper slope and a de-saturating look: AC6's palette is
+      // steel/ochre with saturation only in emissives, and its highlights roll
+      // off rather than clip. Shadows get a small cool lift so they stay open.
       grade: {
-        agxLook: new THREE.Vector4(1.05, -0.004, 1.08, 1.02),
-        lift: new THREE.Vector3(0.006, 0.008, 0.015),
+        agxLook: new THREE.Vector4(1.16, -0.010, 1.18, 0.82),
+        // A cool, open toe. AC6's shadows are deep but you can always read what
+        // is in them; a crushed-to-black shadow is the giveaway of a hobby
+        // renderer. Blue-weighted so shadow/key also splits by temperature.
+        lift: new THREE.Vector3(0.012, 0.018, 0.034),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
-        gain: new THREE.Vector3(1.025, 1.0, 0.965),
-        contrast: 1.06,
-        saturation: 1.03,
-        splitShadow: new THREE.Vector3(-0.012, 0.0, 0.024),
-        splitHighlight: new THREE.Vector3(0.022, 0.009, -0.014),
-        splitBalance: 0.45,
+        gain: new THREE.Vector3(1.035, 1.0, 0.950),
+        contrast: 1.12,
+        saturation: 0.94,
+        splitShadow: new THREE.Vector3(-0.026, -0.006, 0.044),
+        splitHighlight: new THREE.Vector3(0.032, 0.012, -0.024),
+        splitBalance: 0.42,
       },
     };
 
@@ -126,11 +143,18 @@ export class RenderPipeline {
     this._prevCamPos = new THREE.Vector3(1e9, 1e9, 1e9);
     this._camPos = new THREE.Vector3();
     this._sunDir = new THREE.Vector3(0.4, 0.35, 0.6).normalize();
-    this._fogColor = new THREE.Color(0.62, 0.50, 0.37);
-    this._fogSunColor = new THREE.Color(1.0, 0.60, 0.29);
-    this._fogDensity = 0.0030;
-    this._fogHeight = 34;
-    this._fogFalloff = 0.028;
+    this._fogColor = new THREE.Color(0.26, 0.23, 0.19);
+    this._fogSunColor = new THREE.Color(0.72, 0.37, 0.16);
+    this._deckColor = new THREE.Color(0.33, 0.27, 0.21);
+    this._bandColor = new THREE.Color(0.40, 0.32, 0.24);
+    this._aerialColor = new THREE.Color(0.16, 0.17, 0.19);
+    this._fogDensity = 0.0042;
+    this._fogHeight = 2;
+    this._fogFalloff = 0.060;
+    this._bandDensity = 0.0028;
+    this._bandHeight = 55;
+    this._bandThickness = 16;
+    this._aerialDensity = 0.00075;
     this._damageColor = new THREE.Color(0.85, 0.06, 0.05);
 
     this._jitter = new Float32Array(JITTER_COUNT * 2);
@@ -262,9 +286,16 @@ export class RenderPipeline {
       uSunDir: { value: this._sunDir },
       uFogColor: { value: this._fogColor },
       uFogSunColor: { value: this._fogSunColor },
+      uDeckColor: { value: this._deckColor },
+      uBandColor: { value: this._bandColor },
+      uAerialColor: { value: this._aerialColor },
       uFogDensity: { value: this._fogDensity },
       uFogHeight: { value: this._fogHeight },
       uFogFalloff: { value: this._fogFalloff },
+      uBandDensity: { value: this._bandDensity },
+      uBandHeight: { value: this._bandHeight },
+      uBandThickness: { value: this._bandThickness },
+      uAerialDensity: { value: this._aerialDensity },
       uFogStrength: { value: p.atmosphere.strength },
       uAOEnabled: { value: 1 },
       uSSREnabled: { value: 0 },
@@ -413,9 +444,16 @@ export class RenderPipeline {
       if (s.sunDirection) this._sunDir.copy(s.sunDirection);
       if (s.fogColor) this._fogColor.copy(s.fogColor);
       if (s.fogSunColor) this._fogSunColor.copy(s.fogSunColor);
+      if (s.deckColor) this._deckColor.copy(s.deckColor);
+      if (s.bandColor) this._bandColor.copy(s.bandColor);
+      if (s.aerialColor) this._aerialColor.copy(s.aerialColor);
       if (typeof s.fogDensity === 'number') this._fogDensity = s.fogDensity;
       if (typeof s.fogHeight === 'number') this._fogHeight = s.fogHeight;
       if (typeof s.fogFalloff === 'number') this._fogFalloff = s.fogFalloff;
+      if (typeof s.bandDensity === 'number') this._bandDensity = s.bandDensity;
+      if (typeof s.bandHeight === 'number') this._bandHeight = s.bandHeight;
+      if (typeof s.bandThickness === 'number') this._bandThickness = s.bandThickness;
+      if (typeof s.aerialDensity === 'number') this._aerialDensity = s.aerialDensity;
     }));
     this._offs.push(bus.on(EV.PLAYER_HIT, () => {
       this._dyn.hit = Math.min(1.2, this._dyn.hit + 0.6);
@@ -650,6 +688,16 @@ export class RenderPipeline {
     bus.emit('render:quality', level);
   }
 
+  /**
+   * The scene depth buffer, for anything that needs to fade against geometry
+   * (soft particles). Recreated on every resize, so re-read it on
+   * `engine:resize` rather than caching it once.
+   * @type {THREE.DepthTexture|null}
+   */
+  get depthTexture() {
+    return this._depthTexture;
+  }
+
   /** Drop the TAA history — call on camera cuts, teleports, respawns. */
   resetHistory() {
     this._taaReset = 1;
@@ -761,6 +809,10 @@ export class RenderPipeline {
     c.uFogDensity.value = this._fogDensity;
     c.uFogHeight.value = this._fogHeight;
     c.uFogFalloff.value = this._fogFalloff;
+    c.uBandDensity.value = this._bandDensity;
+    c.uBandHeight.value = this._bandHeight;
+    c.uBandThickness.value = this._bandThickness;
+    c.uAerialDensity.value = this._aerialDensity;
     c.uFogStrength.value = p.atmosphere.strength;
     c.uSSRIntensity.value = p.ssr.intensity;
   }

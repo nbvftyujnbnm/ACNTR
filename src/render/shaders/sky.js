@@ -49,7 +49,10 @@ uniform float uCloudOpacity;
 uniform float uCloudScale;
 uniform float uBandStrength;
 uniform float uDither;
-uniform float uEnvBake;       // 1.0 while baking the PMREM: tame the sun disc
+uniform float uEnvBake;       // 1.0 while baking the PMREM: widen the sun disc
+uniform float uEnvSunWiden;   // disc radius multiplier during the bake
+uniform float uEnvSunGain;    // disc peak multiplier during the bake
+uniform vec3  uGroundBake;    // lower-hemisphere bounce colour, IBL only
 
 varying vec3 vDir;
 
@@ -121,21 +124,30 @@ void main() {
   // Chord length is a stable small-angle stand-in for acos(mu) and doesn't
   // lose precision as mu -> 1.
   float ang = sqrt( max( 2.0 - 2.0 * mu, 0.0 ) );
-  float r = ang / max( uSunAngular, 1e-4 );
+  float radius = uSunAngular * mix( 1.0, uEnvSunWiden, uEnvBake );
+  float r = ang / max( radius, 1e-4 );
   float disc = 1.0 - smoothstep( 0.90, 1.02, r );
   float limb = pow( max( 1.0 - r * r * 0.92, 0.0 ), 0.45 );   // limb darkening
-  float discAtten = mix( 1.0, 0.06, uEnvBake );               // no fireflies in the IBL
+  float discAtten = mix( 1.0, uEnvSunGain, uEnvBake );
   sky += uSunDisc * disc * limb * uSunIntensity * discAtten * sunUp
        * ( 1.0 - clamp( cl, 0.0, 1.0 ) * 0.85 );
 
   // ---- below the horizon -------------------------------------------------
-  sky = mix( sky, uGround, 1.0 - smoothstep( -0.10, 0.0, up ) );
+  // In-game the terrain covers this entirely; it exists for the IBL, where it
+  // is the ONLY thing lighting a downward-facing chamfer. A near-black lower
+  // hemisphere is what makes a metalness-1.0 mech read as a silhouette.
+  vec3 below = mix( uGround, uGroundBake, uEnvBake );
+  sky = mix( sky, below, 1.0 - smoothstep( -0.10, 0.0, up ) );
 
   // ---- dither ------------------------------------------------------------
-  // Multiplicative so it scales with the gradient's own magnitude; kills the
-  // banding rings a smooth sky gradient otherwise shows after tonemapping.
+  // Two terms, because one cannot cover the range. AgX is roughly logarithmic:
+  // in the dark zenith an 8-bit display step is ~0.0015 linear, near the bright
+  // horizon it is ~0.007. A purely multiplicative dither under-dithers the
+  // zenith; a purely additive one over-grains the horizon. Use both.
   float dth = hash13( vec3( gl_FragCoord.xy, floor( uTime * 60.0 ) ) ) - 0.5;
-  sky *= 1.0 + dth * uDither;
+  float dth2 = hash13( vec3( gl_FragCoord.yx + 37.0, floor( uTime * 60.0 ) ) ) - 0.5;
+  sky *= 1.0 + dth * uDither * 2.4;
+  sky += dth2 * uDither * 0.30;
 
   gl_FragColor = vec4( max( sky, vec3( 0.0 ) ), 1.0 );
 
