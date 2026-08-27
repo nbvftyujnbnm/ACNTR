@@ -3,7 +3,8 @@ import { bus, EV } from '../core/EventBus.js';
 import { RenderPipeline } from '../render/Pipeline.js';
 import { Sky } from '../render/Sky.js';
 import { Lighting } from '../render/Lighting.js';
-import { Level } from '../world/Level.js';
+// TEMPORARY: real Level.js is being authored concurrently. Swap back when it lands.
+import { Level } from '../world/_LevelStub.js';
 import { Physics } from '../world/Physics.js';
 import { MechFactory } from '../mech/MechFactory.js';
 import { PlayerController } from '../player/PlayerController.js';

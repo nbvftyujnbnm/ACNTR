@@ -60,6 +60,10 @@ const _moveOut = {
   normal: new THREE.Vector3(0, 1, 0),
   hitWall: false,
 };
+// Physics.moveCapsule works in capsule-CENTRE space (it matches
+// Entity.collider.center), while the mech root is authored at the feet.
+// This scratch carries the converted position across that boundary.
+const _capsuleC = new THREE.Vector3();
 
 /** Nominal part stats used to normalise `loadout.derived` into multipliers. */
 const NOMINAL = { boostSpeed: 340, qbThrust: 400, enRecharge: 1650, enMax: 4000 };
@@ -720,8 +724,12 @@ export class PlayerController {
 
     let res = null;
     if (ph?.moveCapsule) {
-      res = ph.moveCapsule(pos, vel, radius, height, dt, _moveOut) || _moveOut;
-      if (res.position && res.position !== pos) pos.copy(res.position);
+      // feet -> centre for the solver, then back again.
+      const halfH = height * 0.5;
+      _capsuleC.set(pos.x, pos.y + halfH, pos.z);
+      res = ph.moveCapsule(_capsuleC, vel, radius, height, dt, _moveOut) || _moveOut;
+      if (res.position) pos.set(res.position.x, res.position.y - halfH, res.position.z);
+      else pos.set(_capsuleC.x, _capsuleC.y - halfH, _capsuleC.z);
       const n = res.normal;
       if (res.hitWall && n && typeof n.x === 'number') {
         const into = vel.x * n.x + vel.y * n.y + vel.z * n.z;

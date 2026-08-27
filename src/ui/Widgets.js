@@ -13,8 +13,8 @@
 
 import { clamp } from '../core/MathUtils.js';
 
-export const MONO = '"Share Tech Mono", ui-monospace, SFMono-Regular, monospace';
-export const SANS = '"Rajdhani", "Segoe UI", system-ui, sans-serif';
+export const MONO = '"Share Tech Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, SFMono-Regular, monospace';
+export const SANS = '"Rajdhani", "Liberation Sans Narrow", "DejaVu Sans Condensed", "Liberation Sans", "Segoe UI", system-ui, sans-serif';
 
 /** Canonical palette. Mirrors the CSS custom properties in index.html. */
 export const COL = {

@@ -38,6 +38,9 @@ const _rad = new THREE.Vector3();
 const _probeF = new THREE.Vector3();
 const _probeT = new THREE.Vector3();
 const _moveOut = { position: new THREE.Vector3(), grounded: false, normal: new THREE.Vector3(0, 1, 0), hitWall: false };
+// Physics.moveCapsule works in capsule-CENTRE space (matching
+// Entity.collider.center); mech roots are authored at the feet.
+const _capsuleC = new THREE.Vector3();
 
 /** Yaw such that the object's local -Z (mech forward) points along (dx,dz). */
 export function yawTo(dx, dz) {
@@ -1119,8 +1122,12 @@ export class Brain {
     const pos = agent.root.position;
 
     if (this.physics?.moveCapsule) {
-      const res = this.physics.moveCapsule(pos, v, r, h, dt, _moveOut) || _moveOut;
-      if (res.position) pos.copy(res.position);
+      // feet -> centre for the solver, then back again.
+      const halfH = h * 0.5;
+      _capsuleC.set(pos.x, pos.y + halfH, pos.z);
+      const res = this.physics.moveCapsule(_capsuleC, v, r, h, dt, _moveOut) || _moveOut;
+      const rp = res.position || _capsuleC;
+      pos.set(rp.x, rp.y - halfH, rp.z);
       bb.grounded = !!res.grounded;
       bb.hitWall = !!res.hitWall;
       if (bb.grounded && v.y < 0) v.y = 0;

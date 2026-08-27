@@ -7,6 +7,6 @@
   debug.placePlayer(0, 0, 0, 0.5);
   debug.poseMech({ grounded: true, aimYaw: 0.4, aimPitch: -0.1 });
   debug.step(2.0);
-  debug.setCamera({ x: 5.2, y: 7.6, z: 5.6 }, { x: 0.1, y: 6.4, z: 0 }, 30);
+  debug.setCamera({ x: 4.6, y: 7.0, z: 5.0 }, { x: 0.1, y: 5.9, z: 0 }, 30);
   debug.step(0.5);
 })();

@@ -325,3 +325,9 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   the thrust axis. **Space + a direction = horizontal thrust** (ground-boost hover skim near the
   ground, glide in the air). **Space + neutral = vertical thrust** (jump impulse on the press edge,
   then sustained climb). No hold timers or double taps, so every transition is same-frame.
+- 2026-08-26 [physics/player/ai] CLARIFICATION: `Physics.moveCapsule(pos, ...)` takes the
+  capsule **CENTRE** (consistent with `Entity.collider.center`), but mech roots are authored
+  with the origin **at the feet**. Callers must convert: `centre.y = root.y + height/2` going
+  in, `root.y = centre.y - height/2` coming out. The original contract left this unstated and
+  both PlayerController and Brain passed feet as centre, which floated every mech half its
+  height off the ground. Fixed at both call sites.

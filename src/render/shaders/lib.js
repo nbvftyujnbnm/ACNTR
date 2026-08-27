@@ -98,7 +98,7 @@ vec3 normalFromDepth( sampler2D depthTex, vec2 uv, vec2 texel, mat4 invProj ) {
   return l > 1e-9 ? n / l : vec3( 0.0, 0.0, 1.0 );
 }
 
-// Orthonormal basis around n, rotated by `ang` so the sample kernel decorrelates.
+// Orthonormal basis around n, rotated by 'ang' so the sample kernel decorrelates.
 mat3 basisFromNormal( vec3 n, float ang ) {
   vec3 rv = vec3( cos( ang ), sin( ang ), 0.0 );
   vec3 t = normalize( rv - n * dot( rv, n ) );
@@ -205,7 +205,7 @@ vec3 agxContrast( vec3 x ) {
          -  0.00232;
 }
 
-// `look` = vec4( slope, offset, power, saturation )
+// 'look' = vec4( slope, offset, power, saturation )
 vec3 agxDisplay( vec3 color, vec4 look ) {
   color = max( color, vec3( 0.0 ) );
   color = AGX_IN * color;

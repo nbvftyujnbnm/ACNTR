@@ -8,6 +8,7 @@
   debug.poseMech({ grounded: true, aimYaw: 0.25, aimPitch: -0.05, speed: 0 });
   // let the mech settle onto the ground and the rig springs relax
   debug.step(2.0);
-  debug.setCamera({ x: 13.5, y: 7.2, z: 15.5 }, { x: 0, y: 5.4, z: 0 }, 34);
+  // Mech is 9 m with its origin at the feet, so frame 0..9 m.
+  debug.setCamera({ x: 12.0, y: 6.4, z: 14.0 }, { x: 0, y: 4.7, z: 0 }, 34);
   debug.step(0.6);
 })();

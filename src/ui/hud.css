@@ -17,7 +17,7 @@
   --hair-soft: rgba(111, 242, 255, 0.1);
   position: absolute;
   inset: 0;
-  font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Rajdhani', 'Liberation Sans Narrow', 'DejaVu Sans Condensed', 'Liberation Sans', 'Segoe UI', system-ui, sans-serif;
   text-transform: uppercase;
   color: #cfe9f2;
   pointer-events: none;
@@ -38,7 +38,7 @@
 
 .acntr-hud .mono,
 .acntr-garage .mono {
-  font-family: 'Share Tech Mono', ui-monospace, monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   text-transform: none;
 }
@@ -114,7 +114,7 @@
   color: rgba(111, 242, 255, 0.72);
 }
 .hud-log .hdr .sig {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.14em;
   color: rgba(150, 190, 205, 0.34);
@@ -125,7 +125,7 @@
   gap: 2px;
 }
 .hud-log .ln {
-  font-family: 'Share Tech Mono', ui-monospace, monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace;
   font-size: clamp(9px, 0.86vmin, 11.5px);
   letter-spacing: 0.045em;
   line-height: 1.42;
@@ -180,7 +180,7 @@
   color: rgba(111, 242, 255, 0.78);
 }
 .hud-obj .sub {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.16em;
   color: rgba(150, 190, 205, 0.4);
@@ -205,7 +205,7 @@
   color: var(--d);
 }
 .hud-obj .row .v {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(11px, 1.05vmin, 14px);
   letter-spacing: 0.08em;
   color: #d8f4fb;
@@ -238,7 +238,7 @@
   padding-bottom: 3px;
 }
 .hud-status .ap-head .val {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(24px, 2.5vmin, 34px);
   line-height: 0.9;
   letter-spacing: 0.04em;
@@ -247,7 +247,7 @@
   text-shadow: 0 0 14px rgba(111, 242, 255, 0.4), -1px 0 0 rgba(255, 60, 80, 0.3), 1px 0 0 rgba(90, 220, 255, 0.32);
 }
 .hud-status .ap-head .max {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(10px, 0.95vmin, 13px);
   color: rgba(150, 190, 205, 0.5);
   padding-bottom: 3px;
@@ -341,7 +341,7 @@
   flex: none;
   width: 46px;
   text-align: right;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(9px, 0.82vmin, 11px);
   color: rgba(190, 226, 236, 0.72);
 }
@@ -431,7 +431,7 @@
   color: rgba(111, 242, 255, 0.72);
 }
 .hud-weapons .whdr .sig {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   color: rgba(150, 190, 205, 0.34);
   text-transform: none;
@@ -464,7 +464,7 @@
 }
 .wrow .st {
   grid-row: 1;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(8px, 0.72vmin, 10px);
   letter-spacing: 0.1em;
   color: rgba(111, 242, 255, 0.62);
@@ -474,7 +474,7 @@
 }
 .wrow .am {
   grid-row: 1;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(11px, 1.05vmin, 14px);
   color: #e6fbff;
   min-width: 4.4em;
@@ -566,7 +566,7 @@
   line-height: 1;
 }
 .hud-slam .s {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(9px, 0.9vmin, 12px);
   letter-spacing: 0.34em;
   color: rgba(255, 176, 56, 0.8);
@@ -816,7 +816,7 @@
   line-height: 1;
 }
 .hud-over .sub {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(9px, 0.9vmin, 12px);
   letter-spacing: 0.3em;
   color: var(--d);
@@ -832,7 +832,7 @@
   text-align: left;
 }
 .hud-over .keys dt {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 11px;
   color: var(--c);
   letter-spacing: 0.06em;
@@ -876,7 +876,7 @@
   color: var(--d);
 }
 .hud-over .results .v {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(15px, 1.7vmin, 22px);
   color: #e6fbff;
   margin-top: 3px;
@@ -887,7 +887,7 @@
   margin-top: 22px;
   display: inline-block;
   padding: 9px 30px 8px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Rajdhani', 'Liberation Sans Narrow', 'DejaVu Sans Condensed', 'Liberation Sans', sans-serif;
   font-size: clamp(11px, 1vmin, 14px);
   font-weight: 700;
   letter-spacing: 0.34em;
@@ -941,7 +941,7 @@
   color: #e6fbff;
 }
 .acntr-garage .g-head .s {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(8px, 0.8vmin, 11px);
   letter-spacing: 0.2em;
   color: var(--d);
@@ -951,7 +951,7 @@
   margin-left: auto;
   pointer-events: auto;
   cursor: pointer;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 11px;
   letter-spacing: 0.18em;
   color: var(--c);
@@ -984,7 +984,7 @@
 }
 .g-col .ch em {
   font-style: normal;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.12em;
   color: rgba(150, 190, 205, 0.4);
@@ -1041,7 +1041,7 @@
 .g-slot .w {
   grid-column: 2;
   grid-row: 1;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   color: rgba(150, 190, 205, 0.45);
 }
@@ -1092,7 +1092,7 @@
   position: absolute;
   left: 10px;
   top: 8px;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.2em;
   color: rgba(150, 190, 205, 0.5);
@@ -1103,7 +1103,7 @@
   right: 10px;
   bottom: 8px;
   text-align: right;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9.5px;
   line-height: 1.6;
   letter-spacing: 0.1em;
@@ -1172,7 +1172,7 @@
   text-overflow: ellipsis;
 }
 .g-item .t {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--rc, #9fb3bd);
@@ -1181,7 +1181,7 @@
 }
 .g-item .m {
   grid-column: 2 / -1;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 9px;
   letter-spacing: 0.06em;
   color: rgba(150, 190, 205, 0.42);
@@ -1216,7 +1216,7 @@
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 8px;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 10px;
   line-height: 1.5;
   text-transform: uppercase;
@@ -1267,7 +1267,7 @@
   color: var(--d);
 }
 .g-load .v {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(9px, 0.82vmin, 11px);
   color: #cdeef8;
   text-align: right;
@@ -1304,14 +1304,14 @@
   white-space: nowrap;
 }
 .g-derived .v {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: clamp(11px, 1.05vmin, 14px);
   color: #e0f6fd;
   letter-spacing: 0.02em;
 }
 .g-status {
   grid-column: 1 / -1;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'Share Tech Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   font-size: 10px;
   letter-spacing: 0.14em;
   color: var(--a);
