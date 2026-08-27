@@ -36,6 +36,7 @@ import { clamp, lerp, TAU } from '../core/MathUtils.js';
 const _mA = new THREE.Matrix4();
 const _mB = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _up = new THREE.Vector3(0, 1, 0);
 const _dir = new THREE.Vector3();
 const _nm3 = new THREE.Matrix3();
@@ -286,7 +287,8 @@ export class GeoBatch {
 
   /** Push a rigid transform: translate, then yaw, then pitch (radians). */
   pushTRS(x, y, z, ry = 0, rx = 0, rz = 0) {
-    _q.setFromEuler(new THREE.Euler(rx, ry, rz, 'YXZ'));
+    _e.set(rx, ry, rz, 'YXZ');
+    _q.setFromEuler(_e);
     _mA.makeRotationFromQuaternion(_q).setPosition(x, y, z);
     return this.push(_mA);
   }
@@ -305,14 +307,24 @@ export class GeoBatch {
    */
   add(key, geo, local, tint) {
     let g = this.groups.get(key);
-    if (!g) { g = { items: [], hasColor: false, verts: 0, indices: 0 }; this.groups.set(key, g); }
+    if (!g) { g = { items: [], verts: 0, indices: 0 }; this.groups.set(key, g); }
     const m = new THREE.Matrix4();
     if (local) m.multiplyMatrices(this.cur, local);
     else m.copy(this.cur);
     let c = null;
     if (tint !== undefined && tint !== null) {
-      c = tint.isColor ? tint : _col.set(tint).clone();
-      g.hasColor = true;
+      if (tint.isColor) {
+        c = tint.clone();
+      } else {
+        // Tints are authored as hex *multipliers*, not as colours: read the raw
+        // bytes (no sRGB decode) and renormalise so the brightest channel is ~1.
+        // Otherwise every "warm off-white" tint would silently darken its piece
+        // by 40% once colour management decoded it.
+        _col.setHex(tint, THREE.LinearSRGBColorSpace);
+        const mx = Math.max(_col.r, _col.g, _col.b) || 1;
+        _col.multiplyScalar((0.80 + 0.32 * mx) / mx);
+        c = _col.clone();
+      }
     }
     const vc = geo.attributes.position.count;
     const ic = geo.index ? geo.index.count : vc;
@@ -392,7 +404,10 @@ export class GeoBatch {
       const P = new Float32Array(g.verts * 3);
       const N = new Float32Array(g.verts * 3);
       const U = new Float32Array(g.verts * 2);
-      const C = g.hasColor ? new Uint8Array(g.verts * 3) : null;
+      // Always emitted: the family materials run `vertexColors`, and a missing
+      // colour attribute would leave the generic attribute at (0,0,0) — i.e. a
+      // silently black mesh.
+      const C = new Uint8Array(g.verts * 3);
       const I = g.verts > 65535 ? new Uint32Array(g.indices) : new Uint16Array(g.indices);
 
       let vo = 0, io = 0;
@@ -429,12 +444,10 @@ export class GeoBatch {
           U[(vo + i) * 2] = ua[i * 2];
           U[(vo + i) * 2 + 1] = ua[i * 2 + 1];
 
-          if (C) {
-            const c = it.c;
-            C[o3] = c ? clamp(c.r, 0, 1) * 255 : 255;
-            C[o3 + 1] = c ? clamp(c.g, 0, 1) * 255 : 255;
-            C[o3 + 2] = c ? clamp(c.b, 0, 1) * 255 : 255;
-          }
+          const c = it.c;
+          C[o3] = c ? clamp(c.r, 0, 1) * 255 : 255;
+          C[o3 + 1] = c ? clamp(c.g, 0, 1) * 255 : 255;
+          C[o3 + 2] = c ? clamp(c.b, 0, 1) * 255 : 255;
         }
 
         const gi = geo.index;
@@ -456,7 +469,7 @@ export class GeoBatch {
       // aoMap samples uv1 — same layout as uv, so the packed ORM's AO channel
       // lands in the seams it was authored for instead of being silently ignored.
       geo.setAttribute('uv1', new THREE.BufferAttribute(U, 2));
-      if (C) geo.setAttribute('color', new THREE.BufferAttribute(C, 3, true));
+      geo.setAttribute('color', new THREE.BufferAttribute(C, 3, true));
       geo.setIndex(new THREE.BufferAttribute(I, 1));
       geo.computeBoundingBox();
       geo.computeBoundingSphere();
