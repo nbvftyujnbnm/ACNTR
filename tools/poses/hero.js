@@ -4,7 +4,7 @@
   const { debug } = window.__ACNTR__;
   debug.setHudVisible(false);
   debug.clearEnemies();
-  debug.placePlayerAtSpawn(0, Math.PI * 0.18);
+  debug.placePlayerInSun(Math.PI * 0.18); // must stand in sun or there is no contact shadow
   debug.poseMech({ grounded: true, aimYaw: 0.25, aimPitch: -0.05, speed: 0 });
   // let the mech settle onto the ground and the rig springs relax
   debug.step(2.0);

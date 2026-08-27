@@ -129,6 +129,53 @@ export class Debug {
     );
   }
 
+  /**
+   * Hold keys down as if the player were pressing them.
+   *
+   * Setting `controller.state` flags directly does not work: `step()` runs the
+   * real controller, which re-derives its state from input every frame and
+   * overwrites them. The boost pose did exactly that and captured a mech
+   * standing still at 9 m/s on the ground. Driving the actual input instead
+   * produces authentic velocity, FOV kick, thruster plumes and motion blur.
+   *
+   * @param {string[]} codes KeyboardEvent.code values, e.g. ['KeyW','ControlLeft']
+   */
+  holdKeys(codes) {
+    const input = window.__ACNTR__?.input || this.game.input;
+    if (!input?.keys) return this;
+    for (const c of codes) input.keys.add(c);
+    return this;
+  }
+
+  releaseKeys(codes) {
+    const input = window.__ACNTR__?.input || this.game.input;
+    if (!input?.keys) return this;
+    if (codes) for (const c of codes) input.keys.delete(c);
+    else input.keys.clear();
+    return this;
+  }
+
+  /**
+   * Put the mech on a spawn point that is actually in direct sunlight.
+   *
+   * Review poses were framing the mech inside a 25 m building's 104 m cast
+   * shadow, so it had no contact shadow and no lit/shadow side — which made the
+   * lighting unreviewable through no fault of the lighting.
+   */
+  placePlayerInSun(yaw = 0) {
+    const sun = this.game.sky?.sunDirection;
+    const pts = this.game.level?.spawnPoints;
+    if (!sun || !pts?.length) return this.placePlayerAtSpawn(0, yaw);
+    const origin = new THREE.Vector3();
+    for (const sp of pts) {
+      const g = this.game.physics?.groundHeight?.(sp.x, sp.z);
+      origin.set(sp.x, (isFinite(g) ? g : sp.y) + 6, sp.z);
+      const hit = this.game.physics?.raycast?.(origin, sun, 400);
+      if (!hit || !hit.hit) return this.placePlayerOnGround(sp.x, sp.z, yaw);
+    }
+    return this.placePlayerAtSpawn(0, yaw);
+  }
+
   /** Force a rig pose without needing live input. */
   poseMech(state = {}) {
     const rig = this.game.player?.rig;

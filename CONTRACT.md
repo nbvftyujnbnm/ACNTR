@@ -726,3 +726,88 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   captures) while the solid pelvis 2 cm to its left reads 66 and the thigh face reads 10.
   Two separate passes have now "fixed" this in the material system. Sample at
   (752,462) for real pelvis armour; (772,505) is sky.
+- 2026-08-27 [render] SHADOW-SIDE FILL is now TWO lights, and the second one is
+  free on the terrain. `Lighting.params` gains `bounceIntensity` 2.1,
+  `bounceElevation` -0.11, `bounceAzimuth` 0.95 rad. The existing `fill` buys its
+  asymmetry by being nearly horizontal (0.13 of itself lands on the plain, 0.99 on
+  a vertical flank); taking the elevation NEGATIVE takes that to the limit — at
+  6.3 degrees BELOW the horizon, n.l on an up-facing surface is negative and
+  clamps to zero, so the plain receives EXACTLY NOTHING from this light however
+  hard it is pushed. What it reaches is what the sky fill cannot: the
+  downward-facing half of the mech, plus the flanks at 90 degrees to the sun,
+  which previously got cos(90) = 0 from BOTH the key and the fill and fell back on
+  the hemisphere's 0.22. Hence the 54-degree azimuth offset — it puts a second
+  lobe in the middle of that dead zone. Physically it is the sand bouncing the key
+  back up, so it takes the sky's `groundFillColor` (warm ochre) against the fill's
+  cool `skyFillColor`: warm from below, cool from the side, warm key.
+  Paid for with `Pipeline.params.grade.lift` 0.032 -> 0.022, and that trade is the
+  point. `lift` is ADDITIVE on the display value (disp = lift + (1-lift)*disp), so
+  every code value it adds to the floor is bought by compressing everything above
+  it — a contact shadow that darkens its surround 42% before the grade darkens it
+  less than 42% after. A light is MULTIPLICATIVE: the AO and cascade ratios
+  survive intact, so the contact shadow gets MORE readable as the shadows open.
+  Measured on the hero pose, against the same build with only the mech differing:
+    frame below display 8      9.91% -> 5.33%   (-46%)
+    mech feet region  mean/sd  22.4/17.5 -> 26.2/21.5   (level AND contrast up)
+    mech legs         mean/sd  37.1/29.2 -> 41.2/31.8
+    shadowed ground   mean/sd  19.2/9.8  -> 17.7/11.1   (DARKER, more range)
+    sunlit ground     mean     67.8      -> 65.4
+    hangar wall       mean     120.1     -> 119.7        (unmoved, as designed)
+    dark containers   median   display 7 -> 44           (black void -> read metal)
+  i.e. the subject opened up while the ground it stands on got darker, which is
+  the separation the flat-looking frames were missing. Vista frame mean is
+  unchanged at 111.8 — this is not an exposure lift.
+- 2026-08-27 [render] `Pipeline.params.chromatic.amount` 0.85 -> 0.34, plus the
+  unsharp mask in FINAL_FRAG rewritten as a LUMA high-pass applied as a RATIO.
+  The two go together because the second was amplifying the first. The CA offset
+  is `cc * r2 * 4.0 * amount * uTexel`, which at the frame corner (|cc| = 0.707,
+  r2 = 0.5) is 1.20 texels per channel — a 2.4 px red/blue split on every edge
+  out there. Binned |R-B| over pixels with a luminance gradient above 40, by
+  radius, on the vista pose: 16.7 at centre rising to 44.8 in the corner, which at
+  1:1 is a visible rainbow outline on every gantry rung and crate edge in the
+  lower right — the loudest remaining "cheap post filter" tell in the frame.
+  Worse, the sharpen's four neighbour taps are read at the UNSHIFTED uv while
+  `color` has already been split per channel, so the old per-channel form
+  differenced a shifted red against an unshifted red and added the mismatch back
+  at uSharpen strength: the sharpen pass was amplifying the fringe by a further
+  30% and ringing it. A luma high-pass cannot do that (one scalar cannot invent a
+  colour), and a ratio preserves hue exactly where an additive high-pass
+  desaturates sharpened highlights. Result: corner |R-B| 44.8 -> 32.2 while the
+  count of high-gradient pixels went UP at every radius, i.e. less false colour
+  and more real edge. `sharpen` keeps its meaning and did not need retuning.
+- 2026-08-27 [render] MEASURED DEAD END, do not repeat: splitting the SSAO kernel
+  into a short-range half (0.35 x radius, for a tight contact term) and a
+  long-range half is free multi-scale AO in theory and a straight regression on a
+  greebled subject. At 0.35 x 1.55 m = 54 cm every rivet, strake and panel step on
+  the mech occludes the near samples, so that half of the kernel saturates almost
+  everywhere on the hull and arrives as a CONSTANT DIMMER rather than a localised
+  contact darkening. Measured on the hero pose: mech torso lost 8.6% of its mean
+  AND 6.5% of its standard deviation, p95 161 -> 147 — darker and flatter at once,
+  the exact opposite of what a contact term is for. Also cost the world geometry
+  (containers 40.3/22.3 -> 39.7/22.0). Reverted; the comment in AO_FRAG records it.
+  A tight contact shadow on geometry this dense needs a separate depth-aware pass,
+  not a share of these twelve taps.
+- 2026-08-27 [render] CLOSED, with measurements, so these stop being reopened:
+  (a) SKY BANDING — there is none. Vertical scans down three columns of the vista
+  sky give maximum constant-value runs of 3, 3 and 7 px across spans of 86, 21 and
+  43 code values, with 189-242 direction changes per 280-row scan. The value
+  oscillates far faster than it drifts, which is a dithered gradient, not a band.
+  The two-term dither in `shaders/sky.js` (multiplicative for the dark zenith,
+  additive for the bright horizon) is doing its job.
+  (b) MIDGROUND HAZE AT 100-250 m — already resolved by the earlier fog retune and
+  should NOT be pushed further. Working the current numbers at the vista camera
+  (y=78): at 150 m the deck contributes ~0 (it e-folds over 8.7 m and the whole
+  sight line but the last metres is above it), the band 0.0008 x 150 x 0.30 = 0.036
+  tau, the aerial term 0.0024 x 150^3/(1000^2 + 150^2) = 0.008 tau — about 4.3%
+  total veiling. There is nothing left to remove at that range; what still reads
+  milky in that part of the frame is at 400-800 m, where veiling is supposed to be
+  strong. Frame-level: the 100-400 m band's standard deviation is 27.6 against
+  20.3 at iter03, and the near sand went 19.6 -> 47.7.
+  (c) THE BLOWN "SUN FLARE" ON THE RIGHT OF THE VISTA IS NOT THE SUN. Bucketing
+  every pixel at or above display 245 into 50 px cells puts 859 of 1148 of them
+  (75%) in a 200x60 px band at x 1250-1450, y 500-550 — the conveyor bridge deck,
+  not the sky. The sun disc is not even in frame in that pose; the bright sky
+  quadrant peaks at 235-240 and rolls off smoothly. The flare complaint and the
+  conveyor-specular defect logged earlier are THE SAME DEFECT, and it is still
+  owned by whoever owns that structure's material (raise its roughness past 0.35
+  or break it up along its length).
