@@ -122,13 +122,20 @@ void main() {
   //            the band above, so low strata glow and high strata silhouette.
   // Net across the skirt: 0 at the core, -26 at 12-18 degrees, -7 at 65.
   //
-  // Its own noise, coarser and 11x squashed rather than 26x, so the bars land
-  // ~5 degrees apart across the glow instead of the ~2 degrees the horizon
-  // field uses -- at 26x they read as a fine stripe pattern, not as weather.
-  vec3 hp = V * vec3( 1.9, 11.0, 1.9 );
+  // Its own noise, 16x squashed rather than 26x, so the bars land ~4 degrees
+  // apart across the glow instead of the ~2 degrees the horizon field uses --
+  // at 26x they read as a fine stripe pattern rather than as weather.
+  //
+  // The threshold pair is centred on the fbm's MEAN, not set above it. fbm3_3
+  // is three octaves of value noise: it is centred near 0.5 with a standard
+  // deviation around 0.14, so a smoothstep( 0.42, 0.76 ) only saturates about
+  // two sigma out and produced one faint smudge in the whole sun quadrant.
+  // Straddling the mean at +/- one sigma is what turns the same field into
+  // alternating bars and gaps, which is the thing that reads as structure.
+  vec3 hp = V * vec3( 3.0, 16.0, 3.0 );
   hp.y -= uTime * 0.011;
   hp.z += uTime * 0.008;
-  float hstrat = smoothstep( 0.42, 0.76, fbm3_3( hp ) );
+  float hstrat = smoothstep( 0.36, 0.66, fbm3_3( hp ) );
 
   float sunSide = pow( max( mu, 0.0 ), 1.4 );
   float sunCore = pow( max( mu, 0.0 ), 70.0 );
