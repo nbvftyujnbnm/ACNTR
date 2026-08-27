@@ -62,12 +62,14 @@ export class Lighting {
       // roughly doubled the display value of the mech's key-lit plating (median
       // 45 -> 98 out of 255) without touching its shadow side, which is the
       // whole point: brightness that arrives with a DIRECTION.
-      sunIntensity: 16.0,
+      sunIntensity: 17.5,
       // A small omnidirectional floor. Its job is only to keep a downward-facing
       // chamfer off pure black; anything more and it flattens the terrain, which
       // is a single enormous up-facing surface and therefore the thing that
-      // suffers most from undirected light.
-      hemiIntensity: 0.42,
+      // suffers most from undirected light. A hemisphere light is weighted
+      // toward the UP normal by construction, so every unit of it lands on the
+      // one surface in this game that must not receive undirected light.
+      hemiIntensity: 0.20,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
       // Amendments), so the environment feeds DIFFUSE on every surface in the
@@ -77,24 +79,33 @@ export class Lighting {
       // correctly rendering shadows produced almost no visible contrast. The
       // energy taken out here goes back in on the key and the bounce, both of
       // which have a direction and therefore SHAPE the surface.
-      envIntensity: 1.45,
+      envIntensity: 1.18,
       // Cool bounce from the opposite side so the shadow side stays readable.
       // AC6 shadows are deep but never crushed; this is what keeps them open.
-      // Carries much more of the ambient budget than it used to.
-      fillIntensity: 1.75,
-      // How far above the anti-sun horizontal the bounce sits, and the single
+      // Carries much more of the ambient budget than it used to — see
+      // `fillElevation` for why that does NOT flatten the ground.
+      fillIntensity: 2.75,
+      // The SINE of the bounce's elevation above the horizon, and the single
       // most useful number in this rig — because it is the only knob that
       // separates "shadow on the mech" from "shadow on the ground".
       //
       // At the original 0.85 the fill pointed almost straight down: it landed
       // on the terrain, which is one enormous up-facing surface and already the
       // brightest thing in frame, and missed the VERTICAL shadow-side plating
-      // entirely. At 0.10 it is nearly horizontal, so cos(theta) on the ground
-      // is 0.32 while cos(theta) on an unlit flank is 0.89. Measured on the two
-      // review poses, moving 0.34 -> 0.10 lifts the mech's dark side ~45% and
-      // DARKENS shadowed sand ~17% at the same time, which no exposure, gamma
-      // or contrast setting can do because those move the whole frame together.
-      fillElevation: 0.10,
+      // entirely.
+      //
+      // This used to be an OFFSET added to |sunDir.y|, which meant the fill's
+      // real elevation tracked the sun's: at a 13.5-degree sun, an "elevation"
+      // of 0.10 actually put the bounce at 18.7 degrees — HIGHER than the key,
+      // and landing 0.32 of itself on the sand. Read as an absolute sine it
+      // does what it says: 0.13 is 7.5 degrees, so cos(theta) on horizontal
+      // ground is 0.13 while cos(theta) on an unlit vertical flank is 0.99.
+      // That ratio is 7.6:1 against the old 2.7:1, which is what lets the fill
+      // be strong enough to open the mech's dark side (+62% measured on the
+      // hero pose) while simultaneously taking 37% of the undirected light OFF
+      // the sand. No exposure, gamma or contrast setting can do that, because
+      // those move the whole frame together.
+      fillElevation: 0.13,
       cascades: 4,
       shadowMapSize: 2048,
       // The camera's near plane is 0.35 m, which drags every automatic split
@@ -391,8 +402,11 @@ export class Lighting {
       // Sky-coloured, from the anti-sun side and higher up: this is skylight
       // bounced back into the shadow side, not a second key. Keep it cool so
       // the shadow/key split also reads as a temperature split.
+      // Absolute elevation, not an offset from the sun's: the whole point of
+      // this light is that it is NEARLY HORIZONTAL regardless of where the key
+      // is, so its cosine falls off a flat plain and holds on a vertical flank.
       _fillDir.copy(this._sunDir).multiplyScalar(-1);
-      _fillDir.y = Math.abs(_fillDir.y) + this.params.fillElevation;
+      _fillDir.y = this.params.fillElevation;
       _fillDir.normalize();
       f.position.copy(this._focus).addScaledVector(_fillDir, 220);
       f.target.position.copy(this._focus);

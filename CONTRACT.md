@@ -420,3 +420,14 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   near-neutral paint has nothing to hold on to under a warm key, so the lit side of every
   part took the colour of the sun and read as unpainted plastic. Keep any future palette
   edit above ~0.18 saturation for the same reason.
+- 2026-08-27 [mech] The detail layer has a RELIEF half as well as an albedo half: the
+  armour shader appends to `<normal_fragment_maps>` and adds a second normal-map tap at the
+  same `DETAIL_SCALE`, tilting the resolved normal by `DETAIL_NORMAL` (0.55) in tangent
+  space. It is fenced on `USE_NORMALMAP_TANGENTSPACE`, the same define under which three's
+  `normal_fragment_begin` declares `tbn` — so `tbn` and `vNormalMapUv` are guaranteed in
+  scope and the patch cannot compile-break another material variant. Reason, measured:
+  raising the albedo detail contrast from 0.48 to 0.58 moved the sunlit forearm by less
+  than one code value (130,118,108 both times), because the grade's shoulder compresses a
+  +/-25% albedo swing to +/-10% display. Relief moves N.L instead, which buys a far larger
+  swing at high light levels. Anything adding a scale of detail to the mech should add it
+  to BOTH halves — an albedo-only layer reads as a decal and dies in the highlights.

@@ -141,7 +141,9 @@ const SPECKLE_LOD = 2.6;
  * of it everywhere instead of one.
  */
 const DETAIL_SCALE = 3.11;
-const DETAIL_MIX = 0.48;
+const DETAIL_MIX = 0.58;
+/** Tangent-space tilt the detail layer adds on top of the macro normal. */
+const DETAIL_NORMAL = 0.55;
 
 // ---------------------------------------------------------------------------
 // Shader injection
@@ -166,6 +168,7 @@ uniform float uSpeckle;
 uniform float uSpeckleLod;
 uniform float uDetail;
 uniform float uDetailScale;
+uniform float uDetailNormal;
 // Written by the recolour chunk, read again by roughness/metalness further down
 // the chunk order: 1 where the paint has been abraded off to bare metal.
 float acChipG = 0.0;
@@ -226,14 +229,14 @@ const RECOLOR = /* glsl */`
   //
   // Only the detail tap's LUMINANCE RATIO is used, so it MODULATES the macro
   // layer rather than replacing it, and the ratio is clamped asymmetrically:
-  // it may darken to 0.34 (sub-panel seams, grime in recesses, which is what
+  // it may darken to 0.31 (sub-panel seams, grime in recesses, which is what
   // sub-panel detail actually looks like) but brighten only to 1.38, which is
   // below the chip gate. That asymmetry is also what stops the detail tap — the
   // one sample the speckle guard above does not cover — from reintroducing
   // bright speckle at a new frequency.
   vec3 acDet = texture2D( map, vMapUv * uDetailScale ).rgb;
   float acDetLum = max( dot( acDet, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
-  acDetail = clamp( acDetLum / uTexMean, 0.34, 1.38 );
+  acDetail = clamp( acDetLum / uTexMean, 0.31, 1.38 );
   acTex *= mix( 1.0, acDetail, uDetail );
 #endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
@@ -305,6 +308,30 @@ const DAMAGE_GLOW = /* glsl */`
 totalEmissiveRadiance += uDamageGlow * ( uDamage * uDamage ) * smoothstep( 0.28, 0.95, acSeam ) * 3.0;
 `;
 
+// Detail RELIEF, the other half of the detail layer.
+//
+// The albedo half above rescues a small part's texture content, and on a
+// midtone surface that is enough. On a surface taking the key light head-on it
+// is not: measured on the sunlit forearm, doubling the albedo detail contrast
+// changed the rendered pixels by less than one code value, because the grade's
+// shoulder compresses a +/-25% albedo swing into +/-10% display. Relief does not
+// have that problem — it moves N dot L, and at high light levels a small tilt
+// buys a far larger display swing than a large albedo change does. Without this
+// the sunlit arm and pauldron stay flat no matter what the albedo layer says.
+//
+// Appended AFTER three's own chunk and fenced on the same define, so the macro
+// normal has already been resolved and `tbn` / `vNormalMapUv` are guaranteed in
+// scope (normal_fragment_begin declares tbn under exactly this condition). The
+// detail tap is minified 3.11x, so its one-texel micro noise is mipped away
+// before it can alias — which is why this does not undo the speckle work.
+const NORMAL_DETAIL = /* glsl */`
+#include <normal_fragment_maps>
+#ifdef USE_NORMALMAP_TANGENTSPACE
+  vec3 acDetN = texture2D( normalMap, vNormalMapUv * uDetailScale ).xyz * 2.0 - 1.0;
+  normal = normalize( normal + tbn * vec3( acDetN.xy * uDetailNormal, 0.0 ) );
+#endif
+`;
+
 function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55, speckle = SPECKLE_CUT) {
   const c = (h) => new THREE.Color(h).convertSRGBToLinear();
   return {
@@ -317,6 +344,7 @@ function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55, sp
     uSpeckleLod: { value: SPECKLE_LOD },
     uDetail: { value: DETAIL_MIX },
     uDetailScale: { value: DETAIL_SCALE },
+    uDetailNormal: { value: DETAIL_NORMAL },
     uDamage: { value: 0 },
     uSoot: { value: c(palette.soot) },
     uDamageGlow: { value: c(palette.glowHot).multiplyScalar(1.4) },
@@ -336,6 +364,7 @@ function patch(mat, uniforms, cacheKey) {
       .replace('#include <map_fragment>', RECOLOR)
       .replace('#include <roughnessmap_fragment>', ROUGH)
       .replace('#include <metalnessmap_fragment>', METAL)
+      .replace('#include <normal_fragment_maps>', NORMAL_DETAIL)
       .replace('#include <emissivemap_fragment>', DAMAGE_GLOW);
   };
   // Constant key: every mech shares one compiled program regardless of palette.

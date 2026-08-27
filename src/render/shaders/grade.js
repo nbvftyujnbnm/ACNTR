@@ -158,6 +158,8 @@ uniform float uTime;
 
 uniform float uExposure;
 uniform float uBloomStrength;
+uniform vec3  uBloomTint;
+uniform float uBloomCore;
 uniform float uChromatic;
 uniform float uSharpen;
 
@@ -206,7 +208,16 @@ void main() {
   }
 
   // ---- bloom -------------------------------------------------------------
-  color += texture2D( tBloom, uv ).rgb * uBloomStrength;
+  //
+  // Chromatic skirt. A neutral bloom is a lens artefact; the glow around a low
+  // sun in a dust column is atmospheric, and long-path scattering is red. So
+  // the CORE keeps the source colour and the SKIRT is pulled amber, with the
+  // crossover set by how hot the bloom sample is rather than by any radius —
+  // which means one uniform does it for the sun, a thruster plume and a muzzle
+  // flash alike, and it costs one mix.
+  vec3 bl = texture2D( tBloom, uv ).rgb * uBloomStrength;
+  float bcore = clamp( maxc( bl ) * uBloomCore, 0.0, 1.0 );
+  color += bl * mix( uBloomTint, vec3( 1.0 ), bcore * bcore );
 
   // ---- exposure + tonemap ------------------------------------------------
   color *= uExposure;

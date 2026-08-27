@@ -68,7 +68,7 @@ export class RenderPipeline {
       // Scene radiance went up ~3x when the key took over from the ambient, so
       // the exposure comes down to keep sunlit concrete around 0.6 display and
       // leave headroom for emissives to punch through the tonemap.
-      exposure: 0.638,
+      exposure: 0.662,
       sharpen: 0.30,
       tonemap: 'agx',         // 'agx' | 'aces'
 
@@ -88,11 +88,33 @@ export class RenderPipeline {
       // at taper^k. Equal weights make every blur radius equally bright, which
       // is exactly the uniform veiling glow REVIEW calls an automatic failure;
       // a geometric taper is the tight-hot-core / wide-soft-skirt shape.
-      bloom: { threshold: 1.25, knee: 0.60, strength: 1.00, radius: 1.05, clamp: 6, mipTaper: 0.80 },
+      //
+      // `radius` is the tent kernel width on every upsample step. At 1.05 the
+      // top mips (25x14 at 1600x900) were being magnified 64x by a 3x3 tent,
+      // which is not enough taps to hide the source texels — the halo around
+      // the vista's conveyor glint had visible blocky steps in it. 1.35 costs
+      // nothing and resolves them.
+      //
+      // `tint`/`tintCore` are the flare's structure, not its energy: see
+      // FINAL_FRAG. A low sun seen down a dust column does not scatter
+      // neutrally, so the wide skirt is tinted amber while the core stays
+      // white. That difference is most of what separates "atmospheric glow"
+      // from "someone smeared white paint on the lens".
+      bloom: {
+        threshold: 1.45, knee: 0.60, strength: 1.00, radius: 1.35,
+        clamp: 4, mipTaper: 0.80,
+        tint: new THREE.Vector3(1.06, 0.72, 0.42), tintCore: 2.2,
+      },
       // Radius up from 1.1 m: the subject is a 9 m mech on open sand, and a 1 m
       // kernel only ever found the geometry's own creases, never the gap between
       // a foot and the ground.
-      ssao: { radius: 1.55, strength: 1.0, bias: 0.03, power: 2.0 },
+      //
+      // `power` back off 2.0: squaring the visibility term stacks a second,
+      // uncorrelated darkening on top of the cascade shadow, and on the hero
+      // pose the apron under the mech was landing at display value 11/255 —
+      // a contact shadow you cannot see BECAUSE everything around it is also
+      // black. AO's job is to find the crease, not to set the black point.
+      ssao: { radius: 1.55, strength: 1.0, bias: 0.03, power: 1.7 },
       ssr: { intensity: 0.85, maxDistance: 48, thickness: 1.2, roughness: 0.30, upBoost: 1.1 },
       motionBlur: { shutter: 0.6, maxPx: 24 },
       // Far-field DOF was the single biggest contributor to "distant geometry
@@ -102,7 +124,10 @@ export class RenderPipeline {
       dof: { restFocus: 90, farScale: 0.10, nearScale: 0.10, maxRadius: 3.2, hex: 0.75 },
       taa: { blend: 0.925, clampGamma: 1.15, jitterScale: 1.0 },
       chromatic: { amount: 0.85 },
-      vignette: { amount: 0.34, smoothness: 0.42 },
+      // Down from 0.34. Both review framings put GROUND in the bottom corners,
+      // so the vignette was spending most of its darkening on the one part of
+      // the frame that was already the hardest to read.
+      vignette: { amount: 0.26, smoothness: 0.42 },
       grain: { amount: 0.030 },
       scanline: { amount: 0.010, count: 900 },
       atmosphere: { strength: 1.0 },
@@ -125,17 +150,17 @@ export class RenderPipeline {
         // barely at all: dropping it from 1.14 to 1.04 raises a 0.07 shadow by
         // 40% and a 0.80 highlight by 2.4%. Contrast and exposure cannot do
         // that — they move the whole curve.
-        agxLook: new THREE.Vector4(1.13, 0.0, 1.04, 0.88),
+        agxLook: new THREE.Vector4(1.13, 0.0, 1.00, 0.88),
         // The frame's black point, applied last in the grade (see FINAL_FRAG).
         // AC6's shadows are deep but you can always read what is in them; a
         // crushed-to-black shadow is the giveaway of a hobby renderer.
         // Blue-weighted so the darkest part of the frame is also its coolest.
-        lift: new THREE.Vector3(0.020, 0.026, 0.042),
+        lift: new THREE.Vector3(0.026, 0.030, 0.046),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
         gain: new THREE.Vector3(1.035, 1.0, 0.950),
         // Reads as before (1.0 = neutral) but drives an S-curve now, so it can
         // be pushed for real tonal range in the sand without clipping the toe.
-        contrast: 1.20,
+        contrast: 1.24,
         saturation: 0.94,
         splitShadow: new THREE.Vector3(-0.026, -0.006, 0.044),
         splitHighlight: new THREE.Vector3(0.032, 0.012, -0.024),
@@ -180,14 +205,17 @@ export class RenderPipeline {
     this._deckColor = new THREE.Color(0.33, 0.27, 0.21);
     this._bandColor = new THREE.Color(0.40, 0.32, 0.24);
     this._aerialColor = new THREE.Color(0.16, 0.17, 0.19);
-    this._fogDensity = 0.0042;
+    // Fallbacks only — Sky pushes the real atmosphere over `sky:params`. Kept
+    // in step with Sky.fogParams so a frame rendered before the first emit does
+    // not visibly re-grade when it arrives.
+    this._fogDensity = 0.0029;
     this._fogHeight = 2;
-    this._fogFalloff = 0.060;
-    this._bandDensity = 0.0028;
+    this._fogFalloff = 0.115;
+    this._bandDensity = 0.0013;
     this._bandHeight = 55;
     this._bandThickness = 16;
-    this._aerialDensity = 0.0012;
-    this._aerialRamp = 250;
+    this._aerialDensity = 0.0016;
+    this._aerialRamp = 520;
     this._damageColor = new THREE.Color(0.85, 0.06, 0.05);
 
     this._jitter = new Float32Array(JITTER_COUNT * 2);
@@ -428,6 +456,8 @@ export class RenderPipeline {
       uTime: { value: 0 },
       uExposure: { value: p.exposure },
       uBloomStrength: { value: p.bloom.strength },
+      uBloomTint: { value: p.bloom.tint },
+      uBloomCore: { value: p.bloom.tintCore },
       uChromatic: { value: p.chromatic.amount },
       uSharpen: { value: p.sharpen },
       uTonemapMode: { value: 0 },
@@ -805,6 +835,7 @@ export class RenderPipeline {
     f.uScanCount.value = p.scanline.count;
     f.uSharpen.value = p.sharpen;
     f.uBloomStrength.value = p.bloom.strength;
+    f.uBloomCore.value = p.bloom.tintCore;
     f.uTonemapMode.value = p.tonemap === 'aces' ? 1 : 0;
     f.uTime.value = t;
     f.uContrast.value = p.grade.contrast;
