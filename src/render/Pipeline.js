@@ -102,7 +102,7 @@ export class RenderPipeline {
       // from "someone smeared white paint on the lens".
       bloom: {
         threshold: 1.45, knee: 0.60, strength: 1.00, radius: 1.35,
-        clamp: 4, mipTaper: 0.80,
+        clamp: 4, mipTaper: 0.74,
         tint: new THREE.Vector3(1.06, 0.72, 0.42), tintCore: 2.2,
       },
       // Radius up from 1.1 m: the subject is a 9 m mech on open sand, and a 1 m
@@ -143,6 +143,16 @@ export class RenderPipeline {
         // buys back a stop and a half of highlight shoulder; the mid-tone punch
         // it costs comes back from `contrast`, which pivots at 0.5 and does not
         // touch the clip point.
+        //
+        // MEASURED DEAD END, so nobody repeats it: slope and exposure cannot be
+        // traded against each other to buy shoulder. The clip point in scene
+        // terms is sigmoid(L * exposure) = 1 / slope, and the sigmoid maps 16.5
+        // EV onto [0,1] — so recovering the 5% of mid-tone that dropping slope
+        // to 1.07 costs takes +0.4 EV of exposure, which moves the clip point
+        // back down by exactly the amount the slope change raised it. Tried it
+        // (l21): the blown area shrank only as much as the whole frame dimmed,
+        // and the mech's shadow side, the sand and the midground all lost 5%
+        // with it. A blown highlight is fixed at the SOURCE or not at all.
         //
         // `power` is the shadow-targeted knob in this vec4 and the one that
         // decides whether the mech's unlit flank is readable. Because it is a

@@ -111,7 +111,15 @@ void main() {
   float cn = fbm3_5( cp );
   float cover = clamp( uCloudCover, 0.0, 1.0 );
   float cl = smoothstep( 1.0 - cover - 0.16, 1.0 - cover + 0.18, cn );
-  cl *= smoothstep( 0.0, 0.20, up );              // deck converges into the haze
+  // Keep the deck OUT of the last 25 degrees above the horizon. The projection
+  // above divides by (0.85 * up + 0.22), so as a sight line flattens, cp.x and
+  // cp.z run away while cp.y barely moves — 8:1 anisotropy by up = 0.25, and
+  // along the screen's centre azimuth (where V.x is near zero) cp does not
+  // change with up at all. The deck therefore drew as parallel VERTICAL
+  // curtains in any near-horizontal framing, which is what the hero pose is.
+  // The stratified dust bands above are the correct structure down there:
+  // they are squashed 26x in y, so they read as horizontal strata.
+  cl *= smoothstep( 0.03, 0.40, up );             // deck converges into the haze
   cl *= uCloudOpacity;
 
   vec3 cloudCol = mix( uCloudDark, uCloudLit, smoothstep( 0.34, 0.92, cn ) );

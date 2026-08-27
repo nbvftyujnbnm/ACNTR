@@ -230,10 +230,12 @@ const RECOLOR = /* glsl */`
   // Only the detail tap's LUMINANCE RATIO is used, so it MODULATES the macro
   // layer rather than replacing it, and the ratio is clamped asymmetrically:
   // it may darken to 0.31 (sub-panel seams, grime in recesses, which is what
-  // sub-panel detail actually looks like) but brighten only to 1.38, which is
-  // below the chip gate. That asymmetry is also what stops the detail tap — the
-  // one sample the speckle guard above does not cover — from reintroducing
-  // bright speckle at a new frequency.
+  // sub-panel detail actually looks like) but brighten only to 1.38. That
+  // asymmetry is also what stops the detail tap — the one sample the speckle
+  // guard above does not cover — from reintroducing bright speckle at a new
+  // frequency. It does NOT keep the detail layer clear of the chip gate: 1.38 is
+  // a MULTIPLIER on acRatio, not a value compared against the gate, so the gate
+  // reads acMacro instead (see below).
   vec3 acDet = texture2D( map, vMapUv * uDetailScale ).rgb;
   float acDetLum = max( dot( acDet, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   acDetail = clamp( acDetLum / uTexMean, 0.31, 1.38 );
@@ -241,6 +243,9 @@ const RECOLOR = /* glsl */`
 #endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   vec3 acSlot = uSlots[0] * vMask.x + uSlots[1] * vMask.y + uSlots[2] * vMask.z + uSlots[3] * vMask.w;
+  // MACRO ratio: the same measurement with the detail layer's modulation taken
+  // back out. Only the chip gate below reads this — see the note there.
+  float acMacro = clamp( acLum / ( uTexMean * mix( 1.0, acDetail, uDetail ) ), 0.22, 2.6 );
   // Ratio is soft-limited: without it a bright chip multiplies a light palette
   // straight past 1.0 and blows out, and a dark seam crushes to absolute black.
   // The floor is 0.22 rather than 0.16 because 0.16 * uSeamDark took the deepest
@@ -256,7 +261,18 @@ const RECOLOR = /* glsl */`
   // anywhere that read as an actual chip. 1.44 -> 1.80 puts the onset at the
   // 97.6th percentile and full strength at the 99.9th: ~2.4% of the map takes
   // any alloy at all, and the texels that do are the real chip cells.
-  acChipG = smoothstep( 1.44, 1.80, acRatio );
+  //
+  // Gated on the MACRO ratio, deliberately, not on the detail-modulated one.
+  // The detail layer multiplies acRatio by up to 1.22, and a multiplier does not
+  // respect a threshold: an ordinary bright-but-clean plate at macro 1.40 lands
+  // at 1.71 and comes out as polished alloy. Measured against the real baked
+  // map, feeding acRatio here took the gate from 2.0% of texels tinted at all
+  // and 0.40% past half strength to 5.9% and 2.28% — nearly 6x the fully
+  // alloyed area, which is why whole small parts (the pelvis skirt worst of all)
+  // drained to neutral grey under a brighter environment. Reading the macro
+  // ratio also means DETAIL_MIX and DETAIL_SCALE can be retuned freely without
+  // silently repainting the mech in bare metal.
+  acChipG = smoothstep( 1.44, 1.80, acMacro );
   // Chipped paint reveals bare alloy: hue drops out, value tracks the texture.
   diffuseColor.rgb = mix( acTint, vec3( 0.26, 0.265, 0.275 ) * min( acRatio, 1.5 ), acChipG * 0.70 );
   // Panel seams are the single most important read on a mech. The baked map

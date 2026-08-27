@@ -431,3 +431,78 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   +/-25% albedo swing to +/-10% display. Relief moves N.L instead, which buys a far larger
   swing at high light levels. Anything adding a scale of detail to the mech should add it
   to BOTH halves — an albedo-only layer reads as a decal and dies in the highlights.
+- 2026-08-27 [mech] The two shoulder mounts now carry ORDNANCE, and deliberately not the
+  same ordnance: `MP.buildMissileRack` on the left, `MP.buildShoulderCannon` on the right
+  (crude MTs get the rack only). Both mounts were previously empty anchors, which made the
+  frame perfectly bilaterally symmetric — the loudest "procedural robot, not an Armored
+  Core" tell in a silhouette. `hardpoints.lShoulder` / `rShoulder` now sit on the
+  ordnance's own muzzle anchor rather than a bare point on the deck, so shoulder muzzle
+  VFX leaves the cell mouths or the barrel; an empty mount still falls back to the old
+  [0, 0.22, -0.42]. Both parts are attached with `mergeSolid`, so a shoulder weapon costs 2
+  draw calls, not 3. Mech total is ~58k triangles against the ~90k budget.
+- 2026-08-27 [render] NOT A MECH BUG — the dark smeared streaks on the chest are POST.
+  Measured both ways. (a) Per-triangle UV stretch across every part of the frame: worst
+  case 2.5x, and under 1% of surface area exceeds 1.6x, so `applyBoxUV` is not smearing
+  anything. (b) Same pose, same build, one frame with all post on and one with
+  `pipeline.q.taa/motionBlur/dof = false`: with them off the exact region is razor sharp
+  down to a legible "ELCANO" stencil and individual vent slats; with them on the stencil is
+  gone and the plate seams are mush. The review poses teleport the camera
+  (`cameraRelativeToPlayer`) and then settle for ~1.1 s, which at SwiftShader frame rates
+  is ~13 frames — not enough for a 0.925-blend TAA history to converge, and the velocity
+  buffer right after a teleport is full of huge vectors for motion blur to smear along.
+  Owner of the post pipeline / capture harness: either let stills settle far longer, or
+  reset TAA history and zero the velocity buffer after a pose's camera jump.
+- 2026-08-27 [mech] The armour chip gate reads the MACRO luminance ratio, not the
+  detail-modulated one. The dual-scale detail layer multiplies acRatio by up to 1.22, and
+  a multiplier does not respect a threshold: a clean plate at macro ratio 1.40 arrives at
+  the gate as 1.71 and comes out as polished bare alloy. Measured against the real baked
+  map, that took the gate from 2.0% of texels tinted at all / 0.40% past half strength to
+  5.9% / 2.28% — nearly six times the fully alloyed area — which is what drained whole
+  small parts (the pelvis skirt worst) to hueless neutral grey once the environment got
+  brighter. RECOLOR now divides the detail modulation back out into `acMacro` and gates on
+  that, so DETAIL_MIX and DETAIL_SCALE can be retuned without silently repainting the mech
+  in bare metal. If you change the detail layer, the chip gate no longer needs re-measuring.
+- 2026-08-27 [render] `Sky.fogParams` gained `aerialRamp` (metres) and `Pipeline` gained the
+  matching `uAerialRamp` uniform, both carried on the existing `sky:params` bus event. The
+  aerial-perspective term is no longer a plain `density * distance`: its per-metre extinction
+  ramps as `rn^2 / (1 + rn^2)`, `rn = distance / aerialRamp`. A linear tau cannot bury a 2 km
+  ridge without also veiling the 150 m gantry in front of it, which is what destroys midground
+  material read. Measured on the vista pose, the change takes 150 m sight lines from 20% veiling
+  to 13% and 400 m from 49% to 42% while reaching MORE total extinction past 800 m. Anyone
+  emitting `sky:params` should include `aerialRamp`; the pipeline keeps its own default if not.
+- 2026-08-27 [render] `Lighting.params.fillElevation` is now the SINE of the bounce light's
+  elevation above the horizon, read absolutely. It used to be an offset added to `|sunDir.y|`,
+  so the fill's real elevation tracked the sun's and a nominal 0.10 was actually 18.7 degrees.
+  Read absolutely, 0.13 is 7.5 degrees, which puts cos(theta) at 0.13 on horizontal ground and
+  0.99 on a vertical flank — a 7.6:1 ratio against the old 2.7:1. That ratio is the only knob in
+  the rig that separates "shadow on the mech" from "shadow on the ground": at `fillIntensity`
+  2.75 it lifted the mech's unlit side 60% (display 42 -> 67 on the hero pose) while taking 37%
+  of the undirected light off the sand in the same frame.
+- 2026-08-27 [render] `Lighting` now renormalises `hemi.color` / `hemi.groundColor` to a peak
+  channel of 1 before applying `hemiIntensity` (the bounce light already did this). The sky
+  palette stores RADIANCES around 0.13, so copying them raw made `hemiIntensity` off by a factor
+  of eight and the one knob for "light inside a shadow" was doing nothing measurable. It is a
+  real irradiance now: 0.30 means 0.30. Anyone reading `Sky.skyFillColor` / `Sky.groundFillColor`
+  is still getting radiances — normalise at the consumer, as both lights do.
+- 2026-08-27 [render] `Pipeline.params.bloom` gained `mipTaper`, `tint` and `tintCore`. The
+  upsample chain is geometrically tapered (mip k reaches the frame at taper^k) instead of
+  equally weighted, which is the difference between a tight hot core with a wide soft skirt and
+  the uniform veiling glow REVIEW calls an automatic failure. `tint`/`tintCore` colour the bloom
+  by how hot each sample is: the core keeps its own colour, the skirt is pulled amber, because
+  the glow around a low sun in a dust column is long-path scattering and long-path scattering is
+  red. One mix in FINAL_FRAG, applies to the sun, thruster plumes and muzzle flashes alike.
+- 2026-08-27 [render] MEASURED DEAD END, recorded so nobody spends an iteration on it: AgX
+  `slope` (`grade.agxLook.x`) and `exposure` cannot be traded against each other to buy highlight
+  shoulder. The clip point in scene terms is `sigmoid(L * exposure) = 1 / slope` and the sigmoid
+  maps 16.5 EV onto [0,1], so recovering the 5% of mid-tone that slope 1.13 -> 1.07 costs takes
+  +0.4 EV of exposure, which puts the clip point back exactly where it was. A blown highlight is
+  fixed at the source or not at all.
+- 2026-08-27 [world] DEFECT FOUND, not owned by this agent. The long conveyor bridge on the right
+  of the vista pose renders a ~350x60 px continuous white specular streak with a hard edge and no
+  falloff — it reads as a lens smear rather than a glint, and it is the single most artificial
+  element left in that frame. It is NOT the IBL sun blob: halving the baked sun's solid angle at
+  constant energy (`envSunWiden` 6.5 -> 4.0 with `envSunGain` compensated) moved the frame's
+  above-230 area by 0.1 percentage points. It is the ANALYTIC sun specular on a near-mirror
+  roughness in that structure's material. Whoever owns the conveyor: raise its roughness (0.35+)
+  or break it up along its length. No exposure, tonemap or bloom setting can fix a source that
+  runs several stops past the shoulder along 300 m of continuous geometry.

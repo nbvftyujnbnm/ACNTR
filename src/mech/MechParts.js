@@ -724,8 +724,19 @@ export function buildCore(o = {}) {
   // everything else has to look outgunned by it.
   b.box('armor', MASK.BASE, W, 1.56, 1.40, 0.085, 0, 1.26, -0.04, 0, 0, 0,
     { taperX: 0.90, taperZ: 0.92, taperFrontX: 0.94 });
-  // upper deck the shoulders bolt onto
-  b.box('armor', MASK.BASE, W * 0.90, 0.50, 1.14, 0.055, 0, 2.16, -0.02, 0, 0, 0, { taperX: 0.9, taperZ: 0.86 });
+  // Upper deck the shoulders bolt onto, plus the collar step above it. Two
+  // stacked masses instead of one 0.50-tall box: the chest-to-shoulder run was a
+  // plain vertical wall, and a plain wall is what makes a torso read as a crate.
+  b.box('armor', MASK.BASE, W * 0.90, 0.38, 1.14, 0.055, 0, 2.10, -0.02, 0, 0, 0, { taperX: 0.94, taperZ: 0.90 });
+  b.box('armor', MASK.TRIM, W * 0.74, 0.20, 0.92, 0.035, 0, 2.38, 0.02, 0, 0, 0, { taperX: 0.88, taperZ: 0.88 });
+  // Load buttresses: angled struts carrying the shoulder deck down onto the
+  // waist. They break the flat flank with a diagonal, which is the line the
+  // silhouette was missing between a narrow waist and a wide shoulder.
+  for (let s = -1; s <= 1; s += 2) {
+    b.box('armor', MASK.BASE, 0.20, 1.10, 0.46, 0.035, s * (W * 0.44), 1.44, -0.30, 0, 0, s * 0.16,
+      { taperX: 0.7, taperZ: 0.86 });
+    piston(b, s * (W * 0.40), 0.62, -0.36, s * (W * 0.46), 1.86, -0.26, 0.052);
+  }
   // Lower waist block (narrow — the classic AC wasp waist). It plunges well below
   // the torso bone's origin so that pitching/twisting the torso can never open a
   // gap onto the pelvis underneath it.
@@ -779,8 +790,26 @@ export function buildCore(o = {}) {
   // as an overhanging slab; a pauldron that caps a thick arm reads as a shoulder.
   const sx = MECH_DIMS.shoulderX * wide;
   for (let s = -1; s <= 1; s += 2) {
-    b.box('armor', MASK.BASE, 0.90, 0.90, 1.16, 0.065, s * (sx - 0.18), 2.00, 0.02, 0, 0, s * -0.06,
-      { taperX: 0.86, taperZ: 0.9 });
+    // STEPPED yoke. This used to be one 0.90 x 0.90 x 1.16 box, which from the
+    // front was a plain slab with a single silhouette edge — the shape reads as a
+    // placeholder no matter how good the texture on it is. It is now three
+    // stacked masses with the upper two set BACK, so the front profile is a
+    // staircase and the top of the shoulder catches a separate highlight.
+    b.box('armor', MASK.BASE, 0.90, 0.52, 1.16, 0.06, s * (sx - 0.30), 1.86, 0.02, 0, 0, s * -0.06,
+      { taperX: 0.94, taperZ: 0.94 });
+    b.box('armor', MASK.BASE, 0.84, 0.34, 0.96, 0.05, s * (sx - 0.32), 2.28, 0.10, 0, 0, s * -0.06,
+      { taperX: 0.90 });
+    // forward nose block, dropped and raked: the step you actually see head-on
+    b.box('armor', MASK.TRIM, 0.66, 0.30, 0.34, 0.04, s * (sx - 0.32), 2.03, -0.50, -0.22, 0, s * -0.06,
+      { taperFrontX: 0.82, taperFrontY: 0.8 });
+    // NEGATIVE SPACE. The yoke's outer face stops at sx+0.15 and the pauldron's
+    // inner face starts at sx+0.255, so there is a 10 cm daylight gap between
+    // them bridged by two brackets. The pauldron now reads as ARMOUR HUNG OFF a
+    // shoulder on visible hardware, which is how AC shoulders are built; before,
+    // yoke and plate were one continuous lump and the joint was invisible.
+    for (let r = -1; r <= 1; r += 2) {
+      b.box('mech', MASK.TRIM, 0.20, 0.17, 0.22, 0.022, s * (sx + 0.20), 2.06, r * 0.30, 0, 0, 0);
+    }
     // outer pauldron plate
     b.addM('armor', MASK.ACCENT, plate(beveledRectShape(0.96, 0.76, { tl: 0.26, tr: 0.10, bl: 0.20, br: 0.10 }), 0.13, 0.03),
       _m.compose(_pv.set(s * (sx + 0.32), 2.06, 0.0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
@@ -794,8 +823,16 @@ export function buildCore(o = {}) {
     axleJoint(b, 'mech', MASK.TRIM, s * (sx + 0.02), 1.72, 0.0, 0.30, 0.34, 14);
     if (d) {
       boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * (sx + 0.24), 1.72, 0.0, 0.21, 8, 0.026, 0.02);
-      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.18), 2.45, -0.30, 0.7, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
-      greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.18), 2.00, 0.60, 0.72, 0.66, rng, { cols: 3, rows: 3, depth: 0.045, accent: 0.04 });
+      greebleFace(b, 'armor', MASK.BASE, 'py', s * (sx - 0.32), 2.45, 0.10, 0.66, 0.4, rng, { cols: 3, rows: 2, depth: 0.04, fill: 0.7 });
+      greebleFace(b, 'armor', MASK.BASE, 'pz', s * (sx - 0.30), 1.86, 0.60, 0.72, 0.40, rng, { cols: 3, rows: 2, depth: 0.045, accent: 0.04 });
+      // EDGE BUSYNESS: a lifting eye and a hose run that project past the yoke's
+      // outline. Detail painted on a flat face does nothing for a silhouette —
+      // only geometry that crosses the outline against the sky does.
+      b.addM('mech', MASK.STEEL, ring(0.055, 0.095, 0.05, 10, 0.012),
+        _m.compose(_pv.set(s * (sx - 0.42), 2.52, 0.22), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+      b.addM('mech', MASK.TRIM, cable([
+        [s * (sx - 0.58), 2.40, 0.46], [s * (sx - 0.30), 2.62, 0.54], [s * (sx + 0.06), 2.44, 0.44],
+      ], 0.034, 10, 5), null);
     }
   }
 
@@ -946,6 +983,26 @@ export function buildBackpack(o = {}) {
   }
 
   if (d) {
+    // --- silhouette breakers ----------------------------------------------
+    // Antenna mast, sensor boom and a rear hook. All three exist to cross the
+    // OUTLINE: an AC is recognisable at 200 m by the spikes and booms coming off
+    // its back, and this pack was a smooth box with the fins buried inside it.
+    // The boom is deliberately on one side only — more asymmetry.
+    _e.set(-0.30, 0, 0.16); _q.setFromEuler(_e); _sc.set(1, 1, 1);
+    _pv.set(-0.52, 0.86, 0.44); _m.compose(_pv, _q, _sc);
+    b.addM('mech', MASK.TRIM, chamferCyl(0.030, 0.010, 0.98, 6, 0.008), _m);
+    _pv.set(-0.66, 1.34, 0.60); _m.compose(_pv, _q, _sc);
+    b.addM('glow', MASK.BASE, chamferCyl(0.018, 0.014, 0.05, 6, 0.005), _m);
+    // sensor boom + dish, right side only
+    _e.set(-0.62, 0, -0.34); _q.setFromEuler(_e);
+    _pv.set(0.60, 0.72, 0.40); _m.compose(_pv, _q, _sc);
+    b.addM('mech', MASK.TRIM, chamferCyl(0.036, 0.028, 0.62, 7, 0.01), _m);
+    _pv.set(0.78, 1.02, 0.52); _q.setFromEuler(_e.set(-1.05, 0, -0.34)); _m.compose(_pv, _q, _sc);
+    b.addM('mech', MASK.TRIM, revolve([[0, 0], [0.14, 0.02], [0.17, 0.09], [0.10, 0.10], [0, 0.04]], 12), _m);
+    // rear towing hook, projecting past the pack's back face
+    b.box('mech', MASK.STEEL, 0.12, 0.10, 0.34, 0.02, 0.30, -0.10, 0.72, 0.34, 0, 0);
+    b.box('mech', MASK.STEEL, 0.12, 0.24, 0.10, 0.02, 0.30, -0.24, 0.86, 0, 0, 0);
+
     greebleFace(b, 'armor', MASK.BASE, 'pz', 0, 0.28, 0.60, 0.9, 0.7, rng, { cols: 3, rows: 3, depth: 0.045, accent: 0.04 });
     greebleFace(b, 'armor', MASK.BASE, 'py', 0, 0.63, 0.24, 0.9, 0.42, rng, { cols: 4, rows: 2, depth: 0.035 });
     ventGrill(b, 'mech', MASK.TRIM, 'px', 0.66, 0.10, 0.24, 0.5, 0.5, 4, 0.08);
@@ -1298,8 +1355,7 @@ export function buildCannonArray(o = {}) {
 }
 
 /** Boss defence: a huge layered tower shield with an emissive projector strip. */
-export function buildShieldPlate(o = {}) {
-  const rng = o.rng;
+export function buildShieldPlate(o = {}) {  const rng = o.rng;
   const b = new GeoBuilder(rng);
   b.addM('armor', MASK.BASE, plate(beveledRectShape(2.30, 3.40, { tl: 0.70, tr: 0.70, bl: 0.45, br: 0.45 }), 0.34, 0.07),
     _m.compose(_pv.set(0, 0, 0), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
@@ -1313,4 +1369,130 @@ export function buildShieldPlate(o = {}) {
   }
   boltRing(b, 'mech', MASK.STEEL, 'nz', 0, 0.10, -0.20, 0.92, 14, 0.036, 0.024);
   return { b, anchors: {} };
+}
+
+// ---------------------------------------------------------------------------
+// SHOULDER ORDNANCE — the mech's asymmetry lives here.
+//
+// Every AC in the game this is modelled on carries DIFFERENT ordnance on its two
+// shoulders: a missile rack one side, a cannon or nothing the other. Until now
+// both shoulder mounts on this frame were empty anchors, so the whole machine was
+// perfectly bilaterally symmetric — which is the single loudest "procedural
+// robot, not an Armored Core" tell in a silhouette. These two parts are attached
+// to the l/r shoulder mounts by MechFactory, one each, never the same one twice.
+//
+// Both are built to merge into a single solid bucket (MechFactory passes
+// `mergeSolid`), so a shoulder weapon costs 2 draw calls, not 3.
+// ---------------------------------------------------------------------------
+
+/**
+ * Vertical-launch missile rack. Boxy, cell-gridded, canted outboard — its job in
+ * the silhouette is to add a big angular mass ABOVE the shoulder line.
+ * @param {object} o `side` -1 left / +1 right; the pod cants away from the body.
+ */
+export function buildMissileRack(o = {}) {
+  const rng = o.rng;
+  const d = o.detail !== 'low';
+  const s = o.side ?? -1;
+  const small = !!o.crude;
+  const W = small ? 0.56 : 0.80;
+  const H = small ? 0.34 : 0.46;
+  const D = small ? 0.74 : 1.04;
+  const b = new GeoBuilder(rng);
+
+  // mounting saddle + trunnion: the rack has to look BOLTED ON, not grown
+  b.box('mech', MASK.TRIM, W * 0.60, 0.13, D * 0.62, 0.02, 0, 0.05, 0);
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0.12, D * 0.22, 0.07, W * 0.52, 10);
+
+  // main pod, canted outboard so the two shoulders never read as a mirror pair
+  const cant = s * -0.13;
+  b.box('armor', MASK.BASE, W, H, D, 0.045, s * 0.05, 0.10 + H * 0.5, -0.02, 0.05, 0, cant,
+    { taperFrontX: 0.90, taperFrontY: 0.94 });
+  // hinged lid, a slightly different colour so the rack reads as a sub-assembly
+  b.box('armor', MASK.ACCENT, W * 0.90, 0.085, D * 0.88, 0.022, s * 0.05, 0.10 + H + 0.02, -0.02, 0.05, 0, cant);
+
+  // launch cells, recessed into the front face
+  const cols = small ? 2 : 3, rows = 2;
+  const cw = W * 0.80 / cols, chh = H * 0.74 / rows;
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const cx = s * 0.05 + (-W * 0.40 + cw * (i + 0.5));
+      const cy = 0.10 + H * 0.5 + (-H * 0.37 + chh * (j + 0.5));
+      // bezel + dark bore: reads as a tube mouth at any distance
+      b.box('mech', MASK.TRIM, cw * 0.82, chh * 0.82, 0.10, 0.015, cx, cy, -D * 0.5 - 0.01, 0.05, 0, cant);
+      b.box('mech', MASK.TRIM, cw * 0.54, chh * 0.54, 0.16, 0.012, cx, cy, -D * 0.5 + 0.06, 0.05, 0, cant);
+    }
+  }
+  // status lamp strip down the outboard flank
+  b.box('glow', MASK.BASE, 0.035, 0.05, D * 0.44, 0.01, s * (W * 0.52 + 0.04), 0.10 + H * 0.62, 0.02);
+
+  if (d) {
+    greebleFace(b, 'armor', MASK.BASE, 'py', s * 0.05, 0.10 + H + 0.08, -0.02, W * 0.62, D * 0.5, rng,
+      { cols: 3, rows: 3, depth: 0.028, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * (W * 0.5 + 0.02), 0.10 + H * 0.5, 0.06, D * 0.52, H * 0.6, rng,
+      { cols: 3, rows: 2, depth: 0.026, accent: 0.05 });
+    // feed conduit from the pod down into the shoulder deck
+    b.addM('mech', MASK.TRIM, cable([
+      [s * -0.16, 0.10 + H * 0.4, D * 0.34], [s * -0.24, 0.16, D * 0.30], [s * -0.20, 0.0, D * 0.10],
+    ], 0.035, 8, 5), null);
+    boltRing(b, 'mech', MASK.STEEL, 'py', 0, 0.12, 0, W * 0.30, 6, 0.022, 0.014);
+  }
+  return { b, anchors: { muzzle: [0, 0.10 + H + 0.06, -D * 0.30] } };
+}
+
+/**
+ * Shoulder cannon. The barrel is the point: it projects ~1.4 m forward of the
+ * shoulder, which is the one element on this frame that breaks the outline
+ * against the sky instead of sitting inside the main volumes.
+ */
+export function buildShoulderCannon(o = {}) {
+  const rng = o.rng;
+  const d = o.detail !== 'low';
+  const s = o.side ?? 1;
+  const b = new GeoBuilder(rng);
+
+  // cradle + elevation trunnion
+  b.box('mech', MASK.TRIM, 0.42, 0.13, 0.58, 0.02, 0, 0.05, 0);
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0.30, 0.12, 0.10, 0.50, 12);
+
+  // recoil housing / receiver
+  b.box('armor', MASK.BASE, 0.50, 0.44, 0.92, 0.04, 0, 0.36, 0.08, -0.04, 0, 0,
+    { taperFrontX: 0.86, taperFrontY: 0.88 });
+  // top rail + optics block
+  b.box('armor', MASK.TRIM, 0.26, 0.10, 0.62, 0.02, 0, 0.60, 0.06, -0.04, 0, 0);
+  b.box('mech', MASK.TRIM, 0.22, 0.16, 0.24, 0.02, 0, 0.70, -0.16, -0.04, 0, 0);
+  b.box('glow', MASK.BASE, 0.12, 0.055, 0.03, 0.01, 0, 0.70, -0.29);
+
+  // barrel: sleeve, then the rifled tube, then a slotted muzzle brake
+  _q.setFromEuler(_e.set(Math.PI * 0.5 - 0.04, 0, 0)); _sc.set(1, 1, 1);
+  _pv.set(0, 0.40, -0.62); _m.compose(_pv, _q, _sc);
+  b.addM('mech', MASK.TRIM, chamferCyl(0.115, 0.10, 0.52, 12, 0.022), _m);
+  _pv.set(0, 0.43, -1.28); _m.compose(_pv, _q, _sc);
+  b.addM('mech', MASK.STEEL, chamferCyl(0.072, 0.066, 1.00, 12, 0.016), _m);
+  _pv.set(0, 0.46, -1.86); _m.compose(_pv, _q, _sc);
+  b.addM('mech', MASK.TRIM, ring(0.066, 0.115, 0.24, 12, 0.02), _m);
+  // brake ports — three fins that catch a rim light on the outline
+  for (let i = 0; i < 3; i++) {
+    b.box('mech', MASK.TRIM, 0.20, 0.028, 0.05, 0.008, 0, 0.46 + 0.005, -1.80 + i * 0.09, -0.04, 0, 0);
+  }
+
+  // ammo feed: drum on the inboard side + a belt cover running to the receiver
+  b.addM('mech', MASK.TRIM, chamferCyl(0.20, 0.20, 0.22, 12, 0.03),
+    _m.compose(_pv.set(s * -0.28, 0.34, 0.40), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  b.box('armor', MASK.ACCENT, 0.16, 0.26, 0.42, 0.022, s * -0.24, 0.36, 0.10, -0.04, 0, 0);
+
+  // heat vanes stacked along the receiver's outboard flank
+  for (let i = 0; i < (d ? 5 : 2); i++) {
+    b.box('mech', MASK.TRIM, 0.05, 0.16, 0.34, 0.012, s * 0.27, 0.22 + i * 0.085, 0.16, 0, 0, s * 0.05);
+  }
+
+  if (d) {
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'nx' : 'px', s * -0.26, 0.40, 0.02, 0.5, 0.34, rng,
+      { cols: 3, rows: 2, depth: 0.024, fill: 0.6 });
+    boltRing(b, 'mech', MASK.STEEL, 'py', 0, 0.12, 0, 0.16, 6, 0.022, 0.014);
+    b.addM('mech', MASK.TRIM, cable([
+      [s * -0.18, 0.22, 0.44], [s * -0.26, 0.08, 0.34], [s * -0.16, -0.02, 0.12],
+    ], 0.032, 8, 5), null);
+  }
+  return { b, anchors: { muzzle: [0, 0.47, -2.00] } };
 }

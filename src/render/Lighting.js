@@ -10,6 +10,20 @@ let _active = null;
 const _fillDir = new THREE.Vector3();
 
 /**
+ * Scale a colour so its largest channel is 1. The sky palette stores radiances,
+ * not hues; every light in this rig wants the hue from the palette and the
+ * level from its own intensity, or the two multiply and the knob stops meaning
+ * anything. Mutates and returns `c` — no allocation.
+ *
+ * @param {THREE.Color} c
+ * @returns {THREE.Color}
+ */
+function normaliseHue(c) {
+  const m = Math.max(c.r, c.g, c.b, 1e-4);
+  return c.multiplyScalar(1 / m);
+}
+
+/**
  * Register every lit material in `scene` with the active CSM.
  *
  * CSM works by replacing the single sun with one directional light per cascade
@@ -66,10 +80,19 @@ export class Lighting {
       // A small omnidirectional floor. Its job is only to keep a downward-facing
       // chamfer off pure black; anything more and it flattens the terrain, which
       // is a single enormous up-facing surface and therefore the thing that
-      // suffers most from undirected light. A hemisphere light is weighted
-      // toward the UP normal by construction, so every unit of it lands on the
-      // one surface in this game that must not receive undirected light.
-      hemiIntensity: 0.20,
+      // suffers most from undirected light.
+      //
+      // This knob was a no-op for most of its life: `hemi.color` is copied
+      // straight from the sky palette, whose radiances sit around 0.13, so an
+      // "intensity" of 0.42 delivered 0.055 of irradiance against a key of 4.
+      // The colours are renormalised now (see `_syncFromSky`), so this reads as
+      // real irradiance and 0.30 means 0.30. That is deliberately the ONE
+      // undirected term in the rig, and it exists for a single measured
+      // failure: on the hero pose the tarmac apron in the mech's own shadow was
+      // landing at display 17/255 with 64% of the lower-left quadrant below 16.
+      // Sunlit ground pays 5% for it; ground in shadow gains 25%, because the
+      // sun is 4.1 and the ambient it is being added to is 1.1.
+      hemiIntensity: 0.30,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
       // Amendments), so the environment feeds DIFFUSE on every surface in the
@@ -384,8 +407,12 @@ export class Lighting {
     const sky = this.sky;
     if (!sky) return;
     if (sky.sunDirection) this._sunDir.copy(sky.sunDirection).normalize();
-    if (sky.skyFillColor) this.hemi.color.copy(sky.skyFillColor);
-    if (sky.groundFillColor) this.hemi.groundColor.copy(sky.groundFillColor);
+    // Renormalise, exactly as the bounce does: the sky palette holds RADIANCES
+    // (~0.13), so copying them raw made `hemiIntensity` a lie by a factor of
+    // eight and left the only knob for "light in a shadow" doing nothing. The
+    // hue is what these colours are for; the level belongs to the intensity.
+    if (sky.skyFillColor) normaliseHue(this.hemi.color.copy(sky.skyFillColor));
+    if (sky.groundFillColor) normaliseHue(this.hemi.groundColor.copy(sky.groundFillColor));
     this.hemi.intensity = this.params.hemiIntensity;
   }
 
@@ -399,9 +426,9 @@ export class Lighting {
 
     const f = this.fill;
     if (f) {
-      // Sky-coloured, from the anti-sun side and higher up: this is skylight
-      // bounced back into the shadow side, not a second key. Keep it cool so
-      // the shadow/key split also reads as a temperature split.
+      // Sky-coloured, from the anti-sun side and only just above the horizon:
+      // this is skylight bounced back into the shadow side, not a second key.
+      // Keep it cool so the shadow/key split also reads as a temperature split.
       // Absolute elevation, not an offset from the sun's: the whole point of
       // this light is that it is NEARLY HORIZONTAL regardless of where the key
       // is, so its cosine falls off a flat plain and holds on a vertical flank.
@@ -411,11 +438,9 @@ export class Lighting {
       f.position.copy(this._focus).addScaledVector(_fillDir, 220);
       f.target.position.copy(this._focus);
       f.target.updateMatrixWorld();
-      if (this.sky?.skyFillColor) f.color.copy(this.sky.skyFillColor);
       // The sky fill colour is a radiance, not a hue — renormalise so the knob
       // controls intensity and the colour only carries the tint.
-      const m = Math.max(f.color.r, f.color.g, f.color.b, 1e-4);
-      f.color.multiplyScalar(1 / m);
+      if (this.sky?.skyFillColor) normaliseHue(f.color.copy(this.sky.skyFillColor));
       f.intensity = this.params.fillIntensity;
     }
   }

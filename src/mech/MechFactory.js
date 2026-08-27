@@ -420,6 +420,8 @@ export class MechFactory {
     // --- arms ------------------------------------------------------------
     const arms = {};
     const muzzles = {};
+    /** Where each shoulder's ORDNANCE actually fires from, when it carries any. */
+    const shoulderMuzzles = {};
     for (const side of [-1, 1]) {
       const p = side < 0 ? 'l' : 'r';
       const shoulder = new THREE.Object3D();
@@ -434,11 +436,31 @@ export class MechFactory {
       arms[`${p}ForeArm`] = fore;
       muzzles[p] = fa.muzzle || [side * 0.55, -D.wristDrop * 0.46, -0.62];
 
-      // shoulder weapon mount (the deck on top of the yoke)
+      // Shoulder weapon mount (the deck on top of the yoke), and the ordnance
+      // bolted to it. This is where the frame stops being a mirror: the LEFT
+      // shoulder always carries a missile rack and the RIGHT always carries a
+      // cannon, so the two halves of the silhouette can never match. Both mounts
+      // used to be empty anchors, which is why the mech read as a symmetrical
+      // procedural robot rather than an AC. The mount still carries the firing
+      // hardpoint underneath, so nothing in the combat path changes.
       const mount = new THREE.Object3D();
       mount.position.fromArray(side < 0 ? (ca.mountL || [-1.16, 2.66, 0]) : (ca.mountR || [1.16, 2.66, 0]));
       torso.add(mount);
       arms[`${p}ShoulderMount`] = mount;
+
+      // Merged into one solid bucket (`mergeSolid`) so a shoulder weapon is 2
+      // draw calls, not 3 — the frame is close to its 40-call budget up close.
+      // Crude MTs get the rack only: cheap mass-produced units would not be
+      // issued a cannon, and one-sided ordnance is still asymmetric.
+      if (side < 0) {
+        const oa = this._attach(mount, `srack:${seed}:${cfg.crude ? 1 : 0}`, MP.buildMissileRack,
+          { ...common, side }, mats, true, true);
+        shoulderMuzzles[p] = oa.muzzle;
+      } else if (!cfg.crude) {
+        const oa = this._attach(mount, `scannon:${seed}`, MP.buildShoulderCannon,
+          { ...common, side }, mats, true, true);
+        shoulderMuzzles[p] = oa.muzzle;
+      }
     }
 
     // --- legs -------------------------------------------------------------
@@ -503,8 +525,11 @@ export class MechFactory {
       bones[`${p}ForeArm`].add(hpArm);
       hardpoints[`${p}Arm`] = hpArm;
 
+      // Fire from the ordnance's own muzzle when the shoulder carries some, so a
+      // launch plume leaves the cell mouths / the barrel instead of appearing
+      // inside the pod. Falls back to the bare deck anchor for an empty mount.
       const hpSh = new THREE.Object3D();
-      hpSh.position.set(0, 0.22, -0.42);
+      hpSh.position.fromArray(shoulderMuzzles[p] || [0, 0.22, -0.42]);
       bones[`${p}ShoulderMount`].add(hpSh);
       hardpoints[`${p}Shoulder`] = hpSh;
     }

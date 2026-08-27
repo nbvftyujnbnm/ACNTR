@@ -33,6 +33,16 @@ export class Sky {
       // across it. At 17 the crests and troughs were within a few percent of
       // each other and the plain read as one flat sheet of sand. The 20% of
       // irradiance lost on horizontal ground is bought back on the key.
+      //
+      // 13.5 is also the FLOOR, and that is a measured result, not caution.
+      // Going to 11.5 (l23) reads as an obvious improvement in the numbers —
+      // the vista's sunlit/shadowed sand ratio went from 2.3:1 to 2.8:1 — and
+      // is an obvious regression in the frame. "Raking light reveals form"
+      // stops being true the moment the shadows MERGE: at 11.5 the refinery's
+      // cast shadows overlapped across the whole plain, the long bands of
+      // sunlight running between them disappeared, and the lower half of the
+      // vista went from graphic to uniformly murky. The interesting ground is
+      // where lit and shadowed are INTERLEAVED, not where the ratio is largest.
       sunElevation: 13.5 * (Math.PI / 180),
       // Chosen so the key rakes ACROSS both review framings rather than sitting
       // behind the camera: side-key on the hero pose, back-side on the vista.
@@ -56,19 +66,30 @@ export class Sky {
       sunAngular: 0.0138,
       // How much wider / dimmer the disc becomes for the IBL bake. A 0.0165 rad
       // disc is a third of a texel on a 256px cube face — it aliases into
-      // fireflies. Widening it ~7x and dropping the peak keeps roughly the same
+      // fireflies. Widening it and dropping the peak keeps roughly the same
       // integrated energy while giving metals a real, resolvable sun blob to
       // reflect (that blob is what draws the chamfer glints).
-      envSunWiden: 6.5,
-      // Peak radiance of the baked sun blob is sunIntensity * this, and that
-      // number is what a smooth metal rail reflects straight into the frame. At
-      // 19 (the old 190 x 0.10) a 300 m conveyor caught a highlight three stops
-      // past the tonemap's clip point along its entire length, which is the
-      // white lens in the vista. 12 lands just under the shoulder, so the same
-      // highlight rolls off instead. The crisp chamfer glints it used to carry
-      // now come from the ANALYTIC sun specular, which went up 45% with the key
-      // — a sharper and more physical source for them anyway.
-      envSunGain: 0.10,
+      //
+      // Down from 6.5, which put the baked sun at 5.1 degrees of angular RADIUS
+      // — twenty times the real disc, and far too wide a source to draw a
+      // chamfer glint with. At 4.0 the blob is 3.2 degrees, still eight texels
+      // across on a 256px cube face (so it neither aliases nor fireflies), and
+      // `envSunGain` is raised in the same breath to hold widen^2 * gain
+      // constant: identical integrated irradiance on every diffuse surface in
+      // the level, a tighter and brighter specular on every smooth one. Rough
+      // metal cannot tell the difference; smooth metal gets its glint back.
+      //
+      // NOT a fix for the vista's blown conveyor streak — that was the theory
+      // and the measurement refuted it. Halving the blob's solid angle at
+      // constant energy moved the frame's above-230 area by 0.1 percentage
+      // points (2.15% -> 2.03%), so the streak is not a reflection of this
+      // blob. It is the ANALYTIC sun's specular on a near-mirror roughness in
+      // the conveyor's material, which lives outside this module.
+      envSunWiden: 4.0,
+      // Peak radiance of the baked sun blob is `sunIntensity * this`. Paired
+      // with `envSunWiden` so that widen^2 * gain stays put (6.5^2 * 0.075 ==
+      // 4.0^2 * 0.198): the blob carries the same energy, concentrated.
+      envSunGain: 0.198,
       cloudCover: 0.52,
       cloudOpacity: 0.86,
       cloudScale: 0.62,
