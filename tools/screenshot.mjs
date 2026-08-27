@@ -116,7 +116,7 @@ async function startServer() {
 
   const outPath = resolve(ROOT, OUT);
   mkdirSync(dirname(outPath), { recursive: true });
-  await page.screenshot({ path: outPath, type: 'png' });
+  await page.screenshot({ path: outPath, type: 'png', timeout: 180000 });
 
   const stats = await page.evaluate(() => {
     const e = window.__ACNTR__?.engine;

@@ -125,7 +125,10 @@ async function startServer() {
     }
     await page.waitForTimeout(SETTLE);
     const file = `${pose}.png`;
-    await page.screenshot({ path: resolve(outDir, file), type: 'png' });
+    // A single frame of the full level can take well over Playwright's 30s
+    // default under SwiftShader, and a timeout here reads as a broken build
+    // rather than a slow one.
+    await page.screenshot({ path: resolve(outDir, file), type: 'png', timeout: 180000 });
     const stats = await page.evaluate(() => {
       try { return window.__ACNTR__.debug.stats(); } catch { return null; }
     });
