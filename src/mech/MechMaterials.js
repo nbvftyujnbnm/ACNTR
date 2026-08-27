@@ -285,6 +285,10 @@ export class MechMaterials {
       map: tex.map,
       normalMap: tex.normalMap,
       roughnessMap: tex.roughnessMap,
+      // The forge packs ORM as R=AO, G=roughness, B=metalness — exactly the
+      // channels three samples. Without this every surface reads as bare metal
+      // and the accumulated grime loses its dielectric response.
+      metalnessMap: tex.metalnessMap,
       aoMap: tex.aoMap,
       roughness: 1,
       metalness: 1,
