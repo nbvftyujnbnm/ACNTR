@@ -68,16 +68,31 @@ export class RenderPipeline {
       // Scene radiance went up ~3x when the key took over from the ambient, so
       // the exposure comes down to keep sunlit concrete around 0.6 display and
       // leave headroom for emissives to punch through the tonemap.
-      exposure: 0.66,
+      exposure: 0.655,
       sharpen: 0.30,
       tonemap: 'agx',         // 'agx' | 'aces'
 
       // Threshold sits just above the brightest lit-metal highlight, so only
-      // emissives, the sun and specular glints bloom. Strength 0.095 was doing
-      // nothing at all; a mip chain this wide needs real weight behind it to
-      // produce the tight-core / wide-skirt shape.
-      bloom: { threshold: 1.4, knee: 0.45, strength: 0.60, radius: 1.15, clamp: 90 },
-      ssao: { radius: 1.1, strength: 0.95, bias: 0.03, power: 1.6 },
+      // emissives, the sun and specular glints bloom.
+      //
+      // `clamp` is the important one and it used to be 90. The sun disc renders
+      // at ~120 linear over a ~30 px blob; at clamp 90 that blob entered the mip
+      // chain essentially intact, saturated every mip it touched, and came out
+      // the far side as a flat white sheet — a smear, not a flare. Clamping the
+      // PREFILTERED value to 10 costs the core nothing (the core is the
+      // untouched scene pixel, still 120, still pure white after the tonemap)
+      // and hands the falloff back to the mip chain, which is the only part of
+      // this that can produce structure.
+      //
+      // `mipTaper` compounds down the upsample chain, so mip k reaches the frame
+      // at taper^k. Equal weights make every blur radius equally bright, which
+      // is exactly the uniform veiling glow REVIEW calls an automatic failure;
+      // a geometric taper is the tight-hot-core / wide-soft-skirt shape.
+      bloom: { threshold: 1.25, knee: 0.60, strength: 1.00, radius: 1.05, clamp: 6, mipTaper: 0.80 },
+      // Radius up from 1.1 m: the subject is a 9 m mech on open sand, and a 1 m
+      // kernel only ever found the geometry's own creases, never the gap between
+      // a foot and the ground.
+      ssao: { radius: 1.55, strength: 1.0, bias: 0.03, power: 2.0 },
       ssr: { intensity: 0.85, maxDistance: 48, thickness: 1.2, roughness: 0.30, upBoost: 1.1 },
       motionBlur: { shutter: 0.6, maxPx: 24 },
       // Far-field DOF was the single biggest contributor to "distant geometry
@@ -96,14 +111,25 @@ export class RenderPipeline {
       // steel/ochre with saturation only in emissives, and its highlights roll
       // off rather than clip. Shadows get a small cool lift so they stay open.
       grade: {
-        agxLook: new THREE.Vector4(1.16, -0.010, 1.18, 0.82),
+        // slope / offset / power / saturation, applied in the sigmoid's OUTPUT
+        // space — so `slope` is a hard clip point: everything above 1/slope
+        // becomes pure white. At 1.22 that was 0.82, which turned a long
+        // specular rail into a flat white lens with no roll-off at all. 1.13
+        // buys back a stop and a half of highlight shoulder; the mid-tone punch
+        // it costs comes back from `contrast`, which pivots at 0.5 and does not
+        // touch the clip point. `power` below 1.18 opens the shadow end, which
+        // is where the mech's unlit flank lives.
+        agxLook: new THREE.Vector4(1.13, 0.0, 1.10, 0.88),
         // A cool, open toe. AC6's shadows are deep but you can always read what
         // is in them; a crushed-to-black shadow is the giveaway of a hobby
         // renderer. Blue-weighted so shadow/key also splits by temperature.
-        lift: new THREE.Vector3(0.012, 0.018, 0.034),
+        // Raised alongside the ambient cut: the rig now has a real key/shadow
+        // ratio, and the toe is what stops that ratio from crushing the mech's
+        // unlit flank to paper black.
+        lift: new THREE.Vector3(0.022, 0.028, 0.046),
         gamma: new THREE.Vector3(1.0, 1.0, 1.0),
         gain: new THREE.Vector3(1.035, 1.0, 0.950),
-        contrast: 1.12,
+        contrast: 1.14,
         saturation: 0.94,
         splitShadow: new THREE.Vector3(-0.026, -0.006, 0.044),
         splitHighlight: new THREE.Vector3(0.032, 0.012, -0.024),
@@ -154,7 +180,8 @@ export class RenderPipeline {
     this._bandDensity = 0.0028;
     this._bandHeight = 55;
     this._bandThickness = 16;
-    this._aerialDensity = 0.00075;
+    this._aerialDensity = 0.0012;
+    this._aerialRamp = 250;
     this._damageColor = new THREE.Color(0.85, 0.06, 0.05);
 
     this._jitter = new Float32Array(JITTER_COUNT * 2);
@@ -296,6 +323,7 @@ export class RenderPipeline {
       uBandHeight: { value: this._bandHeight },
       uBandThickness: { value: this._bandThickness },
       uAerialDensity: { value: this._aerialDensity },
+      uAerialRamp: { value: this._aerialRamp },
       uFogStrength: { value: p.atmosphere.strength },
       uAOEnabled: { value: 1 },
       uSSREnabled: { value: 0 },
@@ -454,6 +482,7 @@ export class RenderPipeline {
       if (typeof s.bandHeight === 'number') this._bandHeight = s.bandHeight;
       if (typeof s.bandThickness === 'number') this._bandThickness = s.bandThickness;
       if (typeof s.aerialDensity === 'number') this._aerialDensity = s.aerialDensity;
+      if (typeof s.aerialRamp === 'number') this._aerialRamp = s.aerialRamp;
     }));
     this._offs.push(bus.on(EV.PLAYER_HIT, () => {
       this._dyn.hit = Math.min(1.2, this._dyn.hit + 0.6);
@@ -813,6 +842,7 @@ export class RenderPipeline {
     c.uBandHeight.value = this._bandHeight;
     c.uBandThickness.value = this._bandThickness;
     c.uAerialDensity.value = this._aerialDensity;
+    c.uAerialRamp.value = this._aerialRamp;
     c.uFogStrength.value = p.atmosphere.strength;
     c.uSSRIntensity.value = p.ssr.intensity;
   }
@@ -996,9 +1026,15 @@ export class RenderPipeline {
 
     const autoClear = r.autoClear;
     r.autoClear = false;   // upsample accumulates onto the downsampled mip
+    // Each step's weight compounds on the way down, so mip k lands in the frame
+    // at taper^k: a 1 / 0.8 / 0.64 / 0.51 / 0.41 / 0.33 ladder against blur radii
+    // that double each rung. That is the falloff; equal weights are a flat veil.
+    const taper = this.params.bloom.mipTaper;
     for (let i = mips.length - 1; i >= 1; i--) {
-      this.mBloomUp[i].uniforms.tSource.value = mips[i].texture;
-      this.mBloomUp[i].uniforms.uRadius.value = this.params.bloom.radius;
+      const u = this.mBloomUp[i].uniforms;
+      u.tSource.value = mips[i].texture;
+      u.uRadius.value = this.params.bloom.radius;
+      u.uWeight.value = taper;
       this._blit(this.mBloomUp[i], mips[i - 1]);
     }
     r.autoClear = autoClear;

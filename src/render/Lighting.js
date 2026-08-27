@@ -62,23 +62,44 @@ export class Lighting {
       // within a factor of ~1.2 of each other, which is why the shadows the
       // cascades were correctly rendering could not be seen at all in frame.
       // Lit ground : shadowed ground is now roughly 3.5 : 1.
-      sunIntensity: 11.0,
-      hemiIntensity: 0.10,
-      // Every mech surface is metalness 1.0, so it is lit ENTIRELY by the
-      // environment — diffuse is identically zero. At 1.0 the PMREM was too
-      // dim to show a single panel seam.
-      envIntensity: 2.2,
+      sunIntensity: 16.0,
+      // A small omnidirectional floor. Its job is only to keep a downward-facing
+      // chamfer off pure black; anything more and it flattens the terrain, which
+      // is a single enormous up-facing surface and therefore the thing that
+      // suffers most from undirected light.
+      hemiIntensity: 0.38,
+      // Was 2.2, from when every mech surface was metalness 1.0 and had no
+      // diffuse lobe at all. The armour is dielectric now (see Contract
+      // Amendments), so the environment feeds DIFFUSE on every surface in the
+      // level — and an environment map is, by construction, the least
+      // directional light in the rig. At 2.2 the sand plain's ambient term was
+      // within a factor of 3 of its sun term, which is why cascades that were
+      // correctly rendering shadows produced almost no visible contrast. The
+      // energy taken out here goes back in on the key and the bounce, both of
+      // which have a direction and therefore SHAPE the surface.
+      envIntensity: 1.45,
       // Cool bounce from the opposite side so the shadow side stays readable.
       // AC6 shadows are deep but never crushed; this is what keeps them open.
-      fillIntensity: 0.62,
+      // Carries much more of the ambient budget than it used to.
+      fillIntensity: 1.30,
+      // How far above the anti-sun horizontal the bounce sits. Low on purpose:
+      // at 0.85 the fill was pointing almost straight down, so it landed on the
+      // terrain (already the brightest thing in frame) and missed the VERTICAL
+      // shadow-side plating that actually needed lifting. At 0.34 it rakes back
+      // across the mech's unlit flank and barely touches the ground.
+      fillElevation: 0.34,
       cascades: 4,
       shadowMapSize: 2048,
       // The camera's near plane is 0.35 m, which drags every automatic split
       // scheme into uselessness: 'practical' put the first cascade break at
       // 79 m, so a 9 m mech got 2 cm... of a 180 m cascade. Explicit splits,
       // tuned for a mech-scale subject with a city-scale background.
-      shadowMaxFar: 460,
-      splits: [22, 66, 170, 460],
+      shadowMaxFar: 420,
+      // Pulled in from [22, 66, 170, 460]. Cascade 0 is the one that draws the
+      // contact shadow under a 9 m mech, and its texel size is (extent / 2048):
+      // 18 m of frustum is ~9 mm/texel, tight enough that the shadow meets the
+      // foot instead of hovering a hand's width off it.
+      splits: [18, 50, 140, 420],
       lightNear: 1,
       lightFar: 2200,
       lightMargin: 180,
@@ -364,7 +385,7 @@ export class Lighting {
       // bounced back into the shadow side, not a second key. Keep it cool so
       // the shadow/key split also reads as a temperature split.
       _fillDir.copy(this._sunDir).multiplyScalar(-1);
-      _fillDir.y = Math.abs(_fillDir.y) + 0.85;
+      _fillDir.y = Math.abs(_fillDir.y) + this.params.fillElevation;
       _fillDir.normalize();
       f.position.copy(this._focus).addScaledVector(_fillDir, 220);
       f.target.position.copy(this._focus);

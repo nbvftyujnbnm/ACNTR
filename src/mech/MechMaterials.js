@@ -25,47 +25,92 @@ import { clamp } from '../core/MathUtils.js';
  * Values are the colour of the PAINT, not the colour of the rendered pixel.
  * Painted armour is a dielectric, so almost all of what you see is the diffuse
  * term — a base darker than ~0.09 linear (roughly #4a4f55 in sRGB) has no
- * headroom left and collapses to black the moment the key light softens. Every
- * `base` here therefore sits in 0.10..0.30 linear; the *look* stays dark because
- * grime, seam AO and the tonemap take it back down, not because the albedo was
- * authored black.
+ * headroom left and collapses to black the moment the key light softens.
+ *
+ * Every `base` now sits at **0.12..0.46 linear, most of them near 0.23**. The
+ * previous set bottomed out at 0.06 (vespers) and averaged 0.15, which survived
+ * direct sun but went to pure black on the shadow side — all the panel work,
+ * chipping and stencilling this file exists to produce was simply not there on
+ * half of every frame. Grime, seam AO and the ACES shoulder still take the look
+ * back down; what they can no longer do is take it to zero.
  */
 export const MECH_PALETTES = {
   raven: {
-    label: 'RAVEN', base: '#666c74', accent: '#8a3a2e', trim: '#3a3e43',
-    steel: '#9aa0a7', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
+    label: 'RAVEN', base: '#7f8690', accent: '#a64739', trim: '#4f545b',
+    steel: '#a8aeb6', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
   },
   balteus: {
-    label: 'BALTEUS', base: '#464e57', accent: '#3d6f8f', trim: '#2c3138',
-    steel: '#949aa1', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
+    label: 'BALTEUS', base: '#5f6975', accent: '#4b83a6', trim: '#3f464f',
+    steel: '#a4aab2', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
   },
   baws: {
-    label: 'BAWS', base: '#8e7c41', accent: '#54575c', trim: '#3c3e41',
-    steel: '#9ea3a8', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
+    label: 'BAWS', base: '#978446', accent: '#64676d', trim: '#515458',
+    steel: '#a9aeb3', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
   },
   rad: {
-    label: 'RaD', base: '#bab5a8', accent: '#b6702f', trim: '#4a4946',
-    steel: '#9ba0a5', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
+    label: 'RaD', base: '#bab5a8', accent: '#c07c3a', trim: '#555450',
+    steel: '#a9aeb4', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
   },
   arquebus: {
-    label: 'ARQUEBUS', base: '#465066', accent: '#9d8a5c', trim: '#30363f',
-    steel: '#969ca4', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
+    label: 'ARQUEBUS', base: '#5f6b88', accent: '#a8956a', trim: '#454d59',
+    steel: '#a6adb5', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
   },
   schneider: {
-    label: 'SCHNEIDER', base: '#737a81', accent: '#5f97a4', trim: '#40454a',
-    steel: '#a0a6ac', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
+    label: 'SCHNEIDER', base: '#7e868e', accent: '#6ba5b2', trim: '#4f545a',
+    steel: '#a8aeb5', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
   },
   vespers: {
-    label: 'VESPERS', base: '#4c4355', accent: '#6d4d8c', trim: '#332c39',
-    steel: '#918b9a', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
+    label: 'VESPERS', base: '#665b72', accent: '#7b579d', trim: '#493f51',
+    steel: '#a09aaa', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
   },
   elcano: {
-    label: 'ELCANO', base: '#556354', accent: '#77914f', trim: '#333a34',
-    steel: '#949a95', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
+    label: 'ELCANO', base: '#728471', accent: '#849e5b', trim: '#49524a',
+    steel: '#a4aaa5', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
   },
 };
 
 export const PALETTE_KEYS = Object.keys(MECH_PALETTES);
+
+// ---------------------------------------------------------------------------
+// Texel density — ONE number for the whole mech
+// ---------------------------------------------------------------------------
+
+/**
+ * Texels per metre of mech surface. Every armour map is baked so that
+ * `size / MECH_TILE_METRES` lands on exactly this, and MechFactory derives every
+ * part's UV scale from `MECH_TILE_METRES` alone. Nothing else is allowed to pick
+ * its own tiling — inconsistent texel density is the single most legible
+ * "this is a hobby project" tell in a side-by-side.
+ */
+export const MECH_TEXELS_PER_M = 320;
+
+/**
+ * World size of one texture tile, in metres.
+ *
+ * Holding texels/m constant is only HALF of consistency. The forge's plate
+ * splitter is depth-capped, so a tile contains roughly the same 30-60 plates no
+ * matter what `panelScale` says, and its noise fields are specified in cycles
+ * PER TILE. That means the world size of a plate, a grime blotch and a chip is
+ * set by the tile's world size, not by its resolution. The previous bake ran
+ * three sets at 3.2 m / 2.4 m / 1.6 m per tile — all at 320 texels/m, but with
+ * grime blobs at 40 cm on the chest, 30 cm on the arms and 20 cm on the joints.
+ * That is why the accent pauldron read visibly coarser and blotchier than the
+ * plates around it. Every set is now baked at 1024² on the SAME 3.2 m tile.
+ */
+export const MECH_TILE_METRES = 3.2;
+
+/** Resolution every mech map is baked at: 3.2 m * 320 texels/m. */
+const MECH_TEX_SIZE = Math.round(MECH_TILE_METRES * MECH_TEXELS_PER_M); // 1024
+
+/**
+ * Speckle guard (see RECOLOR). `SPECKLE_LOD` is the mip bias of the reference
+ * tap: 2.6 is a ~6-texel neighbourhood, i.e. ~2 cm of hull at this density —
+ * comfortably above the forge's 4-texel scratch noise and comfortably below its
+ * chip cells (~54 texels) and rivets (~6 texels across, which survive because
+ * their residual is only partly removed at 0.8 strength).
+ */
+const SPECKLE_CUT = 0.80;
+const SPECKLE_LOD = 2.6;
 
 // ---------------------------------------------------------------------------
 // Shader injection
@@ -86,6 +131,8 @@ uniform float uDamage;
 uniform vec3 uSoot;
 uniform vec3 uDamageGlow;
 uniform float uSeamDark;
+uniform float uSpeckle;
+uniform float uSpeckleLod;
 // Written by the recolour chunk, read again by roughness/metalness further down
 // the chunk order: 1 where the paint has been abraded off to bare metal.
 float acChipG = 0.0;
@@ -104,11 +151,33 @@ const RECOLOR = /* glsl */`
 #include <map_fragment>
 {
   vec3 acTex = diffuseColor.rgb;
+#ifdef USE_MAP
+  // --- speckle guard ------------------------------------------------------
+  // The forge lays its scratch field down at ~220 cycles per tile, i.e. about
+  // FOUR TEXELS per feature. At any sane texel density that is not wear, it is
+  // white noise: a few percent of texels sit far above their neighbours, the
+  // recolour below promotes each isolated one to polished bare alloy, and the
+  // armour ends up looking like a photograph taken at ISO 25600 rather than
+  // like chipped paint.
+  //
+  // Fix it by frequency rather than by amplitude, because amplitude is shared
+  // with the chipping we want to keep. Take a second tap several mips up and
+  // subtract only the POSITIVE residual: isolated bright specks flatten toward
+  // their neighbourhood, while dark seam lines (a negative residual) and the
+  // large chip/grime fields (present in both taps) are untouched. The clamp
+  // bounds the correction to real speckle amplitude so that a distant fragment,
+  // whose base tap is already several mips up, cannot have its plate tinting
+  // subtracted away.
+  vec3 acLo = texture2D( map, vMapUv, uSpeckleLod ).rgb;
+  acTex -= clamp( acTex - acLo, vec3( 0.0 ), vec3( 0.10 ) ) * uSpeckle;
+#endif
   float acLum = max( dot( acTex, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 );
   vec3 acSlot = uSlots[0] * vMask.x + uSlots[1] * vMask.y + uSlots[2] * vMask.z + uSlots[3] * vMask.w;
   // Ratio is soft-limited: without it a bright chip multiplies a light palette
   // straight past 1.0 and blows out, and a dark seam crushes to absolute black.
-  float acRatio = clamp( acLum / uTexMean, 0.16, 2.6 );
+  // The floor is 0.22 rather than 0.16 because 0.16 * uSeamDark took the deepest
+  // seams to ~3% of the paint's albedo — a black hole, not a shadowed groove.
+  float acRatio = clamp( acLum / uTexMean, 0.22, 2.6 );
   vec3 acTint = acSlot * acRatio;
   acChipG = smoothstep( 1.32, 2.05, acRatio );
   // Chipped paint reveals bare alloy: hue drops out, value tracks the texture.
@@ -159,7 +228,7 @@ const DAMAGE_GLOW = /* glsl */`
 totalEmissiveRadiance += uDamageGlow * ( uDamage * uDamage ) * smoothstep( 0.28, 0.95, acSeam ) * 3.0;
 `;
 
-function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55) {
+function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55, speckle = SPECKLE_CUT) {
   const c = (h) => new THREE.Color(h).convertSRGBToLinear();
   return {
     uSlots: { value: [c(palette.base), c(palette.accent), c(palette.trim), c(palette.steel)] },
@@ -167,6 +236,8 @@ function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55) {
     uSlotMetal: { value: new THREE.Vector4(metal[0], metal[1], metal[2], metal[3]) },
     uTexMean: { value: texMean },
     uSeamDark: { value: seamDark },
+    uSpeckle: { value: speckle },
+    uSpeckleLod: { value: SPECKLE_LOD },
     uDamage: { value: 0 },
     uSoot: { value: c(palette.soot) },
     uDamageGlow: { value: c(palette.glowHot).multiplyScalar(1.4) },

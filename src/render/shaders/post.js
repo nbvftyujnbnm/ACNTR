@@ -319,6 +319,7 @@ uniform float uBandDensity;
 uniform float uBandHeight;
 uniform float uBandThickness;
 uniform float uAerialDensity;
+uniform float uAerialRamp;
 uniform float uFogStrength;
 uniform float uAOEnabled;
 uniform float uSSREnabled;
@@ -352,7 +353,12 @@ void main() {
     // AO is an indirect-visibility term. Letting it multiply direct light and
     // emissives is what makes cheap SSAO read as dirt, so bright pixels keep
     // their energy.
-    float protect = smoothstep( 0.55, 3.0, luma( color ) );
+    //
+    // The window used to open at 0.55, which is below the radiance of plain
+    // SUNLIT SAND — so the one place a contact shadow is most visible was also
+    // the place the AO was being 40% suppressed. Emissives and specular glints
+    // live an order of magnitude above lit ground; protect those, not the floor.
+    float protect = smoothstep( 1.2, 6.0, luma( color ) );
     color *= mix( ao, 1.0, protect );
   }
 
@@ -373,7 +379,15 @@ void main() {
     float tBand = uBandDensity * dist *
       ( bandRho( uCameraPos.y ) + 4.0 * bandRho( midY ) + bandRho( wp.y ) ) * ( 1.0 / 6.0 );
 
-    float tAir = uAerialDensity * dist;
+    // Aerial perspective, range-ramped. A strictly linear tau means the only
+    // way to bury a 2 km ridge is to also veil the 150 m gantry in front of it,
+    // which is precisely how midground material read gets destroyed. The ramp
+    // rises from 0.22 of full extinction at the camera to 1.0 far away, half of
+    // it reached at uAerialRamp metres — a clean basin under a distant dust
+    // wall. It costs one divide and stays monotonic, so it cannot invert depth.
+    float rn = dist / max( uAerialRamp, 1.0 );
+    float ramp = 0.22 + 0.78 * ( rn / ( 1.0 + rn ) );
+    float tAir = uAerialDensity * dist * ramp;
 
     float tau = ( tDeck + tBand + tAir ) * uFogStrength;
 

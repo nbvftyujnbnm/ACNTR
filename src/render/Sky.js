@@ -28,9 +28,12 @@ export class Sky {
 
     /** Live-tweakable atmosphere description. Call `bake()` after big changes. */
     this.params = {
-      // Low enough to rake, high enough that horizontal ground still receives a
-      // dominant key: sin(17) = 0.29 against sin(12.5) = 0.22, a third more.
-      sunElevation: 17.0 * (Math.PI / 180),
+      // 13.5 degrees. Lower than the previous 17 on purpose: the terrain is a
+      // dune field, and a dune field only shows its FORM when the key rakes
+      // across it. At 17 the crests and troughs were within a few percent of
+      // each other and the plain read as one flat sheet of sand. The 20% of
+      // irradiance lost on horizontal ground is bought back on the key.
+      sunElevation: 13.5 * (Math.PI / 180),
       // Chosen so the key rakes ACROSS both review framings rather than sitting
       // behind the camera: side-key on the hero pose, back-side on the vista.
       sunAzimuth: -0.35,
@@ -40,17 +43,31 @@ export class Sky {
       // Tight, not broad. A wide Mie lobe turns the whole sun side of the sky
       // into a single blown highlight, which then feeds the bloom chain a
       // quarter-frame of white — REVIEW calls that an automatic failure.
-      mieStrength: 0.72,
+      mieStrength: 0.66,
       mieG: 0.845,
       rayleigh: 0.34,
-      sunIntensity: 190,
-      sunAngular: 0.0165,
+      // The disc feeds the bloom chain. At 190 with a 0.0165 rad radius it was a
+      // ~32 px blob of 190 linear, which survived the prefilter clamp, filled
+      // every bloom mip and came out of the tonemap as a flat white smear with
+      // no structure. A smaller, less absurd disc still clips to white in the
+      // core (120 x 0.62 exposure is 74) but leaves the falloff to the mip
+      // chain instead of to the clamp.
+      sunIntensity: 120,
+      sunAngular: 0.0138,
       // How much wider / dimmer the disc becomes for the IBL bake. A 0.0165 rad
       // disc is a third of a texel on a 256px cube face — it aliases into
       // fireflies. Widening it ~7x and dropping the peak keeps roughly the same
       // integrated energy while giving metals a real, resolvable sun blob to
       // reflect (that blob is what draws the chamfer glints).
-      envSunWiden: 7.0,
+      envSunWiden: 6.5,
+      // Peak radiance of the baked sun blob is sunIntensity * this, and that
+      // number is what a smooth metal rail reflects straight into the frame. At
+      // 19 (the old 190 x 0.10) a 300 m conveyor caught a highlight three stops
+      // past the tonemap's clip point along its entire length, which is the
+      // white lens in the vista. 12 lands just under the shoulder, so the same
+      // highlight rolls off instead. The crisp chamfer glints it used to carry
+      // now come from the ANALYTIC sun specular, which went up 45% with the key
+      // — a sharper and more physical source for them anyway.
       envSunGain: 0.10,
       cloudCover: 0.52,
       cloudOpacity: 0.86,
@@ -73,8 +90,13 @@ export class Sky {
       sunDisc: new THREE.Color(1.000, 0.845, 0.640),
       cloudDark: new THREE.Color(0.062, 0.064, 0.072),
       cloudLit: new THREE.Color(0.420, 0.372, 0.318),
-      /** Lower hemisphere seen only by the IBL bake: sunlit ground bounce. */
-      groundBake: new THREE.Color(0.150, 0.122, 0.088),
+      /**
+       * Lower hemisphere seen only by the IBL bake: sunlit ground bounce.
+       * A pale desert under a raking sun is a genuinely strong bounce source —
+       * it is what keeps a mech's undersides and shadow-side flank off black,
+       * and it is warm, so it also splits temperature against the cool sky fill.
+       */
+      groundBake: new THREE.Color(0.178, 0.142, 0.100),
     };
 
     /** @type {THREE.Vector3} normalised, points FROM origin TOWARD the sun */
@@ -103,18 +125,35 @@ export class Sky {
      */
     this.fogParams = {
       color: new THREE.Color(),        // mid haze (contract field)
-      density: 0.0042,                 // deck density at `height` (contract field)
+      density: 0.0034,                 // deck density at `height` (contract field)
       height: 2,                       // deck base altitude, metres (contract field)
-      falloff: 0.060,                  // 1/m vertical falloff of the deck
+      // 0.10 = a 10 m e-folding height. The deck used to e-fold over 17 m,
+      // which put its half-density surface above the roof line of most of the
+      // level — so it behaved like plain distance fog on the midground instead
+      // of like dust lying on the ground. Tightening it is what lets a 120 m
+      // structure keep its material read while the plain it stands on still
+      // dissolves.
+      falloff: 0.100,
       deckColor: new THREE.Color(),
       bandColor: new THREE.Color(),
       // A tight stratum well clear of the deck. The gap of clean air between
       // the two is what makes each of them read as a LAYER instead of as fog.
-      bandDensity: 0.0028,
+      // Thinned: at 0.0028 it was contributing more optical depth at 250 m than
+      // the true aerial term, i.e. the "layer" was doing the distance fog's job.
+      bandDensity: 0.0013,
       bandHeight: 55,
       bandThickness: 16,
       aerialColor: new THREE.Color(),
-      aerialDensity: 0.00075,
+      // Aerial perspective now carries the far distance almost on its own, and
+      // it ramps in with range (see `aerialRamp`) instead of accumulating from
+      // the camera. Net effect versus the old numbers: ~40% less veiling at
+      // 150-250 m, ~15% more past 700 m.
+      aerialDensity: 0.0012,
+      // Range in metres at which the aerial term reaches half of its full
+      // per-metre extinction. Models a clean basin under a distant dust wall:
+      // the first couple of hundred metres of air really are clearer than the
+      // column out to the ridges.
+      aerialRamp: 250,
       sunColor: new THREE.Color(),
     };
 
@@ -245,12 +284,19 @@ export class Sky {
     );
 
     // Ground dust: warmer than the mid haze, because it is the layer the low
-    // sun actually rakes through — but no brighter, or the midground turns to
-    // milk again and every value in it collapses together.
-    p.deckColor.copy(c.horizon).lerp(c.sunTint, 0.10).multiplyScalar(0.94);
+    // sun actually rakes through — but much DARKER than it looks like it should
+    // be. This is the single value that decides whether the frame reads as milk.
+    // Dust lying on the ground is self-shadowing: it is lit by a sun that has
+    // already crossed most of the dust column, so its radiance sits well below
+    // the sky's. At 0.94 x horizon the deck was brighter than the shadowed sand
+    // it was veiling, so every distant surface got LIGHTER as it receded and the
+    // whole lower half of the frame collapsed to one pale value.
+    p.deckColor.copy(c.horizon).lerp(c.sunTint, 0.10).multiplyScalar(0.70);
 
-    // Smog band: lit from below by the ground bounce, so warmer again.
-    p.bandColor.copy(c.horizon).lerp(c.sunTint, 0.15).multiplyScalar(1.00);
+    // Smog band: lit from below by the ground bounce, so warmer again — and it
+    // sits higher, in cleaner air, so it stays brighter than the deck. That
+    // difference is what draws the visible haze line across the towers.
+    p.bandColor.copy(c.horizon).lerp(c.sunTint, 0.15).multiplyScalar(0.86);
 
     // Aerial perspective: cool and pale. This is the term that separates a
     // distant ridge from the one in front of it — if it is warm like the rest,
@@ -297,6 +343,7 @@ export class Sky {
       bandThickness: f.bandThickness,
       aerialColor: f.aerialColor,
       aerialDensity: f.aerialDensity,
+      aerialRamp: f.aerialRamp,
     });
   }
 

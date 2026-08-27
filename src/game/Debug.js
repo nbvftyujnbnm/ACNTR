@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { bus, EV } from '../core/EventBus.js';
+import { mulberry32 } from '../core/MathUtils.js';
+import { rollPart } from '../loot/PartsDB.js';
 
 /**
  * Debug / capture API.
@@ -241,12 +243,8 @@ export class Debug {
    * Lives here rather than in the pose script because pose scripts run against
    * a production bundle, where raw `/src/...` module paths do not resolve.
    */
-  async seedInventory(count = 24, seed = 20240826) {
+  seedInventory(count = 24, seed = 20240826) {
     try {
-      const [{ rollPart }, { mulberry32 }] = await Promise.all([
-        import('../loot/PartsDB.js'),
-        import('../core/MathUtils.js'),
-      ]);
       const rng = mulberry32(seed);
       const inv = this.game.loadout?.inventory;
       if (!inv) return this;
