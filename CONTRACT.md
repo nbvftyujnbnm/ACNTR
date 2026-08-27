@@ -686,3 +686,26 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   forearm in the DEFAULT STANDING POSE. The thigh's own box is the widest thing on the leg
   again; if anyone widens the thigh past 1.13, re-run the arm/leg clearance check before
   shipping it.
+- 2026-08-27 [mech] PAINT OWNS DARKNESS, LIGHTING OWNS SHADOW-SIDE LEGIBILITY. Palette
+  bases are back down to **0.075..0.15 linear (most near 0.09)**, i.e. dark painted armour.
+  This value has now been wrong in both directions — 0.15 read black on the shadow side,
+  0.235 turned the sunlit arms into a white slab, and 0.19 put the whole mech at the same
+  value as the pale hangar wall behind it so it lost its silhouette into the background. The
+  division of labour is the fix, not a compromise number: if the shadow side crushes at these
+  values it is a FILL problem and must be solved with fill. Do not lift the paint to
+  compensate — that is the loop that produced the pale mech.
+- 2026-08-27 [mech] Lower-leg and pelvis masses up 15-25%: shin 0.94 -> 1.22 m across
+  (10.5% -> 13.6% of height), sole 1.04 -> 1.22 (foot now 1.55 m across the claws), waist
+  block 1.06 -> 1.24, pelvis 1.24 -> 1.42, hip skirts flared. The frame read tall and
+  spindly at hero distance. The lower leg is the one place mass is free: the hands bottom
+  out at y 2.91 and the shin's top is 2.10, so nothing down there can reach the arms. The
+  THIGH is not free — it is capped by the arm's rest-pose clearance (measured 2.3 cm), so
+  its added mass went into Z. Re-run the arm/leg clearance check before widening it in X.
+- 2026-08-27 [world/Level] LIKELY BUG, unowned: a flat panel has been visible floating in
+  the sky in the upper-right of the hero frame across several iterations. A raycast through
+  that exact screen point (tools/probes/floaters.js) hits `ContainmentField` — the arena
+  boundary, a ShaderMaterial parented to `Level` — at ~477 m, at y=94 with 85 m of clearance
+  above the terrain, and it occupies that WHOLE screen region. Hypothesis: the boundary
+  renders as discrete panels and one segment is failing to fade out, so it reads as an opaque
+  floating rectangle instead of a subtle boundary shimmer. Whoever next owns Level should
+  check the field's per-panel fade/alpha against camera distance and view angle.

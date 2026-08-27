@@ -759,7 +759,11 @@ export function buildCore(o = {}) {
   // Lower waist block (narrow — the classic AC wasp waist). It plunges well below
   // the torso bone's origin so that pitching/twisting the torso can never open a
   // gap onto the pelvis underneath it.
-  b.box('mech', MASK.TRIM, 1.06, 0.80, 0.90, 0.045, 0, 0.14, 0.0, 0, 0, 0, { taperX: 1.14, taperZ: 1.12 });
+  // 1.24, not 1.06: the wasp waist was pinching to 57% of the chest's width and
+  // the frame read as an hourglass rather than as a machine. 67% still reads as a
+  // waist against a 1.86 m chest, and it stops the torso looking like it is about
+  // to snap at the belt line from hero distance.
+  b.box('mech', MASK.TRIM, 1.24, 0.80, 1.02, 0.045, 0, 0.14, 0.0, 0, 0, 0, { taperX: 1.10, taperZ: 1.08 });
   // rear spine housing
   b.box('armor', MASK.TRIM, W * 0.80, 1.45, 0.34, 0.045, 0, 1.38, 0.70, -0.05, 0, 0);
 
@@ -1046,8 +1050,12 @@ export function buildPelvis(o = {}) {
   const b = new GeoBuilder(rng);
   const hx = MECH_DIMS.hipX;
 
-  b.box('armor', MASK.BASE, 1.24, 0.58, 0.94, 0.05, 0, 0.02, 0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
-  b.box('mech', MASK.TRIM, 1.42, 0.30, 0.70, 0.035, 0, -0.14, 0);
+  // Hip block, widened with the waist above and the legs below it. The pelvis is
+  // where the frame's mass has to visibly transfer into the legs; at 1.24 it was
+  // narrower than the waist block sitting on top of it, which is why the whole
+  // middle of the mech read as a taper down to nothing.
+  b.box('armor', MASK.BASE, 1.42, 0.62, 1.06, 0.055, 0, 0.02, 0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
+  b.box('mech', MASK.TRIM, 1.58, 0.32, 0.80, 0.035, 0, -0.14, 0);
 
   for (let s = -1; s <= 1; s += 2) {
     // hip actuator housing
@@ -1055,8 +1063,8 @@ export function buildPelvis(o = {}) {
     b.addM('armor', MASK.BASE, chamferCyl(0.30, 0.26, 0.22, 14, 0.03),
       _m.compose(_pv.set(s * (hx + 0.02), -0.10, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
     // skirt plates: front and rear, angled outward
-    b.addM('armor', MASK.BASE, plate(beveledRectShape(0.50, 0.72, { bl: 0.20, br: 0.20 }), 0.10, 0.026),
-      _m.compose(_pv.set(s * 0.40, -0.34, -0.50), _q.setFromEuler(_e.set(0.18, s * 0.22, 0)), _sc.set(1, 1, 1)));
+    b.addM('armor', MASK.BASE, plate(beveledRectShape(0.60, 0.80, { bl: 0.22, br: 0.22 }), 0.11, 0.028),
+      _m.compose(_pv.set(s * 0.46, -0.36, -0.54), _q.setFromEuler(_e.set(0.18, s * 0.22, 0)), _sc.set(1, 1, 1)));
     // Hardware ON the front skirt. This is the largest unbroken plate on the
     // whole frame and it hangs clear of the hip cavity, so it is the one surface
     // the sky can reach unoccluded — measured at 129,127,129 in the hero frame
@@ -1081,8 +1089,8 @@ export function buildPelvis(o = {}) {
       onSkirt('armor', MASK.ACCENT, chamferBox(0.34, 0.065, 0.035, 0.010), 0, -0.10);
       onSkirt('mech', MASK.TRIM, chamferBox(0.30, 0.05, 0.04, 0.010), 0, -0.22);
     }
-    b.addM('armor', MASK.BASE, plate(beveledRectShape(0.46, 0.64, { bl: 0.18, br: 0.18 }), 0.10, 0.026),
-      _m.compose(_pv.set(s * 0.44, -0.30, 0.48), _q.setFromEuler(_e.set(-0.16, s * -0.20, 0)), _sc.set(1, 1, 1)));
+    b.addM('armor', MASK.BASE, plate(beveledRectShape(0.56, 0.72, { bl: 0.20, br: 0.20 }), 0.11, 0.028),
+      _m.compose(_pv.set(s * 0.50, -0.32, 0.52), _q.setFromEuler(_e.set(-0.16, s * -0.20, 0)), _sc.set(1, 1, 1)));
     // hip thruster: nozzle rearward + emissive core
     _q.setFromEuler(_e.set(Math.PI * 0.5 + 0.28, 0, 0));
     _pv.set(s * (hx + 0.10), 0.10, 0.42); _sc.set(1, 1, 1);
@@ -1330,12 +1338,14 @@ export function buildThigh(o = {}) {
   const L = MECH_DIMS.thigh;
   const b = new GeoBuilder(rng);
 
-  // hip joint housing
-  axleJoint(b, 'mech', MASK.TRIM, 0, 0, 0, 0.30, 0.52, 16);
-  b.box('armor', MASK.BASE, 0.86, 0.52, 0.92, 0.055, 0, -0.18, 0, 0, 0, 0, { taperX: 0.94 });
+  // Hip joint housing. Width here is capped by the ARM, not by taste: the hands
+  // hang past this and the measured rest-pose clearance is only a few cm. Depth
+  // is free, so most of the added mass goes into Z.
+  axleJoint(b, 'mech', MASK.TRIM, 0, 0, 0, 0.32, 0.56, 16);
+  b.box('armor', MASK.BASE, 0.88, 0.54, 1.00, 0.055, 0, -0.18, 0, 0, 0, 0, { taperX: 0.94 });
 
   // main thigh mass
-  b.box('armor', MASK.BASE, 0.80, L * 0.74, 0.90, 0.06, 0, -L * 0.50, rev ? 0.06 : -0.02, 0, 0, 0,
+  b.box('armor', MASK.BASE, 0.90, L * 0.76, 1.04, 0.06, 0, -L * 0.50, rev ? 0.06 : -0.02, 0, 0, 0,
     { taperX: rev ? 1.06 : 0.86, taperZ: rev ? 1.02 : 0.88 });
   // outer / front armour plates
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.60, L * 0.60, { tl: 0.20, tr: 0.20, bl: 0.12, br: 0.12 }), 0.12, 0.03),
@@ -1373,23 +1383,32 @@ export function buildShin(o = {}) {
   const L = MECH_DIMS.shin;
   const b = new GeoBuilder(rng);
 
+  // THE LOWER LEG CARRIES THE WEIGHT OF THE READ.
+  // At 0.94 across the shroud and 0.96 across the skirts this was 10.5% of the
+  // mech's height, against a chest 21% wide — from hero distance the frame read
+  // tall and spindly, like a figure on stilts, no matter how good the close-up
+  // detail was. AC bipeds run their lower leg at 14-16% of height. Everything
+  // here is up 15-25%, which lands the shin at 1.32 m across (14.7%) and the sole
+  // at 1.49 m. None of it can touch the arms: the hands bottom out at y 2.91 and
+  // the shin's top is 2.10, so the lower leg is the one place on the frame where
+  // mass is free.
   // knee cap
-  b.box('armor', MASK.ACCENT, 0.62, 0.44, 0.56, 0.045, 0, -0.10, rev ? 0.24 : -0.24, 0, 0, 0, { taperZ: 0.9 });
-  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.17, 0.68, 14);
+  b.box('armor', MASK.ACCENT, 0.74, 0.48, 0.66, 0.05, 0, -0.10, rev ? 0.26 : -0.26, 0, 0, 0, { taperZ: 0.9 });
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.19, 0.78, 14);
 
   // structural shin core
-  b.box('mech', MASK.TRIM, 0.56, L * 0.86, 0.60, 0.04, 0, -L * 0.50, 0);
+  b.box('mech', MASK.TRIM, 0.70, L * 0.86, 0.74, 0.045, 0, -L * 0.50, 0);
 
   // LARGE armour shroud — the dominant leg silhouette element
-  const shroudZ = rev ? 0.46 : -0.44;
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.94, L * 0.90, { tl: 0.30, tr: 0.30, bl: 0.22, br: 0.22 }), 0.20, 0.045),
+  const shroudZ = rev ? 0.48 : -0.46;
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(1.10, L * 0.92, { tl: 0.32, tr: 0.32, bl: 0.24, br: 0.24 }), 0.24, 0.05),
     _m.compose(_pv.set(0, -L * 0.48, shroudZ), _q.setFromEuler(_e.set(rev ? -0.06 : 0.06, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
   // side skirts wrapping the shroud
   for (let i = -1; i <= 1; i += 2) {
-    b.box('armor', MASK.BASE, 0.16, L * 0.84, 0.78, 0.04, i * 0.40, -L * 0.50, shroudZ * 0.35, 0, 0, i * -0.05,
+    b.box('armor', MASK.BASE, 0.20, L * 0.84, 0.86, 0.045, i * 0.50, -L * 0.50, shroudZ * 0.35, 0, 0, i * -0.05,
       { taperX: 0.8, taperZ: 0.86 });
   }
-  b.box('armor', MASK.TRIM, 0.66, L * 0.5, 0.30, 0.035, 0, -L * 0.44, -shroudZ * 0.78);
+  b.box('armor', MASK.TRIM, 0.78, L * 0.5, 0.34, 0.04, 0, -L * 0.44, -shroudZ * 0.78);
 
   // ankle piston cluster
   for (let i = -1; i <= 1; i += 2) {
@@ -1423,29 +1442,31 @@ export function buildFoot(o = {}) {
   const d = o.detail !== 'low';
   const b = new GeoBuilder(rng);
   // reverse-joint feet are shorter and more claw-like
-  const len = rev ? 1.18 : 1.54;
+  const len = rev ? 1.26 : 1.66;
   const fwd = rev ? -0.38 : -0.10;
 
   // ankle block
-  b.box('mech', MASK.TRIM, 0.50, 0.32, 0.50, 0.035, 0, -0.15, 0);
-  b.box('armor', MASK.BASE, 0.70, 0.28, 0.74, 0.04, 0, -0.26, 0.02, 0, 0, 0, { taperX: 1.1, taperZ: 1.05 });
+  b.box('mech', MASK.TRIM, 0.58, 0.34, 0.58, 0.035, 0, -0.15, 0);
+  b.box('armor', MASK.BASE, 0.80, 0.30, 0.84, 0.045, 0, -0.26, 0.02, 0, 0, 0, { taperX: 1.1, taperZ: 1.05 });
 
   // Sole. A 60-tonne machine needs a footprint you could land a helicopter on —
-  // small feet are the fastest way to make a mech read as a toy.
-  b.box('armor', MASK.BASE, 1.04, 0.24, len, 0.055, 0, -0.40, fwd, 0, 0, 0,
+  // small feet are the fastest way to make a mech read as a toy. Widened with the
+  // shin above it: the foot has to stay the widest thing on the leg or the whole
+  // limb reads as a peg rather than as something the mech is standing ON.
+  b.box('armor', MASK.BASE, 1.22, 0.26, len, 0.06, 0, -0.40, fwd, 0, 0, 0,
     { taperFrontX: 0.74, taperZ: 1.0 });
   // toe plate, angled up
-  b.box('armor', MASK.BASE, 0.78, 0.17, 0.48, 0.035, 0, -0.36, fwd - len * 0.50, -0.24, 0, 0, { taperFrontX: 0.7 });
+  b.box('armor', MASK.BASE, 0.90, 0.19, 0.52, 0.04, 0, -0.36, fwd - len * 0.50, -0.24, 0, 0, { taperFrontX: 0.7 });
   // heel plate + spur
-  b.box('armor', MASK.BASE, 0.72, 0.22, 0.40, 0.035, 0, -0.34, fwd + len * 0.48, 0.20, 0, 0, { taperFrontX: 0.86 });
-  b.box('mech', MASK.TRIM, 0.30, 0.36, 0.24, 0.03, 0, -0.30, fwd + len * 0.60, 0.35, 0, 0);
+  b.box('armor', MASK.BASE, 0.84, 0.24, 0.44, 0.04, 0, -0.34, fwd + len * 0.48, 0.20, 0, 0, { taperFrontX: 0.86 });
+  b.box('mech', MASK.TRIM, 0.34, 0.38, 0.26, 0.03, 0, -0.30, fwd + len * 0.60, 0.35, 0, 0);
 
   // splay claws
   for (let i = -1; i <= 1; i += 2) {
-    b.box('armor', MASK.BASE, 0.26, 0.18, 0.64, 0.03,
-      i * 0.54, -0.40, fwd - len * 0.16, 0, i * -0.16, i * -0.22, { taperFrontX: 0.6 });
+    b.box('armor', MASK.BASE, 0.30, 0.20, 0.70, 0.035,
+      i * 0.62, -0.40, fwd - len * 0.16, 0, i * -0.16, i * -0.22, { taperFrontX: 0.6 });
     // outrigger stabiliser bar tying the claw back into the sole
-    b.box('mech', MASK.TRIM, 0.22, 0.10, 0.26, 0.02, i * 0.46, -0.38, fwd + len * 0.16, 0, 0, i * -0.14);
+    b.box('mech', MASK.TRIM, 0.26, 0.11, 0.28, 0.02, i * 0.54, -0.38, fwd + len * 0.16, 0, 0, i * -0.14);
   }
 
   // ankle actuators

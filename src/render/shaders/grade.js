@@ -226,9 +226,20 @@ void main() {
            + texture2D( tColor, uv - vec2( uTexel.x, 0.0 ) ).rgb
            + texture2D( tColor, uv + vec2( 0.0, uTexel.y ) ).rgb
            + texture2D( tColor, uv - vec2( 0.0, uTexel.y ) ).rgb;
+    // Noise gate on the RELATIVE high-pass. An unsharp mask has no way to tell
+    // a panel line from the dither this pipeline deliberately adds, and it
+    // amplifies both. Measured on the vista pose: the 2 km ridge, which sits
+    // under 98.5% veiling and therefore has almost no real signal left,
+    // nonetheless carries a coherent 1.4-code vertical modulation that the
+    // sharpen was lifting out of the noise floor. Real material edges — a plate
+    // seam, a chamfer highlight, a silhouette — run 10-50% of the local
+    // luminance; grain, dither and TAA residue run well under 3%. Gating
+    // between 0.6% and 3% therefore costs nothing that is actually detail and
+    // stops the pass from sharpening its own noise.
     float c0 = luma( color );
-    float hp = c0 - luma( n ) * 0.25;
-    float k = 1.0 + uSharpen * hp / max( c0, 1e-4 );
+    float hpn = ( c0 - luma( n ) * 0.25 ) / max( c0, 1e-4 );
+    float gate = smoothstep( 0.006, 0.030, abs( hpn ) );
+    float k = 1.0 + uSharpen * gate * hpn;
     color = max( color * clamp( k, 0.2, 2.0 ), vec3( 0.0 ) );
   }
 

@@ -27,61 +27,67 @@ import { clamp } from '../core/MathUtils.js';
  * term — a base darker than ~0.09 linear (roughly #4a4f55 in sRGB) has no
  * headroom left and collapses to black the moment the key light softens.
  *
- * Every `base` now sits at **0.10..0.46 linear, most of them near 0.19**. The
- * previous set bottomed out at 0.06 (vespers) and averaged 0.15, which survived
- * direct sun but went to pure black on the shadow side — all the panel work,
- * chipping and stencilling this file exists to produce was simply not there on
- * half of every frame. Grime, seam AO and the tonemap still take the look back
- * down; what they can no longer do is take it to zero.
+ * THE TARGET IS DARK PAINTED ARMOUR. An AC holds its silhouette against a bright
+ * industrial backdrop, and it does that on VALUE, not on outline. Every `base`
+ * therefore sits at **0.075..0.15 linear, most of them near 0.09**.
+ *
+ * This number has been wrong in both directions. It was 0.15 and read black on
+ * the shadow side; the fix pushed it to 0.19-0.235, and at 0.235 the sunlit arms
+ * went to a white slab while at 0.19 the whole mech sat at the same value as the
+ * pale hangar wall behind it and lost its silhouette into the background. The
+ * resolution is a division of labour, not a compromise value: **paint owns
+ * darkness, lighting owns shadow-side legibility.** If the shadow side crushes at
+ * these values that is a fill-light problem and must be fixed with fill — do not
+ * come back here and lift the paint to compensate, because that is the exact loop
+ * that produced the pale mech.
  *
  * `base` is the albedo of an AVERAGE texel, and the average is dragged down by
  * grime and seams, so a CLEAN plate renders about 1.25x this (the baked map's
  * 75th-90th percentile sits at ratio 1.14-1.35 against `armorMean`; re-measure
- * that if you retune the forge parameters). 0.19 here therefore paints a
- * clean plate at ~0.24 linear, which is real battleship grey. An earlier pass at
- * 0.235 put clean plates at 0.29 and the sunlit side of the arms went to a white
- * slab that read as unpainted metal.
+ * that if you retune the forge parameters). 0.09 here therefore paints a clean
+ * plate at ~0.11 linear — dark battleship grey, the value AC6 actually uses.
  *
  * Chroma matters as much as value. Every base has since been pushed away from
  * its own luminance (which leaves `dot(luminanceWeights, rgb)` exactly unchanged)
- * until it carries real hue: raven went from 0.115 to 0.197 saturation at an
- * identical 0.189 linear. A near-neutral paint has nothing to hold on to when a
+ * until it carries real hue, and that chroma was preserved through the drop back
+ * to 0.09 — the values above are dark AND saturated, not dark and grey.
+ * A near-neutral paint has nothing to hold on to when a
  * warm key hits it, so the lit side of every part collapsed to the colour of the
  * sun and read as bare plastic while the shadow side, lit by the blue sky term,
  * stayed blue. Paint with chroma keeps its identity in both.
  */
 export const MECH_PALETTES = {
   raven: {
-    label: 'RAVEN', base: '#6e7989', accent: '#9b4235', trim: '#484e58',
-    steel: '#a4aab2', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
+    label: 'RAVEN', base: '#51555c', accent: '#8e3c30', trim: '#3a3d43',
+    steel: '#90959d', glow: '#ff7a2a', glowHot: '#ffab5e', soot: '#111214',
   },
   balteus: {
-    label: 'BALTEUS', base: '#546372', accent: '#3d6f8f', trim: '#39424f',
-    steel: '#9ea4ab', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
+    label: 'BALTEUS', base: '#475059', accent: '#376583', trim: '#343941',
+    steel: '#90969c', glow: '#5fdcff', glowHot: '#a6ecff', soot: '#0c0e11',
   },
   baws: {
-    label: 'BAWS', base: '#8e7c41', accent: '#5b5e64', trim: '#4b4e54',
-    steel: '#a5aab0', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
+    label: 'BAWS', base: '#685a2e', accent: '#53555b', trim: '#404246',
+    steel: '#91959b', glow: '#ffb833', glowHot: '#ffd97a', soot: '#15130f',
   },
   rad: {
-    label: 'RaD', base: '#beb59c', accent: '#b6702f', trim: '#4f4e4a',
-    steel: '#a5aab0', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
+    label: 'RaD', base: '#6f6c64', accent: '#a6662a', trim: '#504f4c',
+    steel: '#91959b', glow: '#ff9a2e', glowHot: '#ffc06a', soot: '#1a1815',
   },
   arquebus: {
-    label: 'ARQUEBUS', base: '#536488', accent: '#9d8a5c', trim: '#3d4959',
-    steel: '#a0a6af', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
+    label: 'ARQUEBUS', base: '#475167', accent: '#8f7e54', trim: '#343b44',
+    steel: '#90959e', glow: '#8fd2ff', glowHot: '#c6e8ff', soot: '#0e1015',
   },
   schneider: {
-    label: 'SCHNEIDER', base: '#6d7b87', accent: '#5f97a4', trim: '#474f56',
-    steel: '#a4aab1', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
+    label: 'SCHNEIDER', base: '#52585d', accent: '#568a96', trim: '#3b4044',
+    steel: '#90969c', glow: '#9df4ff', glowHot: '#d6faff', soot: '#171a1d',
   },
   vespers: {
-    label: 'VESPERS', base: '#625372', accent: '#715090', trim: '#473a52',
-    steel: '#9b94a4', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
+    label: 'VESPERS', base: '#534a5d', accent: '#674983', trim: '#3d3544',
+    steel: '#9992a2', glow: '#c98cff', glowHot: '#e4bcff', soot: '#0f0b12',
   },
   elcano: {
-    label: 'ELCANO', base: '#627e60', accent: '#77914f', trim: '#424f43',
-    steel: '#9ea49f', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
+    label: 'ELCANO', base: '#4b574a', accent: '#6c8448', trim: '#373e38',
+    steel: '#919692', glow: '#a8f26a', glowHot: '#cfff96', soot: '#0f120f',
   },
 };
 
@@ -311,7 +317,7 @@ const RECOLOR = /* glsl */`
     : 2.0;
   acChipG = smoothstep( 1.44, 1.80, acMacro ) * smoothstep( 1.12, 1.42, acLocal );
   // Chipped paint reveals bare alloy: hue drops out, value tracks the texture.
-  diffuseColor.rgb = mix( acTint, vec3( 0.26, 0.265, 0.275 ) * min( acRatio, 1.5 ), acChipG * 0.70 );
+  diffuseColor.rgb = mix( acTint, vec3( 0.20, 0.205, 0.215 ) * min( acRatio, 1.5 ), acChipG * 0.70 );
   // Panel seams are the single most important read on a mech. The baked map
   // already darkens them; this pushes the contrast further in linear space so
   // they survive tonemapping and distance. The curve is anchored so an AVERAGE
@@ -652,7 +658,9 @@ export class MechMaterials {
       aoMap: tex.aoMap,
       roughness: 1,
       metalness: 1,
-      envMapIntensity: 1.15,
+      // 0.95, not 1.15: the environment term is albedo-independent, so on dark
+      // paint it was a bigger share of the lit side than the paint itself.
+      envMapIntensity: 0.95,
       aoMapIntensity: 1.0,
       dithering: true,
       ...extra,
@@ -687,7 +695,14 @@ export class MechMaterials {
     // this wrong is what made the armour read as black plastic: a metal surface
     // has no diffuse lobe, so a dark base colour had nothing left to reflect but
     // a tinted environment the scene barely provides.
-    const rough = [0.92 + rb, 0.84 + rb, 1.06 + rb, 0.52 + rb];
+    // Painted armour is MATTE-TO-SATIN, and getting that wrong is why halving the
+    // palette's albedo barely dimmed the sunlit arm: at an effective ~0.5 the paint
+    // had a semi-gloss lobe, so the plate facing the key was showing a specular
+    // highlight, not its own colour, and no amount of darkening the paint could
+    // touch it. Base/accent/trim go up; STEEL deliberately stays at 0.52, because
+    // the whole reason machined metal reads as metal is that it keeps a tight
+    // highlight while the paint around it does not.
+    const rough = [1.12 + rb, 1.02 + rb, 1.18 + rb, 0.52 + rb];
     const metal = [0, 0, 0, 1];
 
     // Armour carries NO emissive of its own. Painting glow strips across every

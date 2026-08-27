@@ -80,6 +80,18 @@ void main() {
   // across half the screen (which is what makes AO crawl and smear).
   float radius = uRadius * clamp( 12.0 / max( -P.z, 1.0 ), 0.35, 1.0 );
 
+  // ONE radius, deliberately. MEASURED DEAD END, recorded so nobody repeats it:
+  // splitting this kernel into a short-range half (0.35 x radius, for a tight
+  // contact term) and a long-range half sounds like free multi-scale AO and is
+  // a straight regression on a greebled subject. At 0.35 x 1.55 m = 54 cm,
+  // every rivet, strake and panel step on the mech occludes the near samples,
+  // so that half of the kernel saturates almost everywhere on the hull and
+  // arrives as a CONSTANT dimmer rather than as a localised contact darkening.
+  // Measured on the hero pose against the single-radius build: the mech torso
+  // lost 8.6% of its mean AND 6.5% of its standard deviation, with p95 dropping
+  // 161 -> 147 — darker and flatter at the same time, which is the exact
+  // opposite of what a contact term is for. A tight contact shadow on geometry
+  // this dense needs a separate, depth-aware pass, not a share of these taps.
   float occ = 0.0;
   for ( int i = 0; i < AO_SAMPLES; i ++ ) {
     vec3 sp = P + ( TBN * uKernel[ i ] ) * radius;
