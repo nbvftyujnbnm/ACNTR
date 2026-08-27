@@ -94,6 +94,39 @@ export class Debug {
     return this;
   }
 
+  /**
+   * Drop the mech onto the terrain at (x, z). Review poses must not hard-code a
+   * world Y — the level has real terrain, so an absolute Y either buries the
+   * mech or floats it, and the shot silently becomes worthless.
+   */
+  placePlayerOnGround(x, z, yaw = 0, clearance = 0.05) {
+    const g = this.game.physics?.groundHeight?.(x, z);
+    return this.placePlayer(x, Number.isFinite(g) ? g + clearance : 0, z, yaw);
+  }
+
+  /** Put the mech on one of the level's authored spawn points. */
+  placePlayerAtSpawn(index = 0, yaw = 0) {
+    const sp = this.game.level?.spawnPoints?.[index];
+    if (!sp) return this.placePlayerOnGround(0, 0, yaw);
+    return this.placePlayerOnGround(sp.x, sp.z, yaw);
+  }
+
+  /**
+   * Frame the camera relative to the mech rather than in world space, so a
+   * pose keeps its composition wherever the mech happens to be standing.
+   * @param {{x,y,z}} offset camera position relative to the mech's feet
+   * @param {{x,y,z}} lookOffset look-at point relative to the mech's feet
+   */
+  cameraRelativeToPlayer(offset, lookOffset = { x: 0, y: 4.7, z: 0 }, fov = 34) {
+    const p = this.game.player?.root?.position;
+    if (!p) return this;
+    return this.setCamera(
+      { x: p.x + offset.x, y: p.y + offset.y, z: p.z + offset.z },
+      { x: p.x + lookOffset.x, y: p.y + lookOffset.y, z: p.z + lookOffset.z },
+      fov
+    );
+  }
+
   /** Force a rig pose without needing live input. */
   poseMech(state = {}) {
     const rig = this.game.player?.rig;

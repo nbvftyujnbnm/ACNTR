@@ -5,7 +5,7 @@
   debug.setHudVisible(true);
   debug.releaseCamera();
   debug.clearEnemies();
-  debug.placePlayer(0, 26, 120, 0);
+  debug.placePlayerOnGround(0, 120, 0, 26); // 26 m above terrain
   if (game.controller?.state) {
     game.controller.state.assaultBoost = true;
     game.controller.state.boosting = true;

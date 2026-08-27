@@ -6,7 +6,7 @@
   debug.setHudVisible(true);
   debug.releaseCamera();
   debug.clearEnemies();
-  debug.placePlayer(0, 22, 40, 0);
+  debug.placePlayerOnGround(0, 40, 0, 22); // 22 m above terrain
 
   debug.spawnEnemy('ac', -18, 14, -30, 2);
   debug.spawnEnemy('mt', 26, 0, -46, 1);

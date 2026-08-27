@@ -4,7 +4,7 @@
   const { debug, THREE } = window.__ACNTR__;
   debug.setHudVisible(false);
   debug.clearEnemies();
-  debug.placePlayer(0, 12, 30, 0);
+  debug.placePlayerOnGround(0, 30, 0, 12); // 12 m above terrain
   debug.poseMech({ boosting: true, grounded: false, speed: 70 });
 
   const e = debug.spawnEnemy('ac', -6, 10, -18, 2);
