@@ -1,0 +1,20 @@
+{
+  "name": "acntr",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ACNTR — high-speed mech looter shooter in Three.js",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "shot": "node tools/screenshot.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "vite": "^6.4.3"
+  }
+}
