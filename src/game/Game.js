@@ -19,6 +19,7 @@ import { Loadout } from '../loot/Loadout.js';
 import { HUD } from '../ui/HUD.js';
 import { Garage } from '../ui/Garage.js';
 import { AudioDirector } from '../audio/AudioDirector.js';
+import { installDebug } from './Debug.js';
 
 /**
  * Game wires every subsystem together and owns update order.
@@ -93,6 +94,7 @@ export class Game {
 
     this._wire();
     this._registerLoop();
+    this.debug = installDebug(this);
 
     this.state = 'playing';
     step(1, 'ready');
