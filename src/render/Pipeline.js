@@ -68,7 +68,7 @@ export class RenderPipeline {
       // Scene radiance went up ~3x when the key took over from the ambient, so
       // the exposure comes down to keep sunlit concrete around 0.6 display and
       // leave headroom for emissives to punch through the tonemap.
-      exposure: 0.645,
+      exposure: 0.638,
       sharpen: 0.30,
       tonemap: 'agx',         // 'agx' | 'aces'
 
@@ -122,10 +122,10 @@ export class RenderPipeline {
         // `power` is the shadow-targeted knob in this vec4 and the one that
         // decides whether the mech's unlit flank is readable. Because it is a
         // pow() on a [0,1] display value it moves the toe hard and the shoulder
-        // barely at all: dropping it from 1.14 to 0.98 raises a 0.07 shadow by
-        // 44% and a 0.80 highlight by 3.6%. Contrast and exposure cannot do
+        // barely at all: dropping it from 1.14 to 1.04 raises a 0.07 shadow by
+        // 40% and a 0.80 highlight by 2.4%. Contrast and exposure cannot do
         // that — they move the whole curve.
-        agxLook: new THREE.Vector4(1.13, 0.0, 0.98, 0.88),
+        agxLook: new THREE.Vector4(1.13, 0.0, 1.04, 0.88),
         // The frame's black point, applied last in the grade (see FINAL_FRAG).
         // AC6's shadows are deep but you can always read what is in them; a
         // crushed-to-black shadow is the giveaway of a hobby renderer.

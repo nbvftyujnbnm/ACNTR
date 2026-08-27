@@ -82,12 +82,19 @@ export class Lighting {
       // AC6 shadows are deep but never crushed; this is what keeps them open.
       // Carries much more of the ambient budget than it used to.
       fillIntensity: 1.75,
-      // How far above the anti-sun horizontal the bounce sits. Low on purpose:
-      // at 0.85 the fill was pointing almost straight down, so it landed on the
-      // terrain (already the brightest thing in frame) and missed the VERTICAL
-      // shadow-side plating that actually needed lifting. At 0.34 it rakes back
-      // across the mech's unlit flank and barely touches the ground.
-      fillElevation: 0.34,
+      // How far above the anti-sun horizontal the bounce sits, and the single
+      // most useful number in this rig — because it is the only knob that
+      // separates "shadow on the mech" from "shadow on the ground".
+      //
+      // At the original 0.85 the fill pointed almost straight down: it landed
+      // on the terrain, which is one enormous up-facing surface and already the
+      // brightest thing in frame, and missed the VERTICAL shadow-side plating
+      // entirely. At 0.10 it is nearly horizontal, so cos(theta) on the ground
+      // is 0.32 while cos(theta) on an unlit flank is 0.89. Measured on the two
+      // review poses, moving 0.34 -> 0.10 lifts the mech's dark side ~45% and
+      // DARKENS shadowed sand ~17% at the same time, which no exposure, gamma
+      // or contrast setting can do because those move the whole frame together.
+      fillElevation: 0.10,
       cascades: 4,
       shadowMapSize: 2048,
       // The camera's near plane is 0.35 m, which drags every automatic split
