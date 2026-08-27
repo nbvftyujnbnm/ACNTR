@@ -70,6 +70,11 @@ export class Game {
     this.controller = new PlayerController(this.player, this.input, this.physics, this.level);
     this.cameraRig = new CameraRig(this.engine.camera, this.player, this.input, this.physics);
     this.targeting = new TargetingSystem(this.engine.camera, this.player);
+    // Targeting needs physics for line-of-sight lock breaking and for the aim
+    // convergence raycast that makes arm-mounted weapons converge on what the
+    // crosshair is actually over, and input for the Tab hard-lock toggle.
+    this.targeting.setPhysics(this.physics);
+    this.targeting.setInput(this.input);
 
     step(0.62, 'ordnance');
     this.vfx = new VFX(this.scene, this.engine.renderer);
