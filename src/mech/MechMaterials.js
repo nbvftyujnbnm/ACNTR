@@ -315,6 +315,8 @@ function slotUniforms(palette, rough, metal, texMean = 0.26, seamDark = 0.55, sp
     uSeamDark: { value: seamDark },
     uSpeckle: { value: speckle },
     uSpeckleLod: { value: SPECKLE_LOD },
+    uDetail: { value: DETAIL_MIX },
+    uDetailScale: { value: DETAIL_SCALE },
     uDamage: { value: 0 },
     uSoot: { value: c(palette.soot) },
     uDamageGlow: { value: c(palette.glowHot).multiplyScalar(1.4) },
@@ -418,7 +420,9 @@ export class MaterialSet {
     this.m = materials;
     /** Materials the VFX/HUD layer may modulate. Also mirrored onto `mech.emissives`. */
     this.emissives = emissives;
-    this.list = Object.values(materials);
+    // De-duplicated: `armor` and `armorFine` are the same object, and setDamage
+    // / dispose must each touch it once.
+    this.list = [...new Set(Object.values(materials))];
     this.damage = 0;
     this._emissiveScale = 1;
   }
@@ -612,12 +616,14 @@ export class MechMaterials {
       emissive: new THREE.Color(0x000000),
     }), slotUniforms(pal, rough, metal, this.armorMean ?? 0.26, 0.70), 'acntr-mech-armor');
 
-    // Same maps as `armor` — the slot roughness runs a touch tighter because the
-    // parts that ask for it (head, hands, feet) are machined, not stamped.
-    const armorFine = patch(this._standard(this.armorFineTex, {
-      emissive: new THREE.Color(0x000000),
-    }), slotUniforms(pal, [rough[0] - 0.06, rough[1] - 0.06, rough[2] - 0.04, rough[3]],
-      metal, this.armorFineMean ?? 0.26, 0.70), 'acntr-mech-armor');
+    // `armorFine` is now the SAME material, not merely the same maps. Once both
+    // slots were baked on one tile the only thing left separating them was a
+    // 0.06 roughness offset, and the result was two adjacent parts of one model
+    // rendering to visibly different specular — a second quality bar for no
+    // gain. Small parts get their extra scale from the detail layer instead,
+    // which is uniform across the whole mech. `armorFor(fine)` keeps working;
+    // MaterialSet de-duplicates so damage and dispose still run once.
+    const armorFine = armor;
 
     // Dark mechanical: rubberised booting, cable looms, joint shrouds. Slots 0-2
     // are all dielectric here; slot 3 stays metal so pistons read as bare steel.

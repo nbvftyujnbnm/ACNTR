@@ -1340,3 +1340,9 @@
     grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
   }
 }
+
+/* The assembly screen owns the whole viewport. Without this the combat HUD —
+   mission log, armament panel, AP/ACS/EN bars — renders through it. */
+body.garage-open .acntr-hud {
+  display: none;
+}

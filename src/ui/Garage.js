@@ -325,6 +325,10 @@ export class Garage {
     if (this.opened) return;
     this.opened = true;
     this.root.classList.add('open');
+    // Suppress the combat HUD. Without this the mission log, armament panel and
+    // AP bars render straight through the assembly screen. Done with a body
+    // class so neither module has to reach into the other's DOM.
+    document.body.classList.add('garage-open');
     this._listDirty = true;
     this._modelDirty = true;
 
@@ -354,6 +358,7 @@ export class Garage {
     if (!this.opened) return;
     this.opened = false;
     this.root.classList.remove('open');
+    document.body.classList.remove('garage-open');
 
     const cam = this.game?.engine?.camera;
     if (cam && this._savedLayerMask !== null) {
