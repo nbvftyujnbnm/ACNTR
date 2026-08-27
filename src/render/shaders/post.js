@@ -381,12 +381,22 @@ void main() {
 
     // Aerial perspective, range-ramped. A strictly linear tau means the only
     // way to bury a 2 km ridge is to also veil the 150 m gantry in front of it,
-    // which is precisely how midground material read gets destroyed. The ramp
-    // rises from 0.22 of full extinction at the camera to 1.0 far away, half of
-    // it reached at uAerialRamp metres — a clean basin under a distant dust
-    // wall. It costs one divide and stays monotonic, so it cannot invert depth.
+    // which is precisely how midground material read gets destroyed. So the
+    // per-metre extinction RAMPS with range: a clean basin under a distant
+    // dust wall.
+    //
+    // The ramp is quadratic (rn^2 / (1 + rn^2)), not the Michaelis-Menten
+    // rn / (1 + rn) it replaced, and it has no floor. That matters at exactly
+    // the range REVIEW complains about: measured on the vista pose, the old
+    // curve veiled a 150 m sight line by 20% and a 400 m one by 49%, which
+    // compressed the sand's 2.6:1 sun/shadow ratio to 1.8:1 and turned the
+    // whole lower half of the frame into one pale sheet. The quadratic gives
+    // 13% and 42% for the same distances while REACHING MORE total extinction
+    // past 800 m, so the haze moves outward instead of thinning. Still
+    // monotonic in dist, so it cannot invert depth.
     float rn = dist / max( uAerialRamp, 1.0 );
-    float ramp = 0.22 + 0.78 * ( rn / ( 1.0 + rn ) );
+    float rn2 = rn * rn;
+    float ramp = rn2 / ( 1.0 + rn2 );
     float tAir = uAerialDensity * dist * ramp;
 
     float tau = ( tDeck + tBand + tAir ) * uFogStrength;

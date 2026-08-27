@@ -125,7 +125,7 @@ export class Sky {
      */
     this.fogParams = {
       color: new THREE.Color(),        // mid haze (contract field)
-      density: 0.0034,                 // deck density at `height` (contract field)
+      density: 0.0029,                 // deck density at `height` (contract field)
       height: 2,                       // deck base altitude, metres (contract field)
       // 0.10 = a 10 m e-folding height. The deck used to e-fold over 17 m,
       // which put its half-density surface above the roof line of most of the
@@ -133,7 +133,7 @@ export class Sky {
       // of like dust lying on the ground. Tightening it is what lets a 120 m
       // structure keep its material read while the plain it stands on still
       // dissolves.
-      falloff: 0.100,
+      falloff: 0.115,
       deckColor: new THREE.Color(),
       bandColor: new THREE.Color(),
       // A tight stratum well clear of the deck. The gap of clean air between
@@ -148,12 +148,15 @@ export class Sky {
       // it ramps in with range (see `aerialRamp`) instead of accumulating from
       // the camera. Net effect versus the old numbers: ~40% less veiling at
       // 150-250 m, ~15% more past 700 m.
-      aerialDensity: 0.0012,
+      aerialDensity: 0.0016,
       // Range in metres at which the aerial term reaches half of its full
       // per-metre extinction. Models a clean basin under a distant dust wall:
       // the first couple of hundred metres of air really are clearer than the
-      // column out to the ridges.
-      aerialRamp: 300,
+      // column out to the ridges. Pushed way out (from 300) now that the ramp
+      // in COMPOSITE_FRAG is quadratic and has no floor — the pair moves haze
+      // OUT of the 100-250 m midground and into the 600 m+ background, which
+      // is where an AC6 frame actually keeps it.
+      aerialRamp: 520,
       sunColor: new THREE.Color(),
     };
 
