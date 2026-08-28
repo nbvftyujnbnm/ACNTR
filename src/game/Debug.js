@@ -166,6 +166,10 @@ export class Debug {
     const sun = this.game.sky?.sunDirection;
     const pts = this.game.level?.spawnPoints;
     if (!sun || !pts?.length) return this.placePlayerAtSpawn(0, yaw);
+    // NOTE: prefer frameHeroShot() for any pose that also places a camera.
+    // This scorer only knows about the mech, and two agents independently
+    // reproduced it choosing a spawn whose camera position was inside a wall.
+    //
     // Sunlight alone is not enough — the first sunlit spawn turned out to be
     // jammed against an embankment, which is technically lit and visually
     // useless. Score candidates on sun access AND horizontal elbow room.
@@ -194,6 +198,102 @@ export class Debug {
     }
     if (best) return this.placePlayerOnGround(best.x, best.z, yaw);
     return this.placePlayerAtSpawn(0, yaw);
+  }
+
+  /**
+   * Place the mech AND frame the camera together, validating both.
+   *
+   * `placePlayerInSun` scored only the mech's surroundings, so nothing checked
+   * what was behind the lens; its clearance term was also a SUM over eight
+   * 60 m rays, meaning a spot with open ground in seven directions and 5 m of
+   * wall in the eighth scored 425/480 and won — and when that eighth direction
+   * was the camera's, the shot was taken from inside the wall. Two agents
+   * reproduced that deterministically on consecutive builds.
+   *
+   * This scores the MINIMUM ray rather than the sum, rejects any camera
+   * position that is underground or has geometry between it and the mech, and
+   * prefers a bearing with the sun roughly SIDE-ON. That last term matters: at
+   * a 13.5-degree sun a 9 m mech throws a ~37 m shadow, so it is a long blade
+   * cast far to one side rather than a pool at the feet, and whether the frame
+   * contains it is decided entirely by camera azimuth relative to the sun.
+   *
+   * @returns {boolean} true if a valid framing was found
+   */
+  frameHeroShot({ dist = 18.4, height = 6.4, lookY = 4.7, fov = 34, yaw = null } = {}) {
+    const sun = this.game.sky?.sunDirection;
+    const pts = this.game.level?.spawnPoints;
+    const ph = this.game.physics;
+    if (!sun || !pts?.length || !ph?.raycast) return false;
+
+    const up = new THREE.Vector3(0, 1, 0);
+    const sunH = new THREE.Vector3(sun.x, 0, sun.z).normalize();
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const camPos = new THREE.Vector3();
+    const toMech = new THREE.Vector3();
+
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (const sp of pts) {
+      const g = ph.groundHeight?.(sp.x, sp.z);
+      if (!isFinite(g)) continue;
+      const feetY = g;
+
+      // Is the mech's upper body actually in direct sun?
+      origin.set(sp.x, feetY + 6, sp.z);
+      const sunHit = ph.raycast(origin, sun, 400);
+      if (sunHit && sunHit.hit) continue;
+
+      // Minimum horizontal elbow room — the SUM hid a close wall.
+      let minClear = Infinity;
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        dir.set(Math.cos(a), 0, Math.sin(a));
+        const h = ph.raycast(origin, dir, 60);
+        minClear = Math.min(minClear, h && h.hit ? h.distance : 60);
+      }
+      if (minClear < 14) continue; // camera needs to stand back this far
+
+      // Try camera bearings around the mech and validate each one.
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        camPos.set(sp.x + Math.cos(a) * dist, feetY + height, sp.z + Math.sin(a) * dist);
+
+        const camGround = ph.groundHeight?.(camPos.x, camPos.z);
+        if (isFinite(camGround) && camPos.y < camGround + 1.5) continue; // underground
+
+        // Nothing between the lens and the mech.
+        toMech.set(sp.x - camPos.x, feetY + lookY - camPos.y, sp.z - camPos.z);
+        const span = toMech.length();
+        toMech.normalize();
+        const block = ph.raycast(camPos, toMech, span - 1.5);
+        if (block && block.hit) continue;
+
+        // Sun side-on to the view direction puts the shadow blade across frame.
+        const viewH = new THREE.Vector3(toMech.x, 0, toMech.z).normalize();
+        const sideOn = 1 - Math.abs(viewH.dot(sunH)); // 1 = perpendicular
+
+        const score = sideOn * 100 + Math.min(minClear, 60);
+        if (score > bestScore) {
+          bestScore = score;
+          best = { sp, feetY, a, camPos: camPos.clone(), sideOn };
+        }
+      }
+    }
+
+    if (!best) return false;
+
+    // Face the mech roughly toward the camera so we see its front.
+    const faceYaw = yaw != null ? yaw : Math.atan2(best.camPos.x - best.sp.x, best.camPos.z - best.sp.z);
+    this.placePlayerOnGround(best.sp.x, best.sp.z, faceYaw);
+    this.setCamera(
+      { x: best.camPos.x, y: best.camPos.y, z: best.camPos.z },
+      { x: best.sp.x, y: best.feetY + lookY, z: best.sp.z },
+      fov
+    );
+    this._lastHeroFraming = { sideOn: +best.sideOn.toFixed(2), score: +bestScore.toFixed(1) };
+    return true;
   }
 
   /** Force a rig pose without needing live input. */
