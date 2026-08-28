@@ -166,13 +166,33 @@ export class Debug {
     const sun = this.game.sky?.sunDirection;
     const pts = this.game.level?.spawnPoints;
     if (!sun || !pts?.length) return this.placePlayerAtSpawn(0, yaw);
+    // Sunlight alone is not enough — the first sunlit spawn turned out to be
+    // jammed against an embankment, which is technically lit and visually
+    // useless. Score candidates on sun access AND horizontal elbow room.
     const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    let best = null;
+    let bestScore = -Infinity;
     for (const sp of pts) {
       const g = this.game.physics?.groundHeight?.(sp.x, sp.z);
-      origin.set(sp.x, (isFinite(g) ? g : sp.y) + 6, sp.z);
-      const hit = this.game.physics?.raycast?.(origin, sun, 400);
-      if (!hit || !hit.hit) return this.placePlayerOnGround(sp.x, sp.z, yaw);
+      const y = (isFinite(g) ? g : sp.y) + 6;
+      origin.set(sp.x, y, sp.z);
+      const sunHit = this.game.physics?.raycast?.(origin, sun, 400);
+      if (sunHit && sunHit.hit) continue; // in shadow
+
+      let clearance = 0;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        dir.set(Math.cos(a), 0, Math.sin(a));
+        const h = this.game.physics?.raycast?.(origin, dir, 60);
+        clearance += h && h.hit ? h.distance : 60;
+      }
+      if (clearance > bestScore) {
+        bestScore = clearance;
+        best = sp;
+      }
     }
+    if (best) return this.placePlayerOnGround(best.x, best.z, yaw);
     return this.placePlayerAtSpawn(0, yaw);
   }
 
@@ -297,6 +317,13 @@ export class Debug {
 
   unpause() {
     try {
+      // The HUD re-derives its pause card from `input.locked` every frame and
+      // ignores setPaused(), so overriding the HUD does not survive a single
+      // step(). Simulate the pointer lock instead — which is honest, since a
+      // capture is standing in for a real locked-pointer play session — and the
+      // HUD's own logic then produces the right answer on its own.
+      const input = window.__ACNTR__?.input || this.game.input;
+      if (input) input.locked = true;
       this.game.hud?.setPaused?.(false);
       this.game.hud?.hideGameOver?.();
     } catch { /* HUD may not be ready */ }
