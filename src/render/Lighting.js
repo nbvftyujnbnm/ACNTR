@@ -77,7 +77,39 @@ export class Lighting {
       // roughly doubled the display value of the mech's key-lit plating (median
       // 45 -> 98 out of 255) without touching its shadow side, which is the
       // whole point: brightness that arrives with a DIRECTION.
-      sunIntensity: 17.5,
+      // 17.5 -> 24.0, and this is the cheap half of the "pale mech" fix below.
+      // A 13.5-degree sun is 4.2x more efficient on a VERTICAL flank
+      // (cos 13.5 = 0.97) than on horizontal ground (sin 13.5 = 0.23), so the
+      // key is the one energy term in this rig that lands on the SUBJECT far
+      // harder than it lands on the plain — which makes it the only way to add
+      // contrast to the mech without giving it back to the sand.
+      //
+      // Measured on the hero pose over ten rectangles strictly inside the mech,
+      // in two brackets — every row inside a bracket comes from ONE build with
+      // only this number changed at runtime, which is the only way these are
+      // comparable (see the Contract Amendments on cross-build measurement):
+      //
+      //   at fill 1.55 / bounce 1.10:   p95   >128    <24    rest median
+      //     17.5 .......................  113   3.1%  27.4%       58
+      //     20.5 .......................  122   4.1%  27.3%       59
+      //
+      //   at fill 1.25 / bounce 1.10:
+      //     20.5 .......................  121   4.1%  27.9%       61
+      //     24.0 .......................  131   5.4%  28.3%       60
+      //     27.0 .......................  135   6.0%  28.0%       66   <-- stop
+      //
+      // Up to 24 the whole gain lands in the key faces: the shadow population
+      // and the background do not move, and the frame's above-230 area is the
+      // same 0.02% before and after, so nothing new is blowing out. At 27 the
+      // BACKGROUND comes up with it (rest median +6, rest above-90 17% -> 22%),
+      // which spends the figure/ground separation the fill cut just bought.
+      // 24 is the last value that is free.
+      //
+      // On the vista the same step moves the sunlit:shadowed sand ratio
+      // 2.40 -> 2.53 and the sunlit dune's standard deviation 35.9 -> 39.2, at a
+      // cost of 4% on the dune's level: it buys tonal range on the plain, which
+      // is what that surface was short of.
+      sunIntensity: 24.0,
       // A small omnidirectional floor. Its job is only to keep a downward-facing
       // chamfer off pure black; anything more and it flattens the terrain, which
       // is a single enormous up-facing surface and therefore the thing that
@@ -112,6 +144,14 @@ export class Lighting {
       // which delivers 0.13 of itself to horizontal ground and 0.99 to a
       // vertical flank — so the swap is a straight transfer of ambient off the
       // sand and onto the mech's plating.
+      //
+      // MEASURED, and worth knowing before reaching for it: at 0.16 this term is
+      // a NO-OP ON THE MECH. Rendering the hero pose with the hemisphere removed
+      // entirely moved the subject's median display value by zero (67 -> 67) and
+      // the rest of the frame by one code (63 -> 62). It is still the right
+      // shape of light for a downward chamfer, but it is no longer a knob that
+      // can fix or break anything — treat it as spent, and take ambient off the
+      // fills or put it into the key instead.
       hemiIntensity: 0.16,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
@@ -128,19 +168,65 @@ export class Lighting {
       // a chamfer and stops metal reading as plastic — so this is a 15% trim
       // rather than the 25% the ground contrast alone would want. Anything past
       // this should come out of `hemiIntensity` or go into the key instead.
-      envIntensity: 1.00,
-      // Cool bounce from the opposite side so the shadow side stays readable.
-      // AC6 shadows are deep but never crushed; this is what keeps them open.
-      // Carries much more of the ambient budget than it used to — see
-      // `fillElevation` for why that does NOT flatten the ground.
       //
-      // 2.75 -> 3.35, paid for out of `hemiIntensity`. At a 7.5-degree
-      // elevation this adds 0.59 to a vertical unlit flank and 0.078 to
-      // horizontal ground; the hemisphere cut removes 0.08 from both. Net: the
-      // mech's shadow side gains ~16% of its ambient, the sand plain loses ~0.2%
-      // of its lit value and ~0.3% of its shadowed value. That asymmetry is the
-      // entire reason this light is nearly horizontal.
-      fillIntensity: 3.35,
+      // MEASURED DEAD END — do not spend a run on this again. The documented
+      // "next step if someone wants more ground contrast" (cut env and hemi
+      // together) was tried at 0.85/0.08 and 0.70/0.05 against the current
+      // build. The vista's sunlit:shadowed sand ratio moved 2.51 -> 2.54 -> 2.59
+      // and the sunlit dune's standard deviation 38.5 -> 38.6 -> 38.8, i.e. a
+      // 30% environment cut bought 3% of ground contrast — and on the hero pose
+      // the same setting took the mech's p95 121 -> 115 and its above-128
+      // population 4.1% -> 3.4%, which is the chamfer glints going out. The
+      // reason the payoff is now so small is the `fillIntensity` cut below: the
+      // sky fill used to deliver 0.44 of undirected irradiance to horizontal
+      // ground and now delivers 0.16, so the plain's ambient budget has ALREADY
+      // had its largest term removed and there is very little left here to win.
+      envIntensity: 1.00,
+      // Cool sky fill from the opposite side, so the shadow side stays readable.
+      // AC6 shadows are deep but never crushed; this is what keeps them open —
+      // and see `fillElevation` for why a near-horizontal fill does NOT flatten
+      // the ground the way an omnidirectional one would.
+      //
+      // This knob was walked UP twice (2.2 -> 2.75 -> 3.35) chasing a crushed
+      // shadow side, and both steps were individually correct and collectively
+      // an over-correction; the numbers below are why.
+      //
+      // 3.35 -> 1.25. THE MEASURED CAUSE OF THE PALE MECH, and it was not
+      // exposure and not the grade's toe — both of those move the whole frame,
+      // and the frame around the mech is placed correctly (rest-of-frame median
+      // 63, 5th percentile 11).
+      //
+      // Rendered the hero pose five times on one build, each with a single term
+      // removed, and took the median display value inside ten rectangles that
+      // lie strictly INSIDE the mech's silhouette:
+      //
+      //   base ................ mech 67   rest 63
+      //   fills removed ....... mech 10   rest 54
+      //   environment removed . mech 62   rest 60
+      //   hemisphere removed .. mech 67   rest 62
+      //   KEY removed ......... mech 43   rest 46
+      //
+      // Read the last two rows together. Turning the SUN completely off changed
+      // the subject by 24 code values; turning off these two shadowless fills
+      // changed it by 57. The mech was being lit almost entirely by its fill
+      // rig, which is why it had no modelling and read as pale concrete: at
+      // 3.35 + 2.4 with both aimed at vertical flanks (cos 0.99 and 0.58) an
+      // unlit flank was receiving MORE irradiance than sunlit horizontal ground
+      // gets from the key. The no-key frame is nearly indistinguishable from the
+      // shipped one, which is the whole diagnosis in one image.
+      //
+      // At 1.25 / 1.10 the mech's median goes 67 -> 43 against a background that
+      // does not move (rest median 63 -> 61), so the median RATIO goes 1.07 ->
+      // 0.71: it finally reads darker than the silos behind it, and the
+      // key's warm rim down its sunward side becomes the thing that describes
+      // the form. The fills keep their old JOB — the fraction of the mech below
+      // display 24 lands near 28%, against 18.5% before and 72% with them off —
+      // they just stop out-voting the sun.
+      //
+      // The plain gains too, for free: this light delivers 0.13 of itself to
+      // horizontal ground, so the cut takes 0.27 of undirected irradiance off
+      // the sand and none off the mech's key side.
+      fillIntensity: 1.25,
       // The SINE of the bounce's elevation above the horizon, and the single
       // most useful number in this rig — because it is the only knob that
       // separates "shadow on the mech" from "shadow on the ground".
@@ -189,14 +275,13 @@ export class Lighting {
       // the AO and cascade ratios survive intact and the contact shadow gets
       // MORE readable as the floor comes up, not less. `grade.lift` is dropped
       // 0.032 -> 0.022 in the same pass to pay for this in tonal range.
-      // 2.1 -> 2.4, funding the hemisphere and environment cuts above. This is
-      // the ONE light in the rig that is free on the terrain (it arrives from
-      // 6.3 degrees BELOW the horizon, so n.l on an up-facing surface clamps to
-      // zero), which makes it the only place the ambient taken off the plain can
-      // be put back without undoing the contrast it just bought. Net on a
-      // vertical unlit flank: roughly break-even. Net on horizontal sand:
-      // strictly a loss, which is the point.
-      bounceIntensity: 2.4,
+      // 2.4 -> 1.10, the other half of the fill cut documented on
+      // `fillIntensity`. Cut proportionally LESS than the sky fill (0.46x
+      // against 0.37x) on purpose: this is the only light in the rig that
+      // reaches the mech's downward-facing half, which is measurably the darkest
+      // region of the hero frame, so it is the last term that should be taken
+      // to the floor.
+      bounceIntensity: 1.10,
       bounceElevation: -0.11,
       // Azimuth offset from the anti-sun direction, in radians. The horizontal
       // fill sits exactly opposite the key, which leaves a dead zone: a flank

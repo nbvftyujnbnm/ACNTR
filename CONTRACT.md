@@ -1000,3 +1000,81 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   (three 4 m plates across a 55-degree horizontal field). The fix belongs in the scorer —
   score the camera's position too, or reject any candidate whose camera offset raycast
   hits inside ~25 m. `shots/level2/hero.png` and `shots/level/hero.png` are both this.
+- 2026-08-28 [render] THE PALE MECH IS THE FILL RIG, NOT EXPOSURE AND NOT THE
+  GRADE'S TOE. Settled by rendering the hero pose five times on ONE build, each
+  frame differing only in which light term was removed at runtime, and taking
+  the median display value inside ten rectangles that lie strictly INSIDE the
+  mech's silhouette (so the population is subject pixels and nothing else):
+
+      base ................ mech 67   rest 63
+      fills removed ....... mech 10   rest 54
+      environment removed . mech 62   rest 60
+      hemisphere removed .. mech 67   rest 62
+      KEY removed ......... mech 43   rest 46
+
+  Turning the SUN completely off changed the subject by 24 code values; turning
+  off the two shadowless fills changed it by 57. The no-key frame is nearly
+  indistinguishable from the shipped one. `fillIntensity` 3.35 and
+  `bounceIntensity` 2.4, both aimed at vertical flanks (cos 0.99 and 0.58),
+  were delivering an unlit flank MORE irradiance than sunlit horizontal ground
+  gets from the key — which is why a 0.09-albedo machine was rendering at the
+  same median as the sand and silos behind it (mech/rest median ratio 1.07) with
+  no modelling on it at all.
+  Exposure and the toe were the wrong suspects and the measurement says why:
+  both move the whole frame, and the frame AROUND the mech is placed correctly
+  (rest median 63, 5th percentile 11, 0.02% of the hero frame above display 230).
+  The subject was 6% of the pixels and the only thing mis-lit.
+  Fix: `fillIntensity` 3.35 -> 1.25, `bounceIntensity` 2.4 -> 1.10 (cut
+  proportionally less — it is the only light reaching the mech's downward-facing
+  half), `sunIntensity` 17.5 -> 24.0. Result on the same pose: mech median
+  67 -> 43 against an unchanged background, ratio 1.07 -> 0.71, p95 121 -> 131.
+  The fills keep their old job — the fraction of the mech below display 24 goes
+  18.5% -> 28%, against 72% with them off — they just stop out-voting the sun.
+- 2026-08-28 [render] `sunIntensity` has a measured CEILING of about 24 in this
+  rig, and the thing that ends it is not clipping. Stepping 17.5 / 20.5 / 24 /
+  27 on the hero pose: mech p95 113 / 122 / 131 / 135, mech below-display-24
+  27.4% / 27.3% / 28.3% / 28.0%, rest-of-frame median 58 / 59 / 60 / 66. Up to 24
+  the entire gain lands on the subject's key faces and neither its shadows nor
+  the background move; the frame's above-230 area is identical to three decimals
+  throughout. At 27 the BACKGROUND comes up with it, which spends the
+  figure/ground separation the key was raised to buy. Raise the key, not the
+  exposure, whenever the subject needs contrast: at a 13.5-degree sun the key is
+  4.2x more efficient on a vertical flank than on horizontal ground, and no
+  grade knob has that asymmetry.
+- 2026-08-28 [render] MEASURED DEAD END, closing the one the earlier ambient
+  rebalance left open. Cutting `envIntensity` and `hemiIntensity` together for
+  ground contrast (0.85/0.08 and 0.70/0.05) moves the vista's sunlit:shadowed
+  sand ratio 2.51 -> 2.54 -> 2.59 and the sunlit dune's standard deviation
+  38.5 -> 38.6 -> 38.8 — a 30% environment cut for 3% of ground contrast — while
+  on the hero pose it takes the mech's p95 121 -> 115 and its above-128
+  population 4.1% -> 3.4%, i.e. the chamfer glints go out. The payoff is now
+  much smaller than when it was first costed, because the `fillIntensity` cut
+  above already removed the plain's largest undirected term (the sky fill
+  delivered 0.44 of irradiance to horizontal ground and now delivers 0.16).
+  Both were reverted; the shipped values are 1.00 / 0.16.
+  Related: at 0.16, `hemiIntensity` is a NO-OP ON THE MECH — removing it
+  entirely moves the subject's median by zero (67 -> 67). It is spent as a knob.
+- 2026-08-28 [render] THERE IS NO BANDING IN THE SKY GRADIENT. Measured rather
+  than eyeballed, on three regions across two poses, two ways: the run-length
+  histogram of a single column's raw 8-bit values (banding shows as long
+  plateaus) gives a mean run of 1.10 and a maximum of 2-3 rows everywhere, i.e.
+  the value changes on almost every row; and the second difference of a
+  400-px-wide strip average is fully accounted for by the grain. The two-term
+  dither in SKY_FRAG (multiplicative for the dark zenith, additive for the
+  bright horizon) is doing its job. Do not add more.
+- 2026-08-28 [tools] A/B MEASUREMENT RIG, and the trap it exists to avoid.
+  `Lighting.params`, `Pipeline.params` and `scene.environmentIntensity` are all
+  re-read every frame, so a whole variant sweep can be captured from ONE build
+  in ONE browser session by mutating them between poses — about 90 seconds a
+  frame instead of eight minutes, which is what made a five-way light
+  decomposition affordable. The trap: `tools/capture.mjs` runs `vite build`, and
+  with several agents editing at once a "before" and an "after" taken from two
+  builds differ by everyone's work, not yours. Two vista frames measured 30
+  minutes apart in this session differ by 12 code values on the far ridge purely
+  from concurrent Level.js edits. Any lighting or grade number quoted as a
+  before/after must come from a SINGLE build with the parameter changed at
+  runtime; a rebuild between the two frames invalidates it.
+  Second trap, specific to the fog: the dust banks advect with `dust.drift`, so
+  heavily-veiled far-field regions (the 2 km ridges, the 300-800 m plain) move
+  by several code values between any two frames taken at different times, even
+  in the same build. Near-field regions reproduce to under 1%.

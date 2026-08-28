@@ -69,6 +69,14 @@ const ROADS = [
 /** Metres of world covered by one texture tile on structure surfaces. */
 const UV_STRUCT = 8;
 
+/**
+ * Metres of world covered by one rock tile on the cliffs. 26 m put 115 repeats
+ * around the boundary ring, which lands at 37-57 px on the vista pose — right
+ * in the band where a repeat reads as striping. At 42 m it is 60-92 px, and
+ * `cliffBreakup` overlays two more scales on top of it.
+ */
+const UV_CLIFF = 42;
+
 /* ========================================================================== */
 /*  Module scratch — update() must never allocate                              */
 /* ========================================================================== */
@@ -98,6 +106,55 @@ function fbm2(x, y, s, oct = 4) {
     x *= 2.03; y *= 2.03;
   }
   return sum / norm;
+}
+
+/* ========================================================================== */
+/*  Band-limited angular fields — the only safe way to modulate a revolve      */
+/* ========================================================================== */
+
+/**
+ * Build a fixed set of sine harmonics of the revolve angle, amplitudes falling
+ * as `order^-falloff`, phases drawn from `rng`, normalised so the field is
+ * bounded by about [-1, 1].
+ *
+ * Why not fbm, which every one of these generators used to call: a noise field
+ * sampled on a CIRCLE steps `TAU * R / NA` lattice units per column, and if that
+ * lands anywhere near 1 the column-to-column value is INDEPENDENT. One column of
+ * the mesa ring is ~8 m of cliff, which at the vista's 600-900 m sight lines is
+ * 15-30 px, so an independent per-column value is a vertical stripe by
+ * definition. Harmonics cannot do that: the highest order used anywhere here is
+ * 27 against 384 columns (14 columns per lobe), the derivative is bounded and
+ * analytic, and — the part that actually matters for shading — it is SMOOTH, so
+ * a term composed on top of it (strata phase, say) varies as a slow wave around
+ * the ring rather than as noise. They also cannot go flat, because their
+ * amplitudes are fixed rather than sampled: the failure mode on the other side
+ * of this trade is a smooth revolve under a low sun, which is one coherent
+ * normal and reads as a pale cardboard cut-out.
+ *
+ * @param {() => number} rng seeded generator
+ * @param {number[]} orders harmonic orders, lowest first
+ * @param {number} falloff amplitude exponent
+ * @returns {Float64Array} flat [order, amp, phase] triples
+ */
+function harmonics(rng, orders, falloff = 1) {
+  const h = new Float64Array(orders.length * 3);
+  let norm = 0;
+  for (let i = 0; i < orders.length; i++) {
+    const amp = Math.pow(orders[0] / orders[i], falloff);
+    h[i * 3] = orders[i];
+    h[i * 3 + 1] = amp;
+    h[i * 3 + 2] = rng() * TAU;
+    norm += amp;
+  }
+  for (let i = 0; i < orders.length; i++) h[i * 3 + 1] /= norm;
+  return h;
+}
+
+/** Evaluate a `harmonics()` field at angle `t`. Result is in about [-1, 1]. */
+function angField(t, h) {
+  let s = 0;
+  for (let i = 0; i < h.length; i += 3) s += h[i + 1] * Math.sin(h[i] * t + h[i + 2]);
+  return s;
 }
 
 /* ========================================================================== */
@@ -163,6 +220,37 @@ function surfaceBreakup(sh) {
     .replace('#include <roughnessmap_fragment>', /* glsl */`
       #include <roughnessmap_fragment>
       roughnessFactor = clamp( roughnessFactor + 0.26 * lvlG, 0.04, 1.0 );
+    `);
+}
+
+/**
+ * Cliff anti-tiling. The rock maps repeat every `CLIFF_TILE` metres, which on
+ * the boundary ring is 71 repeats around the horizon, and a repeat is a rhythm:
+ * measured on the vista pose, the distant ridge carried a periodic column
+ * pattern whose screen pitch matched the tile and its second harmonic (44 px
+ * and 22 px predicted, 41.5 px and 21.5 px measured) and which did NOT move
+ * when the ring was rebuilt from 288 columns to 384 — so it was never the mesh.
+ *
+ * Two more taps of the SAME map at incommensurate scales — 4.7x coarser and
+ * 3.2x finer — put three periods on the surface at once (about 200 m, 42 m and
+ * 13 m), and three periods that share no common factor do not read as a rhythm.
+ * Both are used as RATIOS with a mean near 1.0, so this varies the rock without
+ * shifting its overall value, and the coarse tap also drives roughness so it
+ * reads as surface rather than as a stain.
+ *
+ * @param {object} sh three's shader object, mutated in place
+ */
+function cliffBreakup(sh) {
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <map_fragment>', /* glsl */`
+      #include <map_fragment>
+      float cliffMacro = dot( texture2D( map, vMapUv * 0.2137 ).rgb, vec3( 0.3333 ) );
+      float cliffFine = dot( texture2D( map, vMapUv * 3.17 ).rgb, vec3( 0.3333 ) );
+      diffuseColor.rgb *= ( 0.74 + 0.54 * cliffMacro ) * ( 0.90 + 0.20 * cliffFine );
+    `)
+    .replace('#include <roughnessmap_fragment>', /* glsl */`
+      #include <roughnessmap_fragment>
+      roughnessFactor = clamp( roughnessFactor * ( 1.16 - 0.30 * cliffMacro ), 0.32, 1.0 );
     `);
 }
 
@@ -358,13 +446,23 @@ export class Level {
     this._materials.push(glow);
     this.mat.glow = glow;
 
-    // Cliffs: stratified rock, vertex-coloured banding, no metal at all.
+    /*
+     * Cliffs: stratified rock, vertex-coloured banding, no metal at all.
+     *
+     * NO `aoMap`. A baked ambient-occlusion map is a per-tile blotch pattern,
+     * and it multiplies INDIRECT light — which on a cliff face turned away from
+     * a 13-degree sun is nearly all the light there is. Tiled every few tens of
+     * metres across a 200 m landform that is a regular value rhythm applied to
+     * exactly the surfaces with no key light to hide it, which is why the
+     * shadowed half of the ring striped far harder than the sunlit half.
+     * Occlusion on a landform belongs to its own geometry (the gullies and
+     * benches cast) and to SSAO, not to a repeating texture.
+     */
     const cliff = new THREE.MeshStandardMaterial({
       map: dust.map,
       normalMap: dust.normalMap,
       roughnessMap: dust.roughnessMap,
-      aoMap: dust.aoMap,
-      color: 0xb2a184,
+      color: 0xa2917a,
       roughness: 1.0,
       metalness: 0.0,
       envMapIntensity: 0.55,
@@ -372,7 +470,14 @@ export class Level {
       dithering: true,
     });
     cliff.name = 'Level.cliff';
-    cliff.normalScale.set(1.35, 1.35);
+    // 1.95 was too much. The rock map's aggregate is ~1 m, which at the 250 m
+    // sight line of the hero pose is three pixels, and a normal map's variance
+    // does not fall away with mip level the way its albedo does — so the whole
+    // cliff came back as an even stipple, the closest thing to stucco this
+    // level has ever rendered. Relief on a landform at that range has to come
+    // from the mesh; the map's job here is grain, not form.
+    cliff.normalScale.set(1.3, 1.3);
+    cliff.onBeforeCompile = cliffBreakup;
     this._materials.push(cliff);
     this.mat.cliff = cliff;
 
@@ -446,113 +551,237 @@ export class Level {
   /*  Boundary — mesa ring, far plain, distant buttes, containment field      */
   /* ---------------------------------------------------------------------- */
 
+  /**
+   * Two meshes, not one, and the split is a shadow-cost decision. The cliff ring
+   * stands 440-1130 m out and a 13-degree sun throws its shadow right across the
+   * far half of the arena, so it has to cast. The far plain and the buttes are
+   * 0.8-3 km out with nothing behind them and nothing in front of them to catch
+   * a shadow, and they are also the larger half of the boundary's triangles —
+   * carrying them through four cascades cost 194k rendered triangles a frame and
+   * put the boost pose over the 3M budget for no pixel anywhere. One extra draw
+   * call buys all of it back.
+   */
   _buildBoundary() {
-    const parts = [];
-    parts.push(this._mesaRing());
-    parts.push(this._farPlain());
+    const ring = this._mesaRing();
+    ring.setAttribute('uv1', ring.attributes.uv);
+    ring.computeBoundingSphere();
+    const ringMesh = new THREE.Mesh(ring, this.mat.cliff);
+    ringMesh.name = 'Boundary';
+    ringMesh.castShadow = true;
+    ringMesh.receiveShadow = true;
+    ringMesh.matrixAutoUpdate = false;
+    ringMesh.updateMatrix();
+    this.root.add(ringMesh);
+    this._meshes.push(ringMesh);
+    this._geometries.push(ring);
+
+    const parts = [this._farPlain()];
     for (const g of this._distantButtes()) parts.push(g);
-
-    const merged = mergeGeometries(parts, false);
+    const far = mergeGeometries(parts, false);
     for (const p of parts) p.dispose();
-    merged.setAttribute('uv1', merged.attributes.uv);
-    merged.computeBoundingSphere();
-
-    const mesh = new THREE.Mesh(merged, this.mat.cliff);
-    mesh.name = 'Boundary';
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.matrixAutoUpdate = false;
-    mesh.updateMatrix();
-    this.root.add(mesh);
-    this._meshes.push(mesh);
-    this._geometries.push(merged);
+    far.setAttribute('uv1', far.attributes.uv);
+    far.computeBoundingSphere();
+    const farMesh = new THREE.Mesh(far, this.mat.cliff);
+    farMesh.name = 'BoundaryFar';
+    farMesh.castShadow = false;
+    farMesh.receiveShadow = false;
+    farMesh.matrixAutoUpdate = false;
+    farMesh.updateMatrix();
+    this.root.add(farMesh);
+    this._meshes.push(farMesh);
+    this._geometries.push(far);
 
     this._buildContainmentField();
   }
 
   /**
-   * The cliff wall. A revolved mesa profile with per-angle height/radius noise
-   * and per-vertex erosion, vertex-coloured into horizontal strata so the rock
-   * reads as sedimentary rather than as a grey cone.
+   * The cliff wall: a revolved mesa with a scree apron at the toe, a near
+   * vertical caprock band above it, and gullies incised down the face.
+   *
+   * Two defects were measured on the version this replaces and both are
+   * addressed by construction rather than by tuning.
+   *
+   * (1) VERTICAL STRIPING. Per-column shade came out as white noise — the
+   * adjacent-column difference was 0.82 of the whole-ring standard deviation,
+   * i.e. neighbouring columns were essentially independent. It was NOT the
+   * radius or height fields, which measured smooth (ratios 0.09-0.24); it was
+   * the two strata terms, at 0.83 and 1.22. `y` steps 1.6 m per column and the
+   * strata had periods of 15 m and 4.6 m, so their PHASE stepped 0.7 and 2.2 rad
+   * per column — the second past Nyquist outright. Both were also far finer than
+   * the 30 m ring spacing could carry, so they were being point-sampled at a
+   * random phase at every vertex. Fine strata belong in the texture; the vertex
+   * layer now carries beds at 132 m and 60 m against a ~10 m ring spacing, and
+   * every angular field is a bounded harmonic sum, so the worst phase step
+   * anywhere on the ring is 0.71 rad and it advances SMOOTHLY — beds bend over a
+   * spur instead of flickering column to column.
+   *
+   * (2) NO LANDFORM. A revolve whose radius barely varies presents one coherent
+   * normal to a 13-degree sun and reads as a flat pale cut-out however it is
+   * lit or graded. Interior value has to come from real relief: the gully field
+   * swings the surface azimuth about +/-27 degrees over a 55-110 m arc, which
+   * is 100-190 px of light-and-shade at the vista's sight lines — landform
+   * scale, an order of magnitude coarser than a column.
    */
   _mesaRing() {
-    const NA = 288;
-    // radialOffset, heightFraction — steep face, broken shoulder, long back-slope
-    const PROF = [
-      [0, 0.00], [3, 0.16], [1.5, 0.34], [6, 0.56], [3.5, 0.72],
-      [9, 0.87], [6, 0.95], [22, 1.00], [58, 0.95], [120, 0.80],
-      [220, 0.55], [360, 0.26], [520, 0.02],
-    ];
-    const NP = PROF.length;
-    const pos = new Float32Array(NA * NP * 3);
-    const col = new Uint8Array(NA * NP * 3);
-    const uv = new Float32Array(NA * NP * 2);
-    const idx = new Uint32Array((NA) * (NP - 1) * 6);
-
-    const baseY = this.terrain ? this.terrain.minHeight - 6 : -20;
+    const NA = 384;               // face columns; 7.8 m of arc each
+    const NF = 26;                // profile rings on the visible face
+    const NP = NF + 8;            // plus the back slope down to the far plain
+    const NV = NA + 1;            // duplicated seam column, see the UV note
+    const rng = mulberry32(SEED ^ 0x31d5);
 
     /*
-     * Angular noise is sampled on a CIRCLE in noise space, so the step between
-     * neighbouring columns is `TAU * R / NA` times the octave multiplier. The
-     * old radii (3.2 for `big`, 9.9 for `mid`, 28.8 for `ero`) stepped the top
-     * octave by 0.29 / 0.89 / 2.5 lattice units per column — `ero` was fully
-     * decorrelated, so every column got an independent radius, height and shade.
-     * One column is 10 m of cliff, which at the vista's ~600 m sight line to the
-     * ring is 19 px: measured, that is the faint vertical striation on the
-     * distant ridges (RMS 0.42, peak 1.6 code values, stripe pitch 10-18 px,
-     * present on the ridge face and absent in the sky above it). It was never a
-     * fog artefact — haze only made it visible.
-     *
-     * These radii and octave counts hold the FINEST octave at 4-7 columns per
-     * feature (`big` 7.2, `ero` 5.9, `mid` 4.4), and `ero` now drifts only
-     * slowly with height, so erosion reads as gullies running down the face
-     * instead of as noise scattered across it.
+     * Every angular field is band-limited. Highest order anywhere is 27 against
+     * 384 columns = 14 columns per lobe, so nothing here can step per column.
      */
-    for (let a = 0; a < NA; a++) {
-      const ang = (a / NA) * TAU;
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const nx = ca * 1.55, nz = sa * 1.55;
-      // low-frequency ridge modulation: some sections are tall mesas, some are
-      // eroded saddles, so the horizon is never a constant-height wall
-      const big = fbm2(nx, nz, 17, 3);
-      const mid = fbm2(nx * 3.3, nz * 3.3, 41, 2);
-      const r0 = 462 + big * 46 + mid * 22;
-      const h = 96 + Math.pow(big, 1.6) * 190 + mid * 34;
-      const ex = ca * 1.9, ez = sa * 1.9;
+    const H_MASS = harmonics(rng, [1, 2, 3, 5, 8, 13], 1.0);  // mesas vs saddles
+    const H_CROWN = harmonics(rng, [5, 9, 15, 23], 1.0);      // ragged skyline
+    const H_SPUR = harmonics(rng, [2, 3, 5, 8], 1.0);         // buttresses in plan
+    const H_GULLY = harmonics(rng, [7, 11, 17, 24], 0.8);     // erosion channels
+    const H_CLIFF = harmonics(rng, [2, 3, 6], 1.0);           // sheer .. eroded
+    const H_TONE = harmonics(rng, [2, 4, 7], 1.0);            // slow value drift
+    const H_SLIDE = harmonics(rng, [2, 3, 5], 1.0);           // breaks the UV repeat
+
+    /** back slope: [radial offset beyond the face, height fraction] */
+    const BACK = [
+      [26, 0.97], [62, 0.90], [112, 0.76], [176, 0.57],
+      [248, 0.38], [318, 0.22], [380, 0.09], [430, 0.00],
+    ];
+
+    const pos = new Float32Array(NV * NP * 3);
+    const col = new Uint8Array(NV * NP * 3);
+    const uv = new Float32Array(NV * NP * 2);
+    const idx = new Uint32Array(NA * (NP - 1) * 6);
+
+    const baseY = this.terrain ? this.terrain.minHeight - 6 : -20;
+    const R_NOM = 476;
+    /*
+     * U is a CONSTANT step per column, and the ring carries a whole number of
+     * tiles (115) so the duplicated seam column closes exactly. The old form was
+     * `ang * r0 / 26` with a per-column `r0`: at the far side of the ring that
+     * derivative is `ang * dr0 / 26`, which reached 2.2x the nominal step, so
+     * the rock texture was being compressed and stretched column by column — a
+     * second, independent source of vertical banding on top of the strata one.
+     * It also had no seam column at all, which crammed one whole tile into the
+     * last quad.
+     */
+    const U_TILES = 71;
+    const U_STEP = U_TILES / NA;
+
+    for (let a = 0; a < NV; a++) {
+      const t = ((a % NA) / NA) * TAU;
+      const ca = Math.cos(t), sa = Math.sin(t);
+      const mass = angField(t, H_MASS);
+      const crown = angField(t, H_CROWN);
+      const spur = angField(t, H_SPUR);
+      const gully = angField(t, H_GULLY);
+      const tone = angField(t, H_TONE);
+      const slide = angField(t, H_SLIDE);
+      const cw = clamp(0.5 + 0.62 * angField(t, H_CLIFF), 0, 1);
+
+      /*
+       * A harmonic sum normalised to a peak of 1 has an RMS near 0.38, so these
+       * amplitudes are roughly 2.6x the standard deviation they buy. The first
+       * pass here used 96 m across orders 1-5 and rendered a single smooth arc
+       * spanning the whole frame — one lobe is one lobe however tall it is. The
+       * read comes from orders 8 and 13 (30 and 18 columns per lobe, i.e. 230
+       * and 140 m of crest), which is what puts several mesas and saddles inside
+       * the ~90 degrees of ring a wide shot actually sees.
+       */
+      /*
+       * The floor is not cosmetic. The vista camera sits at y=78 and the ring's
+       * base at about -26, so a section under ~104 m of relief is LOOKED DOWN
+       * ON: its rim and back slope, both broad up-facing planes, come into view
+       * as a pale flat band above the crest line. Clamping costs a few of the
+       * deepest saddles and buys a silhouette that is always a silhouette.
+       */
+      const h = Math.max(112, 176 + mass * 128 + crown * 26);
+      const r0 = R_NOM + spur * 46;
+      const talus = lerp(0.16, 0.46, cw);       // fraction of height that is scree
+      // Scree stands at its angle of repose (~34 deg), so the apron's RUN follows
+      // from the height it has to cover. A fixed radial run gave an 11-degree
+      // ramp under a short eroded section and a 48-degree one under a tall
+      // sheer section, neither of which is a talus.
+      const talusRun = Math.min(h * talus * 1.45, 210);
+      const cliffRun = lerp(7, 34, cw);         // the caprock leans back a little
 
       for (let p = 0; p < NP; p++) {
-        const [off, frac] = PROF[p];
-        const ero = (fbm2(ex + frac * 0.62, ez - frac * 0.37, 89, 3) - 0.5);
-        const r = r0 + off * (1 + ero * 0.16) + ero * 9 * (p > 0 && p < NP - 1 ? 1 : 0.2);
-        const y = baseY + h * frac + ero * 5.5 * frac;
+        let f, off;
+        if (p < NF) {
+          f = p / (NF - 1);
+          // 86% of the radial run is spent in the scree cone; the caprock above
+          // it is near vertical, which is what makes a mesa a mesa
+          off = f < talus
+            ? talusRun * Math.pow(f / talus, 0.86)
+            : talusRun + cliffRun * (f - talus) / (1 - talus);
+        } else {
+          const b = BACK[p - NF];
+          off = talusRun + cliffRun + b[0];
+          f = b[1];
+        }
+        // Gullies bite deepest in the scree and die out under the caprock, with
+        // a little left over on the cliff so it is not a smooth cylinder.
+        const gd = Math.pow(Math.sin(Math.PI * clamp((f - 0.02) / 0.74, 0, 1)), 0.7)
+          + 0.24 * smoothstep(0.52, 0.96, f);
+        /*
+         * Benches. A hard bed stands proud of the soft one under it, and the
+         * overhang it leaves is the horizontal shadow line that says SEDIMENTARY
+         * ROCK rather than sand dune — the single loudest missing cue at hero
+         * range, where the face was reading as one smooth ramp with a grain on
+         * it. Deliberately a function of the profile fraction and not of world
+         * y: a bench keyed to the 60 m bed would inherit that bed's 0.71 rad
+         * per-column phase step as a RADIAL step of 4 m, which is a 29 degree
+         * azimuth swing per column — a stripe. Keyed to `f` it steps once per
+         * eight rings and its only angular term is `tone`, at 0.09 rad.
+         */
+        const bench = Math.sin(f * 20.4 + tone * 1.2);
+        const r = r0 + off + gully * gd * 24
+          + Math.max(0, bench) * Math.max(0, bench) * 7.0 * (1 - f * 0.45);
+        const y = baseY + h * f - clamp(gully, 0, 1) * gd * 4.5;
+
         const k = a * NP + p;
         pos[k * 3] = ca * r;
         pos[k * 3 + 1] = y;
         pos[k * 3 + 2] = sa * r;
-        uv[k * 2] = (ang * r0) / 26;
-        uv[k * 2 + 1] = (y) / 26;
+        // `slide` walks the tile phase 1.2 tiles around the ring. Measured on
+        // the previous capture, the residual 27 px vertical rhythm on the ridge
+        // was not the mesh at all — per-column vertex shade and N.L both came
+        // out smooth (adjacent-column difference 0.17 and 0.05 of their own
+        // standard deviations) — it was the rock map repeating 115 times around
+        // the ring, which lands ~16 repeats inside a 500 px window. Sliding the
+        // phase breaks the rhythm; the amplitude is held low so the local U
+        // density still varies by only about a sixth, which is what stops this
+        // becoming the per-column density stripe the old `ang * r0` form had.
+        uv[k * 2] = a * U_STEP + slide * 1.2;
+        uv[k * 2 + 1] = y / UV_CLIFF;
 
-        // strata: sharp value bands with a slow hue drift, plus cavity dirt.
-        // Both band phases are driven by `big` — the low-frequency term — so a
-        // stratum stays continuous around the ring the way a real bed does,
-        // instead of stepping at every column the way a `mid`-driven phase did.
-        const band = Math.sin(y * 0.42 + big * 9) * 0.5 + 0.5;
-        const band2 = Math.sin(y * 1.35 + big * 7 + mid * 3) * 0.5 + 0.5;
-        const shade = 0.62 + band * 0.30 + band2 * 0.12 + ero * 0.17;
-        const warm = 0.86 + band * 0.22;
+        // Sedimentary beds at 132 m and 44 m, phased off the LOW-ORDER height
+        // only: the crown wobble and the gully cut move the surface, not the
+        // beds that were laid down before it eroded. That is both the correct
+        // geology and what keeps the worst per-column phase step at 0.42 rad.
+        const yBed = baseY + (176 + mass * 128) * f;
+        const s1 = Math.sin(yBed * 0.0476 + tone * 1.7) * 0.5 + 0.5;   // 132 m
+        const s2 = Math.sin(yBed * 0.1047 + tone * 2.4) * 0.5 + 0.5;   // 60 m
+        const scree = 1 - smoothstep(talus * 0.72, talus * 1.30, f);
+        const cut = clamp(-gully * gd, 0, 1);   // shaded floor of a channel
+        // Beds have EDGES. A raw sine reads as a soft gradient at any distance;
+        // pushing it through a smoothstep gives each bed a defined base and top,
+        // which is what survives being reduced to twenty pixels.
+        const b1 = smoothstep(0.30, 0.70, s1);
+        const b2 = smoothstep(0.36, 0.64, s2);
+        const shade = 0.48 + b1 * 0.30 + b2 * 0.16 + scree * 0.14 - cut * 0.17 + tone * 0.06;
+        const warm = 0.88 + b1 * 0.24 + scree * 0.06;
         const k3 = k * 3;
         col[k3] = clamp(shade * warm, 0, 1) * 255;
-        col[k3 + 1] = clamp(shade * (0.94 + band2 * 0.06), 0, 1) * 255;
-        col[k3 + 2] = clamp(shade * 0.80, 0, 1) * 255;
+        col[k3 + 1] = clamp(shade * (0.93 + b2 * 0.05), 0, 1) * 255;
+        col[k3 + 2] = clamp(shade * 0.78, 0, 1) * 255;
       }
     }
 
     let w = 0;
     for (let a = 0; a < NA; a++) {
-      const a1 = (a + 1) % NA;
       for (let p = 0; p < NP - 1; p++) {
         const i0 = a * NP + p, i1 = a * NP + p + 1;
-        const j0 = a1 * NP + p, j1 = a1 * NP + p + 1;
+        const j0 = (a + 1) * NP + p, j1 = (a + 1) * NP + p + 1;
         idx[w++] = i0; idx[w++] = j0; idx[w++] = i1;
         idx[w++] = i1; idx[w++] = j0; idx[w++] = j1;
       }
@@ -564,13 +793,28 @@ export class Level {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     g.computeVertexNormals();
+    // The seam column exists so U can run 0..115 without wrapping a whole tile
+    // into one quad, but a duplicated vertex only collects half its ring of
+    // faces, so average the two halves back together or the seam lights as a
+    // one-column crease.
+    const nrm = g.attributes.normal.array;
+    for (let p = 0; p < NP; p++) {
+      const i = p * 3, j = (NA * NP + p) * 3;
+      const x = nrm[i] + nrm[j], y = nrm[i + 1] + nrm[j + 1], z = nrm[i + 2] + nrm[j + 2];
+      const l = Math.hypot(x, y, z) || 1;
+      nrm[i] = nrm[j] = x / l;
+      nrm[i + 1] = nrm[j + 1] = y / l;
+      nrm[i + 2] = nrm[j + 2] = z / l;
+    }
     return g;
   }
 
   /** Dust plain beyond the cliffs — gives the horizon something to sit on. */
   _farPlain() {
-    const NA = 128, NR = 7;
-    const R0 = 900, R1 = 3200;
+    // 224 columns, not 128: the plain's outer edge is the horizon line itself,
+    // and one column there was 157 m of straight edge.
+    const NA = 224, NR = 9;
+    const R0 = 840, R1 = 3400;
     const pos = new Float32Array(NA * NR * 3);
     const col = new Uint8Array(NA * NR * 3);
     const uv = new Float32Array(NA * NR * 2);
@@ -594,7 +838,7 @@ export class Level {
         const y = baseY - 6 + (n - 0.5) * 34 * (0.35 + t);
         const k = a * NR + r;
         pos[k * 3] = ca * rad; pos[k * 3 + 1] = y; pos[k * 3 + 2] = sa * rad;
-        uv[k * 2] = ca * rad / 40; uv[k * 2 + 1] = sa * rad / 40;
+        uv[k * 2] = ca * rad / (UV_CLIFF * 1.6); uv[k * 2 + 1] = sa * rad / (UV_CLIFF * 1.6);
         const sh = 0.72 + n * 0.32;
         col[k * 3] = clamp(sh * 1.02, 0, 1) * 255;
         col[k * 3 + 1] = clamp(sh * 0.97, 0, 1) * 255;
@@ -620,93 +864,190 @@ export class Level {
     return g;
   }
 
-  /** Silhouette buttes on the far plain: the third depth layer. */
+  /**
+   * The vista's whole background layer: two rings of free-standing mesas on the
+   * far plain, the near group deliberately close enough to overlap the cliff
+   * ring's saddles.
+   *
+   * This layer read as flat pale cut-outs, and the reason is worth keeping. At
+   * 1.5 km a butte is ~95% veiled, so lighting contributes almost nothing and
+   * the SILHOUETTE plus a few code values of interior ramp is the entire read.
+   * The shape it had could not carry that: six profile rings whose last one
+   * folded back inward, giving a hard-edged trapezoid with a roof, and a plan
+   * that was a near-circle. A real mesa is a scree cone that flares out at the
+   * toe, a vertical caprock band, and a rim that rolls over — the toe is what
+   * stops the shape sitting on the plain like pasted paper, and the rim is what
+   * says "rock" rather than "hill". Three further things carry the depth read:
+   * the plan is anisotropic and turned (a squashed butte across the sight line
+   * is a RIDGE, not another cylinder), the near group is at 0.8-1.4 km so its
+   * silhouettes cross both the ring in front and the far group behind, and the
+   * crest is darker than the toe so every shape has an interior ramp.
+   *
+   * Beds are phased off the UNMODULATED height, so the ragged crown cannot walk
+   * their phase from column to column — the aliasing failure that striped the
+   * cliff ring.
+   */
   _distantButtes() {
     const rng = mulberry32(SEED ^ 0x9a1);
     const out = [];
     const baseY = this.terrain ? this.terrain.minHeight - 4 : -20;
-    for (let i = 0; i < 17; i++) {
-      const ang = (i / 17) * TAU + (rng() - 0.5) * 0.28;
-      // Further out and lower than they were. At 1 km a butte is only ~95%
-      // veiled, so it arrives as a LIGHT shape with a crisp edge and no interior
-      // value at all — a paper cut-out pasted over the mesa ring, measured at
-      // display 131 against 122 for the sky above it and 96 for the ring below.
-      // The job of this layer is a soft third depth plane, and depth is what
-      // buys the softness: from 1.25 km out it dissolves instead of cutting.
-      const rad = 1250 + rng() * 1500;
-      const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
-      const r = 90 + rng() * 240;
-      const h = 80 + rng() * 210;
-      // 72 columns, not 30: at 30 the silhouette was 31 px of straight edge per
-      // column with a visible corner at each end. 72 puts it at 10 px.
-      const NA = 72, NP = 6;
-      const PROF = [[0, 0], [0.10, 0.42], [0.06, 0.66], [0.22, 0.88], [0.30, 1.0], [0.62, 0.72]];
-      const pos = new Float32Array(NA * NP * 3);
-      const col = new Uint8Array(NA * NP * 3);
-      const uv = new Float32Array(NA * NP * 2);
-      const idx = new Uint32Array(NA * (NP - 1) * 6);
-      /*
-       * The plan and the crown line are BAND-LIMITED HARMONICS of the angle, not
-       * a noise lookup on a circle. Sampling fbm on a 30-column revolve is the
-       * trap that produced both failure modes here: at the original radius 2.4 /
-       * 3 octaves the field repeated ~62 times around 26 columns, so every
-       * column got an independent radius — 45 px of static per column on a
-       * silhouette at 1.2 km. Dropping the radius far enough to fix that took the
-       * field almost constant instead, and a smooth revolve under a low sun is a
-       * single coherent normal: the butte came back as a flat, hard-edged pale
-       * trapezoid with no internal value at all, which is worse.
-       *
-       * Harmonics 3/7/13 cannot alias at 72 columns by construction (the highest
-       * is 5.5 columns per lobe) and cannot go flat either, because their
-       * amplitudes are fixed rather than sampled. The crown gets its own 2/5
-       * pair so the top edge is ragged — at this range the silhouette is most of
-       * what survives the aerial perspective, so it has to carry the read.
-       */
-      const P = [rng() * TAU, rng() * TAU, rng() * TAU, rng() * TAU, rng() * TAU];
-      for (let a = 0; a < NA; a++) {
-        const t = (a / NA) * TAU;
-        const ca = Math.cos(t), sa = Math.sin(t);
-        const wob = 1 + 0.20 * Math.sin(3 * t + P[0]) + 0.13 * Math.sin(7 * t + P[1])
-          + 0.075 * Math.sin(13 * t + P[2]);
-        const hs = 1 + 0.14 * Math.sin(2 * t + P[3]) + 0.09 * Math.sin(5 * t + P[4]);
+
+    /** [radius factor, height fraction] — scree cone, caprock, rim, cap. */
+    const PROF = [
+      [1.000, 0.000], [0.905, 0.115], [0.828, 0.235], [0.762, 0.350],
+      [0.712, 0.455], [0.686, 0.560], [0.672, 0.665], [0.664, 0.760],
+      // The caprock stands PROUD of the slope it sits on. That flare is the
+      // overhang line every real mesa carries just under its rim, and it is the
+      // one place a shape this veiled can still put a hard dark edge.
+      [0.708, 0.802], [0.702, 0.898], [0.672, 0.952],
+      // The cap CLOSES. It used to stop at 0.08 of the plan radius, which on a
+      // 300 m butte is a 24 m hole, and the vista pose looked straight through
+      // one at bright sky — a white pennant sitting in the middle of a
+      // silhouette. A revolve that is meant to be solid needs its pole.
+      [0.585, 0.988], [0.430, 1.000], [0.230, 0.997], [0.000, 0.990],
+    ];
+    const NP = PROF.length;
+    const NA = 64, NV = NA + 1;
+
+    /*
+     * count, radius min/span, plan radius min/span, height min/span, contrast.
+     *
+     * The minimum HEIGHT is load-bearing and was 85 m. A butte's cap is a flat,
+     * up-facing plane, and an up-facing plane under a bright sky is the
+     * brightest surface a landform owns — so any butte whose top came out below
+     * the camera was seen from above and read as a pale slab floating over the
+     * ridge line, which is the exact defect this level has already been through
+     * once with the banners. Base sits at terrain minimum minus 4 (about -24 m)
+     * and the vista camera is at 78 m, so nothing below ~105 m of relief is
+     * safe. At 130 m the shortest cap is 28 m above that camera and further
+     * above any gameplay one.
+     */
+    /*
+     * ONE band, 0.95-1.9 km, not two out to 3 km. Working the fog numbers: the
+     * aerial term alone reaches tau 1.2 at 1 km (70% veiled), 2.5 at 1.5 km
+     * (92%) and 3.5 at 2.4 km (97%). Past about 2 km a landform retains so
+     * little of its own radiance that it renders as one flat patch of fog
+     * colour with a hard edge — measured on the previous capture, a 3 km butte
+     * came back as a uniform pale rounded rectangle with ZERO interior
+     * variation, which is the paper cut-out this whole layer exists to stop
+     * being. A shape only reads as rock while it still owns some of its own
+     * light. The far horizon is the far plain's job.
+     *
+     * The height minimum is the other hard constraint: base is about -24 and
+     * the crown modulation can take 0.81 of the nominal height, so anything
+     * under ~150 m of relief can put its flat, up-facing cap below the vista
+     * camera at y=78 and read as a floating slab.
+     */
+    const GROUPS = [
+      [22, 950, 950, 85, 145, 150, 150, 1.00],
+    ];
+
+    for (const [n, rad0, rads, br0, brs, bh0, bhs, con] of GROUPS) {
+      for (let i = 0; i < n; i++) {
+        const ang = ((i + 0.5) / n) * TAU + (rng() - 0.5) * (TAU / n) * 0.85;
+        const rad = rad0 + rng() * rads;
+        const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
+        const r = br0 + rng() * brs;
+        const h = bh0 + rng() * bhs;
+        const squash = 0.42 + rng() * 0.58;
+        const turn = rng() * TAU;
+        const cq = Math.cos(turn), sq = Math.sin(turn);
+
+        // Highest plan order is 11 against 64 columns — 5.8 columns per lobe.
+        const H_PLAN = harmonics(rng, [2, 3, 5, 8, 11], 1.0);
+        const H_CROWN = harmonics(rng, [1, 2, 3, 5, 9], 1.0);
+        const H_TONE = harmonics(rng, [1, 3, 6], 1.0);
+        const bedPhase = rng() * TAU;
+
+        const pos = new Float32Array(NV * NP * 3);
+        const col = new Uint8Array(NV * NP * 3);
+        const uv = new Float32Array(NV * NP * 2);
+        const idx = new Uint32Array(NA * (NP - 1) * 6);
+
+        for (let a = 0; a < NV; a++) {
+          const t = ((a % NA) / NA) * TAU;
+          const ca = Math.cos(t), sa = Math.sin(t);
+          const planN = angField(t, H_PLAN);
+          const plan = 1 + 0.27 * planN;
+          const hs = 1 + 0.19 * angField(t, H_CROWN);
+          const tone = angField(t, H_TONE);
+          for (let p = 0; p < NP; p++) {
+            const frac = PROF[p][1];
+            // The plan wobble tapers out toward the cap. At full strength on the
+            // rim it drove thin slivers off the caprock flare that caught the
+            // sun edge-on and rendered as bright pennants on the silhouette.
+            const rr = r * PROF[p][0] * (1 + 0.27 * planN * (1 - 0.62 * frac));
+            const y = baseY + h * frac * hs;
+            const lx = ca * rr, lz = sa * rr * squash;
+            const k = a * NP + p;
+            pos[k * 3] = cx + lx * cq - lz * sq;
+            pos[k * 3 + 1] = y;
+            pos[k * 3 + 2] = cz + lx * sq + lz * cq;
+            uv[k * 2] = (a / NA) * (TAU * r / UV_CLIFF);
+            uv[k * 2 + 1] = y / UV_CLIFF;
+
+            const yBed = baseY + h * frac;
+            const s1 = Math.sin(yBed * 0.0532 + bedPhase) * 0.5 + 0.5;      // 118 m
+            const s2 = Math.sin(yBed * 0.1208 + bedPhase * 1.7) * 0.5 + 0.5; // 52 m
+            const scree = 1 - smoothstep(0.26, 0.58, frac);
+            // The band right under the caprock flare is in its own shadow.
+            const under = smoothstep(0.62, 0.76, frac) * (1 - smoothstep(0.78, 0.84, frac));
+            /*
+             * Base 0.44, not 0.57. At 1-3 km the veil is 75-95%, so what a
+             * butte renders is mostly the fog colour and only a little of its
+             * own albedo — which means a pale rock lands ABOVE the sky around
+             * it and reads as pasted paper. The albedo has to be pulled down
+             * for the veiled result to sit below the sky, which is where a
+             * distant landform belongs.
+             */
+            let sh = 0.44 + s1 * 0.23 + s2 * 0.09 + scree * 0.13
+              + (plan - 1) * 0.40 + tone * 0.05 - under * 0.14;
+            // Desert varnish. The cap is the oldest surface on the landform and
+            // the only one facing the sky, so it needs to come down or it wins
+            // the frame. Keyed to the ring INDEX, not the height fraction — the
+            // cap rings sit BELOW the rim (that is what makes it a cap and not
+            // a cone), so a height test darkens exactly the wrong ring.
+            if (p >= NP - 3) sh *= 0.70;
+            else if (p === NP - 4) sh *= 0.86;
+            // Crest darker than toe: a shape at one flat value is what reads as
+            // a cut-out, and a ramp is the only interior cue that survives a
+            // 95% veil.
+            sh *= 1.09 - 0.27 * frac;
+            sh = 0.60 + (sh - 0.60) * con;
+            const k3 = k * 3;
+            col[k3] = clamp(sh * 1.03, 0, 1) * 255;
+            col[k3 + 1] = clamp(sh * 0.95, 0, 1) * 255;
+            col[k3 + 2] = clamp(sh * 0.83, 0, 1) * 255;
+          }
+        }
+
+        let w = 0;
+        for (let a = 0; a < NA; a++) {
+          for (let p = 0; p < NP - 1; p++) {
+            const i0 = a * NP + p, i1 = a * NP + p + 1;
+            const j0 = (a + 1) * NP + p, j1 = (a + 1) * NP + p + 1;
+            idx[w++] = i0; idx[w++] = j0; idx[w++] = i1;
+            idx[w++] = i1; idx[w++] = j0; idx[w++] = j1;
+          }
+        }
+
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+        g.setIndex(new THREE.BufferAttribute(idx, 1));
+        g.computeVertexNormals();
+        const nrm = g.attributes.normal.array;
         for (let p = 0; p < NP; p++) {
-          const rr = r * (1 - PROF[p][0]) * wob;
-          const y = baseY + h * PROF[p][1] * hs;
-          const k = a * NP + p;
-          pos[k * 3] = cx + ca * rr; pos[k * 3 + 1] = y; pos[k * 3 + 2] = cz + sa * rr;
-          uv[k * 2] = t * rr / 40; uv[k * 2 + 1] = y / 40;
-          // strata plus a face term: a west-facing bench and a south-facing one
-          // are not the same value, and at this range that is the only interior
-          // detail with any chance of surviving the haze
-          const band = Math.sin(y * 0.25 + i) * 0.5 + 0.5;
-          const band2 = Math.sin(y * 0.62 + P[0]) * 0.5 + 0.5;
-          // Crest darker than base. Only the crest clears the mesa ring, and a
-          // ramp is the one kind of interior value that survives a 95% veil —
-          // a flat shape at one value is what reads as a cut-out.
-          const sh = (0.60 + band * 0.26 + band2 * 0.10 + (wob - 1) * 0.42)
-            * (1.10 - 0.30 * PROF[p][1]);
-          col[k * 3] = clamp(sh * 1.04, 0, 1) * 255;
-          col[k * 3 + 1] = clamp(sh * 0.96, 0, 1) * 255;
-          col[k * 3 + 2] = clamp(sh * 0.84, 0, 1) * 255;
+          const u = p * 3, v = (NA * NP + p) * 3;
+          const x = nrm[u] + nrm[v], y = nrm[u + 1] + nrm[v + 1], z = nrm[u + 2] + nrm[v + 2];
+          const l = Math.hypot(x, y, z) || 1;
+          nrm[u] = nrm[v] = x / l;
+          nrm[u + 1] = nrm[v + 1] = y / l;
+          nrm[u + 2] = nrm[v + 2] = z / l;
         }
+        out.push(g);
       }
-      let w = 0;
-      for (let a = 0; a < NA; a++) {
-        const a1 = (a + 1) % NA;
-        for (let p = 0; p < NP - 1; p++) {
-          const i0 = a * NP + p, i1 = a * NP + p + 1;
-          const j0 = a1 * NP + p, j1 = a1 * NP + p + 1;
-          idx[w++] = i0; idx[w++] = j0; idx[w++] = i1;
-          idx[w++] = i1; idx[w++] = j0; idx[w++] = j1;
-        }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
-      g.setIndex(new THREE.BufferAttribute(idx, 1));
-      g.computeVertexNormals();
-      out.push(g);
     }
     return out;
   }
@@ -751,7 +1092,15 @@ export class Level {
           float bars = 0.55 + 0.45 * sin( vUvv.x * 1340.0 );
           float scan = 0.5 + 0.5 * sin( vW.y * 0.34 - uTime * 1.7 );
           float pulse = 0.72 + 0.28 * sin( uTime * 2.3 + vUvv.x * 40.0 );
-          float a = ( 0.035 + prox * 0.62 ) * vert * ( 0.28 + 0.72 * bars * scan ) * pulse;
+          // The bar pattern is 213 cycles around a 430 m ring, i.e. ~12.7 m of
+          // arc, which from anywhere across the arena is 20-30 px. Modulating
+          // the FAR alpha by it (0.28..1.0, a 3.6x swing) put a fine regular
+          // vertical rhythm across every distant sight line for no design gain
+          // whatsoever, since the boundary is supposed to be invisible until it
+          // is approached. It now resolves with proximity along with everything
+          // else about the curtain.
+          float detail = mix( 1.0, 0.28 + 0.72 * bars * scan, prox );
+          float a = ( 0.035 + prox * 0.62 ) * vert * detail * pulse;
           float cam = length( vW - cameraPosition );
           a *= exp( -uFog * cam * 0.55 );
           vec3 c = uColor * ( 0.5 + prox * 3.4 );
