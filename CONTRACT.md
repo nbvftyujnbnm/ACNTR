@@ -811,3 +811,192 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   conveyor-specular defect logged earlier are THE SAME DEFECT, and it is still
   owned by whoever owns that structure's material (raise its roughness past 0.35
   or break it up along its length).
+- 2026-08-28 [world] THE CONVEYOR BLOWOUT IS FIXED, and it was two defects wearing one
+  coat. (a) MATERIAL: every structure family's `rough` is a MULTIPLIER on the baked
+  roughness map, not a roughness — three evaluates `roughness * roughnessMap.g`, and the
+  forge writes a mean near 0.62 with a floor near 0.45. `dark`, which carries every deck,
+  truss, handrail and grating in the level, was at 0.48, so its smoothest texels rendered
+  at **0.22 — a mirror**. Every family was in that neighbourhood. They are now
+  0.80-0.96 (`dark` 0.96, `steel` 0.80, `trim` 0.86, `teal` 0.86, `rust` 0.96,
+  `ochre` 0.90), i.e. effective 0.36-0.77, and `env` came down with them. Read the new
+  numbers as "1.6x the effective roughness"; a family needs `rough` past ~0.78 before its
+  smoothest texels clear 0.35. (b) GEOMETRY, which the material alone could not reach: the
+  312 m span's deck was ONE box and each handrail was ONE 8 cm bar, so the whole run
+  presented one normal to a 13-degree sun. `pipeBridge`, `catwalk`, the cantilever arm and
+  `railing` now build in plates and bays — each rolled 1-3 degrees about the run axis, set
+  a few centimetres off its neighbours and tinted independently — plus grating treads every
+  2.5 m. Measured on the vista pose over the bridge's whole run: pixels at or above display
+  245 **-46%** (1754 -> 953) and above 235 -49%; inside the 200x60 px band the review
+  measured (x 1250-1450, y 500-560) the mean fell 159.6 -> 95.5 and the above-245 count
+  1515 -> 583.
+  More to the point the highlight is now a broken chain of plate glints instead of a
+  300 m smear. NOTE for the render owners: the frame's TOTAL above-245 count went UP over
+  the same interval (9839 -> 14212) and every one of those pixels is in the sky above
+  y=430 (7896 -> 12806) — that is not the level.
+- 2026-08-28 [world] `GeoBatch.tint(tint, scale)` is now a public static. It resolves a hex
+  tint multiplier exactly the way `add()` does and then scales it, so a builder can vary
+  plate-to-plate INSIDE one assembly and still compose with the caller's tint instead of
+  replacing it. `add()` calls it, so there is one implementation of the renormalisation.
+- 2026-08-28 [world] All seven structure families and the four prop families share one
+  `onBeforeCompile` (`surfaceBreakup`) that adds WORLD-space grime: roughness +0..0.26 and
+  albedo x0.90..1.07 from a two-term field at 20 m and 5.5 m. Roughness is only ever ADDED,
+  so it can break a highlight up but never sharpen one. The shortest wavelength is 5.5 m
+  deliberately — that is ~12 px at the vista's 400 m sight lines, and a sub-metre
+  procedural term would alias into a crawling speckle at that range while the baked
+  roughness map already owns that scale. It is ONE function object on purpose: three keys
+  its program cache on `onBeforeCompile.toString()`, so the families keep sharing compiled
+  programs (37-39 total, unchanged) instead of forking one each. It is also what stops 168
+  instanced containers from wearing identically — the varying is computed through
+  `instanceMatrix` under `#ifdef USE_INSTANCING`.
+- 2026-08-28 [world] THE FLOATING PANEL IS NOT `ContainmentField`. It is `Level.banners`,
+  and the earlier diagnosis should not be acted on. Raycast through the exact screen point
+  in the old hero framing: FIRST hit `Level.banners` at **89 m**, world (6.4, 34.9, -52.4);
+  `ContainmentField` is the SECOND hit 384 m further out. The field could not have drawn it
+  anyway — far from the player its fragment alpha is 0.035 before a `exp(-fog*dist)` factor
+  and additive `SrcAlpha, One` blending squares it, so it contributes ~1e-4 of anything.
+  The raycast reached it because a raycast does not read alpha. What `_buildBanners`
+  actually did was scatter tarps on a random bearing from each district centre at
+  `heightAt + 6..22` with `castShadow` off and a `PlaneGeometry`'s default 0..1 UVs — one
+  whole tile of the armour-panel map stretched across a 12 m piece, so its plates rendered
+  a metre wide each and it read as a rigid bulkhead hanging in clear sky. Now: anchors come
+  from `_blockers` and `_decks` so every tarp hangs off a real parapet or handrail, UVs are
+  world-scaled at 1.7 m/tile, the free edge is torn, and the mesh casts shadows. Same
+  screen point now returns nothing but the boundary shell. Two supporting changes: the
+  wave amplitude went 0.55 -> 0.28 because a tarp 20 cm off a wall cannot swing half a
+  metre, and `_blockers` entries gained a 6th slot, **1 for `_addOBB` slabs and 0 for
+  `_addAABB`** — only the sliced footprints bound a real flat wall, and allowing the rest
+  left 8 of 29 tarps with no geometry within 6 m because a tank's or a lattice tower's
+  bounding box face stands metres clear of anything solid. Everything else reads slots 0..3
+  only.
+- 2026-08-28 [world] THE VERTICAL STRIATION ON THE DISTANT RIDGES IS A NYQUIST BUG IN THE
+  BOUNDARY REVOLVES, not fog and not terrain. Angular noise sampled on a CIRCLE in noise
+  space steps `TAU * R / NA` per column times the octave multiplier. `_mesaRing` used
+  R = 28.8 for its erosion field over 288 columns: 2.5 lattice units per column at the top
+  octave, i.e. fully decorrelated, so every column got an independent radius, height and
+  shade. One column is 10 m of cliff, which at the vista's 600 m sight line is 19 px —
+  measured stripe pitch 10-18 px, RMS 0.42 and peak 1.6 code values on the ridge face and
+  none in the sky above it. `_farPlain` (finest octave 152 m against a 157 m column) and
+  `_distantButtes` (a field repeating 62 times around 30 columns) had it worse. Radii and
+  octave counts now hold the finest octave at 5+ columns per feature everywhere, and the
+  buttes use fixed harmonics 3/5/8 in angle instead of a noise lookup. THE TRAP ON THE
+  OTHER SIDE, hit and recorded: simply lowering a butte's noise radius until it stopped
+  aliasing took the field almost constant, and a smooth revolve under a low sun is one
+  coherent normal — the butte came back as a flat, hard-edged pale trapezoid with no
+  interior value at all, which is an automatic REVIEW failure where the striation was
+  merely a blemish. Band-limited harmonics cannot do that: their amplitude is fixed rather
+  than sampled. Anyone adding a revolve to the boundary should check the same ratio.
+- 2026-08-27 [render] `Pipeline.params.dust` (`amount` / `scale` / `drift`) and
+  `dustGain()` in `COMPOSITE_FRAG` — the deck and band media now have STRUCTURE.
+  Every other term in that pass is a smooth closed-form function of position, so
+  a sight line across open ground produces a smooth ramp and nothing else.
+  Measured on the vista pose, that showed up as the plain between 300 m and
+  800 m: standard deviation 15.9 code values across a 700x70 px band, a pale
+  featureless sheet occupying the middle third of the frame and the largest
+  single reason its lower half read as flat. Nothing stands on that stretch to
+  cast onto it (and it is past `shadowMaxFar` anyway — tested, extending the
+  cascades to 950 m moved that region by 0.1 code values), and the terrain there
+  has no relief, so the only place structure can come from is the AIR.
+  Two world-space probes per ray at 0.30 and 0.68 of the distance, fbm2 each,
+  squashed 3.5x in Y so banks lie in sheets. World space, not screen space, so
+  banks stay put under camera motion and TAA does not fight them; the gain is
+  built to average exactly 1.0, so total veiling on the ridges is unchanged and
+  the numbers tuned in the earlier fog pass still hold. Aerial term deliberately
+  excluded — it is Rayleigh-ish and really is uniform.
+  TWO THINGS TO KNOW BEFORE RETUNING IT. (a) `scale` is the knob that matters,
+  and the first value tried (190 m) was useless: the 700 px measuring window
+  spans only ~140 m of world at the far probe, so ONE noise cell covered the
+  whole region and the term shifted its level without adding structure inside it
+  — sd 15.9 -> 16.9, and no further at 0.85 amplitude. Two or three banks across
+  the frame is the target. (b) A fixed-region standard deviation is a bad metric
+  for this at any scale, because which bank happens to land on the measured
+  rectangle dominates it; cross-variant region stats moved the FOREGROUND sand
+  by 3-5 code values purely from reseeding. Judge it on frames.
+- 2026-08-27 [render] Ambient rebalance, and the reasoning generalises: on the
+  PLAIN, and only on the plain, shadow value is dominated by undirected light. A
+  13.5-degree sun delivers sin(13.5) = 0.23 of its irradiance to horizontal
+  ground but cos(13.5) = 0.97 to a vertical flank, so the ground is the one
+  surface in the frame whose lit value the key barely wins. Every 0.01 removed
+  from an omnidirectional term is therefore worth about 4x more contrast on the
+  sand than it costs the mech, which has a directional fill of its own.
+  `hemiIntensity` 0.22 -> 0.16 and `envIntensity` 1.18 -> 1.00, both paid into
+  `bounceIntensity` 2.1 -> 2.4 (which lands EXACTLY zero on up-facing ground —
+  see the earlier amendment — so it cannot give back what was just taken).
+  Measured on the vista pose against the same build with only these three
+  differing: sunlit sand 128.0 -> 127.1, sand in shadow 55.8 -> 54.3, ratio
+  2.29 -> 2.34. Small, and honestly smaller than predicted, because AgX
+  compresses it. `envIntensity` is the term that wants to come down further and
+  the one that cannot: it also drives specular, i.e. whether metal picks up the
+  sky. A harder setting (0.11 / 0.86 / 2.7) was measured at ratio 2.30 against
+  2.21 for its own paired baseline — a slightly better trade on paper, not taken
+  because of the 27% specular cut. That is the documented next step if someone
+  wants more ground contrast and is willing to pay for it.
+- 2026-08-27 [render] `grade.splitShadow` (-0.026,-0.006,0.044) ->
+  (-0.038,-0.008,0.058). AC6's signature is a warm key against a COOL shadow and
+  this frame was only delivering the first half: measured on the vista, sunlit
+  sand reads R/B 1.38 and sand IN SHADOW still read 1.20. The cause is that the
+  terrain albedo is warm ochre and the largest ambient term reaching it (the
+  PMREM environment) is warm too, so nothing in the shadow is cool enough to
+  overcome the paint — the two directional fills already carry the right
+  temperatures and cannot be pushed harder without flattening the plain. Moves
+  shadowed sand to R/B 1.13 at no cost anywhere else, because it is gated on the
+  bottom of the curve.
+- 2026-08-27 [render] MEASURED, and it contradicts the review note it answers:
+  THE SHADOWS ARE NOT WEAK. Rendered one pose twice, identical but for
+  `castShadow` on every cascade light, and differenced: 31% of lit pixels are
+  darkened below 0.6x, the ground immediately around the mech goes 58.8 -> 26.3
+  (a 2.2x darkening) and the mech's own self-shadowing runs 0.66. What is
+  missing is not shadow DEPTH, it is a framing in which one is visible. At a
+  13.5-degree sun a 9 m mech throws a 37 m shadow: it is a long blade cast far
+  to one side, not a pool at the feet, so whether the frame contains it is
+  decided entirely by the camera azimuth relative to the sun. A tight
+  under-the-feet darkening at this sun elevation can only come from AO, never
+  from the cascades. Anyone still chasing "faint contact shadow" should fix the
+  pose, or accept that the cue is AO's job.
+- 2026-08-27 [world] DEFECT, not owned by this agent: the distant ridge meshes
+  carry VERTICAL FACET STRIPING. Measured by comparing the horizontal
+  high-frequency content of a single scanline against the same statistic on a
+  100-row average — noise averages down by sqrt(N), a vertical stripe does not.
+  Coherence comes out at 0.35-0.52 against the ~0.1 that independent noise would
+  give, i.e. genuinely coherent columns. Amplitude is 2.1 code values with the
+  post fog off and 0.6 with it on, so the fog is already burying it 3.7x and it
+  is invisible in the vista pose; it is clearly visible in any LOW camera, where
+  the ridges are less veiled — the boost frame measures 2.06 at coherence 0.52.
+  It is not post: TAA, sharpen and grain were each ruled out by isolation, and
+  the fog attenuates it, which places it before the composite. Likely a
+  heightfield ridge whose vertex normals face-band along its grid columns.
+- 2026-08-27 [render] MEASUREMENT TRAP, recorded so nobody chases it: an
+  autocorrelation peak at lag 25-27 px appeared on every ridge in every frame at
+  two different cameras and FOVs, which looks exactly like a fixed screen-space
+  period and is not. It is the analysis: subtracting a moving average of radius
+  12 (a 25-wide window) to detrend a profile plants a positive echo at precisely
+  the window width. Vary the detrend width before believing any peak near it.
+- 2026-08-27 [tools] TWO POSE DEFECTS that make lighting unreviewable, found by
+  capturing at HEAD. (a) `Debug.placePlayerInSun` scores candidates on the SUM
+  of eight 60 m clearance rays, so a spawn with one wall 3 m away and seven open
+  directions still wins, and it never tests the point the camera will actually
+  occupy. On this build it picks a spawn where the hero camera (player +
+  12, 6.4, 14) lands INSIDE geometry: `shots/L40/hero.png` is a full-frame
+  close-up of armour plating. Score the MINIMUM ray, not the sum, and reject a
+  candidate whose camera offset is occupied or whose line back to the mech is
+  blocked. (b) Even a perfect sunlit spawn is not enough for the thing the hero
+  pose exists to show: the shot also needs the sun roughly SIDE-ON to the
+  camera, or the mech's shadow falls behind it and out of frame. Both hero
+  framings tried this session put the sun near the camera axis and neither shows
+  a contact shadow, despite the shadows measuring strong (see above).
+- 2026-08-27 [tools] The boost pose's motion blur is a function of the capture's
+  SETTLE TIME, which makes it easy to grade the wrong frame. The pose releases
+  its keys and then steps; at the harness default (1100 ms) the frame still has
+  the assault-boost velocity and shows heavy, correct blur, and at 1800 ms the
+  velocity has decayed and the same pose renders sharp at 59 m/s. Do not raise
+  `--settle` when capturing `boost`.
+- 2026-08-28 [harness] DEFECT, not owned by this agent, and it makes the `hero` pose
+  unreviewable: `Debug.placePlayerInSun` scores a spawn on the PLAYER's elbow room and the
+  pose then puts the camera 18.4 m away on a fixed bearing, so nothing checks what is
+  behind the lens. Its clearance term is a SUM over 8 rays capped at 60 m, so a spot with
+  60 m of open ground in seven directions and 5 m of wall in the eighth scores 425 of 480
+  and wins — and if that eighth direction is the camera's, the shot is taken from inside
+  the wall. Reproduced on two consecutive builds, deterministic, and confirmed by
+  measurement rather than by eye: the frame is a `plateA`-family wall at about 11 m
+  (three 4 m plates across a 55-degree horizontal field). The fix belongs in the scorer —
+  score the camera's position too, or reject any candidate whose camera offset raycast
+  hits inside ~25 m. `shots/level2/hero.png` and `shots/level/hero.png` are both this.

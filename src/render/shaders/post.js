@@ -1,4 +1,4 @@
-import { GLSL_COMMON, GLSL_DEPTH } from './lib.js';
+import { GLSL_COMMON, GLSL_DEPTH, GLSL_NOISE3 } from './lib.js';
 
 /* ---------------------------------------------------------------------------
  * Velocity — camera-motion reconstruction from depth.
@@ -311,6 +311,7 @@ void main() {
 export const COMPOSITE_FRAG = /* glsl */ `
 ${GLSL_COMMON}
 ${GLSL_DEPTH}
+${GLSL_NOISE3}
 
 uniform sampler2D tScene;
 uniform sampler2D tDepth;
@@ -333,6 +334,9 @@ uniform float uBandThickness;
 uniform float uAerialDensity;
 uniform float uAerialRamp;
 uniform float uFogStrength;
+uniform float uDustAmount;    // 0 = perfectly smooth media, 1 = full modulation
+uniform float uDustScale;     // metres per noise cell (horizontal)
+uniform float uDustTime;      // wind advection, metres
 uniform float uAOEnabled;
 uniform float uSSREnabled;
 uniform float uSSRIntensity;
@@ -354,6 +358,42 @@ float deckTau( float y0, float y1, float dist ) {
 float bandRho( float y ) {
   float t = ( y - uBandHeight ) / max( uBandThickness, 1e-3 );
   return exp( - t * t );
+}
+
+/**
+ * Density modulation for the two DUST media — the thing that turns an analytic
+ * fog into weather.
+ *
+ * Every term above is a smooth closed-form function of position, so a sight
+ * line across open ground produces a smooth ramp and nothing else. Measured on
+ * the vista pose, the plain between 300 m and 800 m came out at a standard
+ * deviation of 15.9 code values over a 700 x 70 px band — a pale, featureless
+ * sheet occupying the middle third of the frame, and the single largest reason
+ * the lower half read as flat. There is no cast shadow available to break it up
+ * (nothing stands on that stretch, and it is past the cascade range anyway) and
+ * no terrain relief either, so the structure has to come from the AIR.
+ *
+ * Sampled in WORLD space at two points along the ray rather than in screen
+ * space, for two reasons: banks then stay put as the camera moves (a
+ * screen-space pattern would swim, and TAA would fight it), and two taps give a
+ * bank a soft leading and trailing edge instead of one flat value per sight
+ * line. The mean of the noise is 0.5 and the gain is built to average exactly
+ * 1.0, so this redistributes optical depth without adding any: total veiling on
+ * the ridges is unchanged, which matters because that was tuned separately.
+ *
+ * Deck and band only. The aerial term is Rayleigh-ish molecular scattering and
+ * really is uniform; giving it banks would read as a bug.
+ */
+float dustGain( vec3 a, vec3 b ) {
+  if ( uDustAmount < 0.001 ) return 1.0;
+  // Squashed in Y so banks are wide and flat — dust lies in sheets, it does not
+  // form spheres. 3.5:1, mild enough that a climbing camera still passes
+  // through them rather than skimming one forever.
+  vec3 s = vec3( 1.0 / max( uDustScale, 1.0 ) );
+  s.y *= 3.5;
+  vec3 wind = vec3( uDustTime, 0.0, uDustTime * 0.35 ) * s;
+  float n = 0.5 * ( fbm3_2( a * s + wind ) + fbm3_2( b * s + wind ) );
+  return 1.0 + uDustAmount * ( 2.0 * n - 1.0 );
 }
 
 void main() {
@@ -385,11 +425,19 @@ void main() {
     float dist = length( toP );
     vec3 dir = toP / max( dist, 1e-4 );
 
-    float tDeck = deckTau( uCameraPos.y, wp.y, dist );
+    // Two probes along the sight line, deliberately NOT at the ends: at 0.30
+    // the near probe is clear of the camera (so a bank cannot sit on the lens
+    // and tint the whole frame) and at 0.68 the far one is short of the surface
+    // (so a bank cannot outline the geometry it is supposed to be veiling).
+    vec3 dustA = uCameraPos + toP * 0.30;
+    vec3 dustB = uCameraPos + toP * 0.68;
+    float dust = dustGain( dustA, dustB );
+
+    float tDeck = deckTau( uCameraPos.y, wp.y, dist ) * dust;
 
     float midY = ( uCameraPos.y + wp.y ) * 0.5;
     float tBand = uBandDensity * dist *
-      ( bandRho( uCameraPos.y ) + 4.0 * bandRho( midY ) + bandRho( wp.y ) ) * ( 1.0 / 6.0 );
+      ( bandRho( uCameraPos.y ) + 4.0 * bandRho( midY ) + bandRho( wp.y ) ) * ( 1.0 / 6.0 ) * dust;
 
     // Aerial perspective, range-ramped. A strictly linear tau means the only
     // way to bury a 2 km ridge is to also veil the 150 m gantry in front of it,

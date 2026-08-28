@@ -101,6 +101,72 @@ function fbm2(x, y, s, oct = 4) {
 }
 
 /* ========================================================================== */
+/*  Surface breakup — WORLD-space grime, shared by every structure family      */
+/* ========================================================================== */
+
+/**
+ * A tiled texture repeats every 8 m; this varies over 20 m and 5.5 m in WORLD
+ * space, so two pieces welded into the same batch never wear identically and a
+ * long run of one material is never uniform along its length.
+ *
+ * It exists because of a measured defect: the 312 m conveyor bridge is one
+ * continuous plane of one roughness, which puts every square metre of it at the
+ * same angle to a 13-degree sun. The specular lobe therefore lit up as ONE
+ * unbroken mirror band several stops past the tonemap shoulder — 75% of every
+ * pixel at or above display 245 in the vista frame sat inside it. A blown
+ * highlight is fixed at the source, and the source of a mirror band is a large
+ * surface with no variation in it.
+ *
+ * Two deliberate constraints:
+ *  - roughness is only ever ADDED, so this can break a highlight up but can
+ *    never sharpen one, whatever the family's base value is;
+ *  - the shortest wavelength is 5.5 m, which is ~12 px at the vista's 400 m
+ *    sight lines. A sub-metre procedural term would alias into a crawling
+ *    speckle at that range, and the baked roughness map already owns that scale.
+ *
+ * One function object shared by every family on purpose: three keys its program
+ * cache on `onBeforeCompile.toString()`, so the families keep sharing a single
+ * compiled program instead of forking one each.
+ *
+ * @param {object} sh three's shader object, mutated in place
+ */
+function surfaceBreakup(sh) {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', /* glsl */`
+      #include <common>
+      varying vec3 vLvlW;
+    `)
+    .replace('#include <project_vertex>', /* glsl */`
+      vec4 lvlP = vec4( transformed, 1.0 );
+      #ifdef USE_INSTANCING
+        lvlP = instanceMatrix * lvlP;
+      #endif
+      vLvlW = ( modelMatrix * lvlP ).xyz;
+      #include <project_vertex>
+    `);
+
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', /* glsl */`
+      #include <common>
+      varying vec3 vLvlW;
+      float lvlGrime( vec3 p ) {
+        float a = sin( p.x * 0.31 + p.z * 0.19 ) * sin( p.z * 0.28 - p.x * 0.12 + 1.9 );
+        float b = sin( p.x * 1.14 - p.z * 0.87 + 0.7 ) * sin( p.y * 0.63 + p.z * 0.41 + 2.6 );
+        return clamp( 0.5 + 0.31 * a + 0.19 * b, 0.0, 1.0 );
+      }
+    `)
+    .replace('#include <map_fragment>', /* glsl */`
+      #include <map_fragment>
+      float lvlG = lvlGrime( vLvlW );
+      diffuseColor.rgb *= 0.90 + 0.17 * lvlG;
+    `)
+    .replace('#include <roughnessmap_fragment>', /* glsl */`
+      #include <roughnessmap_fragment>
+      roughnessFactor = clamp( roughnessFactor + 0.26 * lvlG, 0.04, 1.0 );
+    `);
+}
+
+/* ========================================================================== */
 
 export class Level {
   /**
@@ -239,6 +305,7 @@ export class Level {
       });
       if (o.normalScale) m.normalScale.set(o.normalScale, o.normalScale);
       m.name = 'Level.' + name;
+      m.onBeforeCompile = surfaceBreakup;
       this._materials.push(m);
       return m;
     };
@@ -247,14 +314,24 @@ export class Level {
      * Structure families. Deliberately spread across the AC6 palette: gunmetal,
      * oxidised teal, rusted orange, faded hazard yellow, near-black machinery,
      * safety-orange trim, poured concrete.
+     *
+     * `rough` is a MULTIPLIER on the baked roughness map, not a roughness — three
+     * evaluates `roughness * roughnessMap.g`, and the forge writes a mean near
+     * 0.62 with a floor around 0.45 (the chipped-to-bare-metal texels). So the
+     * effective range of a family is roughly `rough * [0.45, 0.80]`, and a family
+     * needs `rough` above ~0.78 before its SMOOTHEST texels clear the 0.35 that
+     * keeps a low sun off the shoulder. `dark` at 0.48 was landing those texels at
+     * 0.22 — a mirror — which is what blew the conveyor deck out; every family
+     * here was in the same neighbourhood. They are all weathered structural steel
+     * on a dust plateau, so none of them should have been.
      */
     this.mat = {
-      steel: mk('steel', plateA, { color: 0x7d848b, rough: 0.52, metal: 1.0, env: 1.05, normalScale: 1.0 }),
-      teal: mk('teal', plateA, { color: 0x4e7d76, rough: 0.62, metal: 0.9, env: 0.9, normalScale: 1.05 }),
-      rust: mk('rust', plateA, { color: 0x8c4f2c, rough: 0.78, metal: 0.72, env: 0.75, normalScale: 1.15 }),
-      ochre: mk('ochre', plateB, { color: 0x9c8340, rough: 0.70, metal: 0.8, env: 0.85 }),
-      dark: mk('dark', plateB, { color: 0x3a3f44, rough: 0.48, metal: 1.0, env: 1.15 }),
-      trim: mk('trim', plateB, { color: 0xb1541c, rough: 0.66, metal: 0.55, env: 0.8 }),
+      steel: mk('steel', plateA, { color: 0x7d848b, rough: 0.80, metal: 1.0, env: 0.95, normalScale: 1.0 }),
+      teal: mk('teal', plateA, { color: 0x4e7d76, rough: 0.86, metal: 0.9, env: 0.85, normalScale: 1.05 }),
+      rust: mk('rust', plateA, { color: 0x8c4f2c, rough: 0.96, metal: 0.72, env: 0.7, normalScale: 1.15 }),
+      ochre: mk('ochre', plateB, { color: 0x9c8340, rough: 0.90, metal: 0.8, env: 0.8 }),
+      dark: mk('dark', plateB, { color: 0x3a3f44, rough: 0.96, metal: 1.0, env: 0.85 }),
+      trim: mk('trim', plateB, { color: 0xb1541c, rough: 0.86, metal: 0.55, env: 0.75 }),
       concrete: mk('concrete', conc, { color: 0x8e8b83, rough: 0.95, metal: 0.0, env: 0.45, ao: 1.0 }),
     };
 
@@ -414,21 +491,39 @@ export class Level {
 
     const baseY = this.terrain ? this.terrain.minHeight - 6 : -20;
 
+    /*
+     * Angular noise is sampled on a CIRCLE in noise space, so the step between
+     * neighbouring columns is `TAU * R / NA` times the octave multiplier. The
+     * old radii (3.2 for `big`, 9.9 for `mid`, 28.8 for `ero`) stepped the top
+     * octave by 0.29 / 0.89 / 2.5 lattice units per column — `ero` was fully
+     * decorrelated, so every column got an independent radius, height and shade.
+     * One column is 10 m of cliff, which at the vista's ~600 m sight line to the
+     * ring is 19 px: measured, that is the faint vertical striation on the
+     * distant ridges (RMS 0.42, peak 1.6 code values, stripe pitch 10-18 px,
+     * present on the ridge face and absent in the sky above it). It was never a
+     * fog artefact — haze only made it visible.
+     *
+     * These radii and octave counts hold the FINEST octave at 4-7 columns per
+     * feature (`big` 7.2, `ero` 5.9, `mid` 4.4), and `ero` now drifts only
+     * slowly with height, so erosion reads as gullies running down the face
+     * instead of as noise scattered across it.
+     */
     for (let a = 0; a < NA; a++) {
       const ang = (a / NA) * TAU;
       const ca = Math.cos(ang), sa = Math.sin(ang);
-      const nx = Math.cos(ang) * 3.2, nz = Math.sin(ang) * 3.2;
+      const nx = ca * 1.55, nz = sa * 1.55;
       // low-frequency ridge modulation: some sections are tall mesas, some are
       // eroded saddles, so the horizon is never a constant-height wall
       const big = fbm2(nx, nz, 17, 3);
-      const mid = fbm2(nx * 3.1, nz * 3.1, 41, 3);
+      const mid = fbm2(nx * 3.3, nz * 3.3, 41, 2);
       const r0 = 462 + big * 46 + mid * 22;
       const h = 96 + Math.pow(big, 1.6) * 190 + mid * 34;
+      const ex = ca * 1.9, ez = sa * 1.9;
 
       for (let p = 0; p < NP; p++) {
         const [off, frac] = PROF[p];
-        const ero = (fbm2(nx * 9 + p * 0.7, nz * 9 - p * 1.3, 89, 3) - 0.5);
-        const r = r0 + off * (1 + ero * 0.16) + ero * 7 * (p > 0 && p < NP - 1 ? 1 : 0.2);
+        const ero = (fbm2(ex + frac * 0.62, ez - frac * 0.37, 89, 3) - 0.5);
+        const r = r0 + off * (1 + ero * 0.16) + ero * 9 * (p > 0 && p < NP - 1 ? 1 : 0.2);
         const y = baseY + h * frac + ero * 5.5 * frac;
         const k = a * NP + p;
         pos[k * 3] = ca * r;
@@ -437,10 +532,13 @@ export class Level {
         uv[k * 2] = (ang * r0) / 26;
         uv[k * 2 + 1] = (y) / 26;
 
-        // strata: sharp value bands with a slow hue drift, plus cavity dirt
+        // strata: sharp value bands with a slow hue drift, plus cavity dirt.
+        // Both band phases are driven by `big` — the low-frequency term — so a
+        // stratum stays continuous around the ring the way a real bed does,
+        // instead of stepping at every column the way a `mid`-driven phase did.
         const band = Math.sin(y * 0.42 + big * 9) * 0.5 + 0.5;
-        const band2 = Math.sin(y * 1.35 + mid * 14) * 0.5 + 0.5;
-        const shade = 0.62 + band * 0.30 + band2 * 0.12 + ero * 0.18;
+        const band2 = Math.sin(y * 1.35 + big * 7 + mid * 3) * 0.5 + 0.5;
+        const shade = 0.62 + band * 0.30 + band2 * 0.12 + ero * 0.17;
         const warm = 0.86 + band * 0.22;
         const k3 = k * 3;
         col[k3] = clamp(shade * warm, 0, 1) * 255;
@@ -485,7 +583,14 @@ export class Level {
       for (let r = 0; r < NR; r++) {
         const t = r / (NR - 1);
         const rad = lerp(R0, R1, t * t);
-        const n = fbm2(ca * rad * 0.004, sa * rad * 0.004, 133, 4);
+        // 128 columns at 3200 m is a 157 m step. The old field at 0.004 units/m
+        // put one lattice unit at 250 m and its fourth octave at 30 m — five
+        // times finer than the mesh can carry — so the far plain's height and
+        // value both changed at every column, sawing the horizon line and
+        // striping the haze band behind it. 0.0011 with two octaves lands the
+        // finest feature at ~450 m, i.e. three columns, and a hazed dust plain
+        // at 1-3 km has no business carrying detail finer than that anyway.
+        const n = fbm2(ca * rad * 0.0011, sa * rad * 0.0011, 133, 2);
         const y = baseY - 6 + (n - 0.5) * 34 * (0.35 + t);
         const k = a * NR + r;
         pos[k * 3] = ca * rad; pos[k * 3 + 1] = y; pos[k * 3 + 2] = sa * rad;
@@ -522,29 +627,64 @@ export class Level {
     const baseY = this.terrain ? this.terrain.minHeight - 4 : -20;
     for (let i = 0; i < 17; i++) {
       const ang = (i / 17) * TAU + (rng() - 0.5) * 0.28;
-      const rad = 980 + rng() * 1250;
+      // Further out and lower than they were. At 1 km a butte is only ~95%
+      // veiled, so it arrives as a LIGHT shape with a crisp edge and no interior
+      // value at all — a paper cut-out pasted over the mesa ring, measured at
+      // display 131 against 122 for the sky above it and 96 for the ring below.
+      // The job of this layer is a soft third depth plane, and depth is what
+      // buys the softness: from 1.25 km out it dissolves instead of cutting.
+      const rad = 1250 + rng() * 1500;
       const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
       const r = 90 + rng() * 240;
-      const h = 90 + rng() * 300;
-      const NA = 26, NP = 6;
+      const h = 80 + rng() * 210;
+      // 72 columns, not 30: at 30 the silhouette was 31 px of straight edge per
+      // column with a visible corner at each end. 72 puts it at 10 px.
+      const NA = 72, NP = 6;
       const PROF = [[0, 0], [0.10, 0.42], [0.06, 0.66], [0.22, 0.88], [0.30, 1.0], [0.62, 0.72]];
       const pos = new Float32Array(NA * NP * 3);
       const col = new Uint8Array(NA * NP * 3);
       const uv = new Float32Array(NA * NP * 2);
       const idx = new Uint32Array(NA * (NP - 1) * 6);
-      const seed = 200 + i * 13;
+      /*
+       * The plan and the crown line are BAND-LIMITED HARMONICS of the angle, not
+       * a noise lookup on a circle. Sampling fbm on a 30-column revolve is the
+       * trap that produced both failure modes here: at the original radius 2.4 /
+       * 3 octaves the field repeated ~62 times around 26 columns, so every
+       * column got an independent radius — 45 px of static per column on a
+       * silhouette at 1.2 km. Dropping the radius far enough to fix that took the
+       * field almost constant instead, and a smooth revolve under a low sun is a
+       * single coherent normal: the butte came back as a flat, hard-edged pale
+       * trapezoid with no internal value at all, which is worse.
+       *
+       * Harmonics 3/7/13 cannot alias at 72 columns by construction (the highest
+       * is 5.5 columns per lobe) and cannot go flat either, because their
+       * amplitudes are fixed rather than sampled. The crown gets its own 2/5
+       * pair so the top edge is ragged — at this range the silhouette is most of
+       * what survives the aerial perspective, so it has to carry the read.
+       */
+      const P = [rng() * TAU, rng() * TAU, rng() * TAU, rng() * TAU, rng() * TAU];
       for (let a = 0; a < NA; a++) {
         const t = (a / NA) * TAU;
         const ca = Math.cos(t), sa = Math.sin(t);
-        const wob = 0.78 + fbm2(ca * 2.4, sa * 2.4, seed, 3) * 0.5;
+        const wob = 1 + 0.20 * Math.sin(3 * t + P[0]) + 0.13 * Math.sin(7 * t + P[1])
+          + 0.075 * Math.sin(13 * t + P[2]);
+        const hs = 1 + 0.14 * Math.sin(2 * t + P[3]) + 0.09 * Math.sin(5 * t + P[4]);
         for (let p = 0; p < NP; p++) {
           const rr = r * (1 - PROF[p][0]) * wob;
-          const y = baseY + h * PROF[p][1] * (0.85 + fbm2(ca * 1.2, sa * 1.2, seed + 7, 2) * 0.3);
+          const y = baseY + h * PROF[p][1] * hs;
           const k = a * NP + p;
           pos[k * 3] = cx + ca * rr; pos[k * 3 + 1] = y; pos[k * 3 + 2] = cz + sa * rr;
           uv[k * 2] = t * rr / 40; uv[k * 2 + 1] = y / 40;
+          // strata plus a face term: a west-facing bench and a south-facing one
+          // are not the same value, and at this range that is the only interior
+          // detail with any chance of surviving the haze
           const band = Math.sin(y * 0.25 + i) * 0.5 + 0.5;
-          const sh = 0.66 + band * 0.3;
+          const band2 = Math.sin(y * 0.62 + P[0]) * 0.5 + 0.5;
+          // Crest darker than base. Only the crest clears the mesa ring, and a
+          // ramp is the one kind of interior value that survives a 95% veil —
+          // a flat shape at one value is what reads as a cut-out.
+          const sh = (0.60 + band * 0.26 + band2 * 0.10 + (wob - 1) * 0.42)
+            * (1.10 - 0.30 * PROF[p][1]);
           col[k * 3] = clamp(sh * 1.04, 0, 1) * 255;
           col[k * 3 + 1] = clamp(sh * 0.96, 0, 1) * 255;
           col[k * 3 + 2] = clamp(sh * 0.84, 0, 1) * 255;
@@ -698,7 +838,11 @@ export class Level {
       _box.min.set(xa, y0, zmin);
       _box.max.set(xb, y1, zmax);
       this.physics.addBox(_box, owner);
-      this._blockers.push([xa, zmin, xb, zmax, y1]);
+      // slot 5 flags "this slab tracks a real flat wall". Only the sliced
+      // footprints do; `_addAABB` circumscribes towers, tanks and lattice, whose
+      // faces can stand many metres inside the box. `_buildBanners` is the one
+      // consumer that needs to tell them apart — everything else only reads 0..3.
+      this._blockers.push([xa, zmin, xb, zmax, y1, 1]);
       this.stats.colliders++;
     }
   }
@@ -708,7 +852,7 @@ export class Level {
     _box.min.set(cx - w * 0.5, y0, cz - d * 0.5);
     _box.max.set(cx + w * 0.5, y1, cz + d * 0.5);
     this.physics.addBox(_box, owner);
-    this._blockers.push([cx - w * 0.5, cz - d * 0.5, cx + w * 0.5, cz + d * 0.5, y1]);
+    this._blockers.push([cx - w * 0.5, cz - d * 0.5, cx + w * 0.5, cz + d * 0.5, y1, 0]);
     this.stats.colliders++;
   }
 
@@ -839,12 +983,28 @@ export class Level {
       length: armLen, depth: 11, width: 12,
       bays: 20, chord: 0.85, brace: 0.42,
     });
-    b.box(K.dark, armLen, 0.30, 9.5, 0, 11.3, 0, 0, { tint: 0xa9a49b });
+    // Deck and crane rails in bolted sections, not single 162 m extrusions —
+    // same reasoning as the conveyor deck: one plane 162 m long at 152 m up is
+    // a mirror pointed at the horizon, and this one is silhouetted against sky.
+    const armPlates = Math.round(armLen / 8);
+    for (let i = 0; i < armPlates; i++) {
+      const j = (i * 0.6180339887 + 0.077) % 1 - 0.5;
+      const k = (i * 0.7548776662 + 0.482) % 1 - 0.5;
+      b.pushTRS(-armLen * 0.5 + (i + 0.5) * (armLen / armPlates), 11.3 + k * 0.06, 0, 0, j * 0.026, 0);
+      b.box(K.dark, armLen / armPlates - 0.06, 0.30, 9.5, 0, 0, 0, 0,
+        { tint: S.GeoBatch.tint(0xa9a49b, 0.90 + (k + 0.5) * 0.20) });
+      b.pop();
+    }
     S.railing(b, K.dark, -armLen * 0.5, -4.8, armLen * 0.5, -4.8, 11.5, 1.2);
     S.railing(b, K.dark, -armLen * 0.5, 4.8, armLen * 0.5, 4.8, 11.5, 1.2);
     // service rails + trolley
     for (const s of [-1, 1]) {
-      b.box(K.trim, armLen, 0.4, 0.55, 0, 11.75, s * 3.2, 0, { tint: 0xd2c8b6 });
+      for (let i = 0; i < armPlates; i++) {
+        const k = (i * 0.7548776662 + 0.155) % 1 - 0.5;
+        b.box(K.trim, armLen / armPlates - 0.08, 0.4, 0.55,
+          -armLen * 0.5 + (i + 0.5) * (armLen / armPlates), 11.75 + k * 0.02, s * 3.2, 0,
+          { tint: S.GeoBatch.tint(0xd2c8b6, 0.92 + (k + 0.5) * 0.16) });
+      }
     }
     b.box(K.body, 9, 6, 11, armLen * 0.22, 15.0, 0, 0, { chamfer: 0.5, tint: 0xbfb9ad });
     b.box(K.dark, 11, 1.2, 12.4, armLen * 0.22, 11.8, 0, 0);
@@ -1472,12 +1632,15 @@ export class Level {
         dithering: true,
       });
       m.name = 'Level.prop.' + name;
+      // Instanced props share one geometry and one material, so world-space
+      // grime is the only thing that stops 168 containers wearing identically.
+      m.onBeforeCompile = surfaceBreakup;
       this._materials.push(m);
       return m;
     };
     const A = this._tex.plateA, B = this._tex.plateB, C = this._tex.conc;
-    const mContainer = propMat('container', B, { color: 0xffffff, rough: 0.62, metal: 0.9 });
-    const mSteel = propMat('steel', B, { color: 0xffffff, rough: 0.55, metal: 1.0 });
+    const mContainer = propMat('container', B, { color: 0xffffff, rough: 0.76, metal: 0.9 });
+    const mSteel = propMat('steel', B, { color: 0xffffff, rough: 0.74, metal: 1.0 });
     const mRough = propMat('rough', A, { color: 0xffffff, rough: 0.82, metal: 0.6 });
     const mConc = propMat('concrete', C, { color: 0xffffff, rough: 0.96, metal: 0.0, env: 0.4 });
 
@@ -1951,41 +2114,113 @@ export class Level {
   }
 
   /**
-   * Torn tarps and banners lashed to railings and walls. A two-term wave in the
-   * vertex shader, weighted so the lashed edge stays put — about as much motion
-   * as a still frame needs and it costs one uniform.
+   * Torn tarps and banners LASHED TO SOMETHING. A two-term wave in the vertex
+   * shader, weighted so the lashed edge stays put — about as much motion as a
+   * still frame needs and it costs one uniform.
+   *
+   * This used to scatter its anchors on a random bearing from each district
+   * centre at `heightAt + 6..22`, i.e. hanging in open air with nothing behind
+   * them and `castShadow` off. Confirmed by raycast as the flat panel that had
+   * been floating in the upper-right of the hero frame for several iterations:
+   * the ray through that screen point hits `Level.banners` at 89 m, world
+   * (6.4, 34.9, -52.4), 20 m above the ground with clear sky behind it. It was
+   * previously diagnosed as the `ContainmentField`; the field is the SECOND hit
+   * along that ray, 380 m further out, and its shader cannot draw an opaque grey
+   * plate — the raycast reached it because a raycast does not read alpha.
+   *
+   * Two things had to change together. Anchors now come from real geometry —
+   * `_blockers` (every structure footprint placed so far) and `_decks` (the
+   * walkable bridge decks) — so every tarp hangs off a parapet or a handrail
+   * with mass behind it. And the UVs are world-scaled: a `PlaneGeometry`'s
+   * default 0..1 UVs stretched ONE tile of the armour-panel map across the whole
+   * 12 m piece, so its plates rendered a metre wide each and the thing read as a
+   * rigid bulkhead rather than as cloth. At 1.7 m per tile the same map reads as
+   * coarse weave and stitched seams.
    */
   _buildBanners() {
     const rng = mulberry32(SEED ^ 0xba33);
     const pieces = [];
-    const anchors = [];
+    const sites = [];
 
-    for (const D of DISTRICTS) {
-      const count = D === D_GANTRY ? 6 : 3;
-      for (let i = 0; i < count; i++) {
-        const a = rng() * TAU;
-        const rad = 40 + rng() * (Math.min(D.sx, D.sz) * 0.42);
-        const x = D.x + Math.cos(a) * rad;
-        const z = D.z + Math.sin(a) * rad;
-        if (Math.hypot(x, z) > ARENA_R - 30) continue;
-        anchors.push([x, this.heightAt(x, z) + 6 + rng() * 16, z, rng() * TAU, 4 + rng() * 8, 3 + rng() * 6]);
-      }
+    // --- lashed under a parapet, flush to a wall face ---------------------
+    const B = this._blockers;
+    for (let guard = 0; guard < 400 && sites.length < 26 && B.length; guard++) {
+      const bl = B[Math.floor(rng() * B.length)];
+      // Only sliced building footprints (`_addOBB`) bound a real flat wall.
+      // Measured: allowing every blocker left 8 of 29 tarps with no geometry
+      // within 6 m, because a tank's or a lattice tower's AABB face stands
+      // metres clear of anything solid — which is how they got back into open
+      // sky, just less obviously than before.
+      if (!bl[5]) continue;
+      const sx = bl[2] - bl[0], sz = bl[3] - bl[1];
+      if (sx < 6 || sz < 6) continue;                    // a post, not a wall
+      const cx = (bl[0] + bl[2]) * 0.5, cz = (bl[1] + bl[3]) * 0.5;
+      const gy = this.heightAt(cx, cz);
+      const wallH = bl[4] - gy;
+      if (wallH < 8 || wallH > 70) continue;
+      const w = 2.4 + rng() * 3.2;
+      const h = Math.min(2.2 + rng() * 3.4, wallH - 3.6);
+      if (h < 1.5) continue;
+      // Sit on the footprint face. `_addOBB` slices along X, so a slab's +/-Z
+      // faces always lie on the real outline while its +/-X faces are usually
+      // an interior cut through the building — only the Z pair is offered, and
+      // only near the middle of it, where the axis-aligned slab and the rotated
+      // wall it bounds agree to about a metre. Erring INWARD just tucks the
+      // tarp behind the wall, which is a far cheaper failure than erring
+      // outward into open sky, so the 0.2 m stand-off is deliberately small.
+      const along = (rng() - 0.5) * 0.5;
+      const x = cx + along * sx;
+      const z = rng() < 0.5 ? bl[1] - 0.2 : bl[3] + 0.2;
+      const yaw = z < cz ? Math.PI : 0;
+      if (Math.hypot(x, z) > ARENA_R - 20) continue;
+      const yTop = bl[4] - 0.7 - rng() * 2.2;
+      if (yTop - h < gy + 1.4) continue;
+      sites.push([x, yTop, z, yaw, w, h]);
     }
 
-    for (const [x, y, z, yaw, w, h] of anchors) {
+    // --- lashed to a bridge handrail, hanging over the edge ---------------
+    for (const d of this._decks) {
+      if (rng() < 0.45) continue;
+      const t = 0.12 + rng() * 0.76;
+      const x = lerp(d[0], d[3], t), z = lerp(d[2], d[5], t);
+      const y = lerp(d[1], d[4], t);
+      const ang = Math.atan2(d[3] - d[0], d[5] - d[2]);
+      const s = rng() < 0.5 ? -1 : 1;
+      const off = d[6] * 0.5 + 0.12;
+      sites.push([
+        x + Math.cos(ang) * off * s, y + 1.02, z - Math.sin(ang) * off * s,
+        ang + (s > 0 ? Math.PI * 0.5 : -Math.PI * 0.5),
+        2.2 + rng() * 2.6, 1.8 + rng() * 2.4,
+      ]);
+    }
+
+    // 1.7 m per texture tile: the armour-panel map's plates land at ~0.3 m,
+    // which reads as weave and stitching instead of as bolted bulkhead plate.
+    const UV_TARP = 1.7;
+    for (const [x, yTop, z, yaw, w, h] of sites) {
       const g = new THREE.PlaneGeometry(w, h, 6, 5);
       const pa = g.attributes.position;
+      const ua = g.attributes.uv;
       const wave = new Float32Array(pa.count);
       for (let i = 0; i < pa.count; i++) {
+        const px = pa.getX(i);
         // 0 at the top edge (lashed) → 1 at the free bottom corner
-        const u = (pa.getX(i) / w) + 0.5;
+        const u = (px / w) + 0.5;
         const v = 0.5 - (pa.getY(i) / h);
-        wave[i] = clamp(v * (0.35 + u * 0.9), 0, 1.4);
-        pa.setZ(i, pa.getZ(i) + (rng() - 0.5) * 0.25);
+        // eat the free edge away irregularly — a clean rectangle in silhouette
+        // is what made these read as panels rather than as rag
+        let py = pa.getY(i);
+        if (v > 0.99) py += (0.12 + rng() * 0.62) * h * 0.30;
+        else if (v > 0.78) py += (rng() - 0.35) * h * 0.10;
+        pa.setY(i, py);
+        pa.setZ(i, pa.getZ(i) + (rng() - 0.5) * 0.22);
+        wave[i] = clamp(v * (0.30 + u * 0.85), 0, 1.3);
+        ua.setXY(i, (px + x * 0.37) / UV_TARP, (py + yTop * 0.29) / UV_TARP);
       }
       g.setAttribute('aWave', new THREE.BufferAttribute(wave, 1));
+      g.computeVertexNormals();
       g.rotateY(yaw);
-      g.translate(x, y, z);
+      g.translate(x, yTop - h * 0.5, z);
       pieces.push(g);
     }
     if (!pieces.length) return;
@@ -2016,17 +2251,21 @@ export class Level {
         .replace('#include <begin_vertex>', /* glsl */`
           #include <begin_vertex>
           float ph = transformed.x * 0.6 + transformed.z * 0.4;
-          float amp = aWave * 0.55;
+          // 0.28 not 0.55: these now hang 30 cm off a wall, and half a metre of
+          // swing would drive the free corner straight through it
+          float amp = aWave * 0.28;
           transformed.x += sin( uTime * 2.1 + ph ) * amp;
           transformed.z += cos( uTime * 1.7 + ph * 1.3 ) * amp * 0.8;
-          transformed.y -= aWave * ( 0.12 + 0.10 * sin( uTime * 2.6 + ph ) );
+          transformed.y -= aWave * ( 0.10 + 0.08 * sin( uTime * 2.6 + ph ) );
         `);
     };
     this._materials.push(mat);
 
     const mesh = new THREE.Mesh(merged, mat);
     mesh.name = 'Level.banners';
-    mesh.castShadow = false;
+    // A tarp with no shadow is a decal floating in front of the wall it is
+    // lashed to; it is 1.3 k triangles, so the cascade cost is noise.
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.root.add(mesh);
     this._meshes.push(mesh);

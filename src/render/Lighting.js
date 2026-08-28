@@ -94,6 +94,16 @@ export class Lighting {
       // Sunlit ground pays 5% for it; ground in shadow gains 25%, because the
       // sun is 4.1 and the ambient it is being added to is 1.1.
       //
+      // 0.22 -> 0.16, paid straight into `bounceIntensity`. Same trade as
+      // before and for the same measured reason: on the vista pose the sunlit
+      // sand reads display 128 against 58 in shadow, a ratio of only 2.2:1,
+      // and the reason is that a 13.5-degree sun delivers just sin(13.5) = 0.23
+      // of its irradiance to horizontal ground. That makes the PLAIN — and only
+      // the plain — a surface whose shadowed value is dominated by undirected
+      // light. Every 0.01 taken off an omnidirectional term is therefore worth
+      // ~4x more contrast on the ground than the same 0.01 costs the mech,
+      // which has a directional fill of its own to fall back on.
+      //
       // 0.30 -> 0.22. This is the ONLY term in the rig with no direction at all,
       // so it is the only one that costs the terrain contrast at full rate: the
       // plain is one enormous up-facing surface, and an omnidirectional 0.30
@@ -102,7 +112,7 @@ export class Lighting {
       // which delivers 0.13 of itself to horizontal ground and 0.99 to a
       // vertical flank — so the swap is a straight transfer of ambient off the
       // sand and onto the mech's plating.
-      hemiIntensity: 0.22,
+      hemiIntensity: 0.16,
       // Was 2.2, from when every mech surface was metalness 1.0 and had no
       // diffuse lobe at all. The armour is dielectric now (see Contract
       // Amendments), so the environment feeds DIFFUSE on every surface in the
@@ -112,7 +122,13 @@ export class Lighting {
       // correctly rendering shadows produced almost no visible contrast. The
       // energy taken out here goes back in on the key and the bounce, both of
       // which have a direction and therefore SHAPE the surface.
-      envIntensity: 1.18,
+      // 1.18 -> 1.00. The environment is the SECOND undirected term, and on the
+      // plain it is the larger of the two. It cannot be cut as freely as the
+      // hemisphere because it also drives specular — it is what puts the sky in
+      // a chamfer and stops metal reading as plastic — so this is a 15% trim
+      // rather than the 25% the ground contrast alone would want. Anything past
+      // this should come out of `hemiIntensity` or go into the key instead.
+      envIntensity: 1.00,
       // Cool bounce from the opposite side so the shadow side stays readable.
       // AC6 shadows are deep but never crushed; this is what keeps them open.
       // Carries much more of the ambient budget than it used to — see
@@ -173,7 +189,14 @@ export class Lighting {
       // the AO and cascade ratios survive intact and the contact shadow gets
       // MORE readable as the floor comes up, not less. `grade.lift` is dropped
       // 0.032 -> 0.022 in the same pass to pay for this in tonal range.
-      bounceIntensity: 2.1,
+      // 2.1 -> 2.4, funding the hemisphere and environment cuts above. This is
+      // the ONE light in the rig that is free on the terrain (it arrives from
+      // 6.3 degrees BELOW the horizon, so n.l on an up-facing surface clamps to
+      // zero), which makes it the only place the ambient taken off the plain can
+      // be put back without undoing the contrast it just bought. Net on a
+      // vertical unlit flank: roughly break-even. Net on horizontal sand:
+      // strictly a loss, which is the point.
+      bounceIntensity: 2.4,
       bounceElevation: -0.11,
       // Azimuth offset from the anti-sun direction, in radians. The horizontal
       // fill sits exactly opposite the key, which leaves a dead zone: a flank

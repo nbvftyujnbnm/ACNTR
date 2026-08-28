@@ -172,6 +172,25 @@ export class RenderPipeline {
       grain: { amount: 0.030 },
       scanline: { amount: 0.010, count: 900 },
       atmosphere: { strength: 1.0 },
+      // Dust-bank structure for the deck and band media — see `dustGain` in
+      // COMPOSITE_FRAG. `amount` is the peak fractional swing in those two
+      // terms' density (0.55 = 0.45x .. 1.55x, mean exactly 1.0, so total
+      // veiling on the far ridges is unchanged). `scale` is metres per noise
+      // cell horizontally. `drift` is metres per second of wind advection.
+      //
+      // `scale` matters more than it looks. At the first value tried (190 m) a
+      // single bank was WIDER than the whole midground: measured on the vista
+      // pose, the 700 px window across the 300-800 m plain spans about 140 m of
+      // world at the far probe, so one noise cell covered all of it and the term
+      // shifted the region's LEVEL without adding any structure inside it —
+      // region standard deviation moved 15.9 -> 16.9 and no further at twice the
+      // amplitude. The useful range is a scale small enough that two or three
+      // banks cross the frame; below ~50 m they start reading as blotches rather
+      // than weather. Note that a fixed-region standard deviation is a poor
+      // metric for this whichever value is chosen — which bank happens to land
+      // on the measured rectangle dominates it — so this was settled on the
+      // frames, not the numbers.
+      dust: { amount: 0.70, scale: 110, drift: 1.6 },
 
       // AgX with a steeper slope and a de-saturating look: AC6's palette is
       // steel/ochre with saturation only in emissives, and its highlights roll
@@ -243,7 +262,18 @@ export class RenderPipeline {
         // be pushed for real tonal range in the sand without clipping the toe.
         contrast: 1.24,
         saturation: 0.94,
-        splitShadow: new THREE.Vector3(-0.026, -0.006, 0.044),
+        // Cooled: (-0.026, -0.006, 0.044) -> (-0.038, -0.008, 0.058). AC6's
+        // signature is a warm key against a COOL shadow, and this frame was not
+        // delivering the second half — measured on the vista pose, sunlit sand
+        // reads R/B 1.38 and sand in shadow still reads 1.22, i.e. the shadow is
+        // barely cooler than the light. The cause is that the terrain's own
+        // albedo is warm ochre and the largest ambient term reaching it (the
+        // PMREM environment) is warm too, so nothing in the shadow is cool
+        // enough to overcome the paint. The two directional fills already carry
+        // the right temperatures and cannot be pushed harder without flattening
+        // the plain, so the remaining separation is bought here, where it is
+        // aimed at the bottom of the curve and nowhere else.
+        splitShadow: new THREE.Vector3(-0.038, -0.008, 0.058),
         splitHighlight: new THREE.Vector3(0.032, 0.012, -0.024),
         splitBalance: 0.42,
       },
@@ -443,6 +473,9 @@ export class RenderPipeline {
       uAerialDensity: { value: this._aerialDensity },
       uAerialRamp: { value: this._aerialRamp },
       uFogStrength: { value: p.atmosphere.strength },
+      uDustAmount: { value: p.dust.amount },
+      uDustScale: { value: p.dust.scale },
+      uDustTime: { value: 0 },
       uAOEnabled: { value: 1 },
       uSSREnabled: { value: 0 },
       uSSRIntensity: { value: p.ssr.intensity },
@@ -1021,6 +1054,9 @@ export class RenderPipeline {
     c.uAerialDensity.value = this._aerialDensity;
     c.uAerialRamp.value = this._aerialRamp;
     c.uFogStrength.value = p.atmosphere.strength;
+    c.uDustAmount.value = p.dust.amount;
+    c.uDustScale.value = p.dust.scale;
+    c.uDustTime.value = this._elapsed * p.dust.drift;
     c.uSSRIntensity.value = p.ssr.intensity;
   }
 

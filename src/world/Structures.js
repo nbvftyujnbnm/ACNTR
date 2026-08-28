@@ -300,6 +300,30 @@ export class GeoBatch {
   }
 
   /**
+   * Resolve a tint the way `add` does, optionally scaled.
+   *
+   * Tints are authored as hex *multipliers*, not as colours: read the raw bytes
+   * (no sRGB decode) and renormalise so the brightest channel is ~1. Otherwise
+   * every "warm off-white" tint would silently darken its piece by 40% once
+   * colour management decoded it.
+   *
+   * `scale` exists so a builder can vary plate-to-plate INSIDE one assembly and
+   * still compose with whatever tint the caller passed, rather than replacing it.
+   *
+   * @param {THREE.Color|number} tint
+   * @param {number} [scale]
+   * @returns {THREE.Color}
+   */
+  static tint(tint, scale = 1) {
+    if (tint === undefined || tint === null) return new THREE.Color(scale, scale, scale);
+    if (tint.isColor) return tint.clone().multiplyScalar(scale);
+    _col.setHex(tint, THREE.LinearSRGBColorSpace);
+    const mx = Math.max(_col.r, _col.g, _col.b) || 1;
+    _col.multiplyScalar(((0.80 + 0.32 * mx) / mx) * scale);
+    return _col.clone();
+  }
+
+  /**
    * @param {string} key      material family
    * @param {THREE.BufferGeometry} geo  cached source, never mutated
    * @param {THREE.Matrix4} [local]
@@ -311,21 +335,7 @@ export class GeoBatch {
     const m = new THREE.Matrix4();
     if (local) m.multiplyMatrices(this.cur, local);
     else m.copy(this.cur);
-    let c = null;
-    if (tint !== undefined && tint !== null) {
-      if (tint.isColor) {
-        c = tint.clone();
-      } else {
-        // Tints are authored as hex *multipliers*, not as colours: read the raw
-        // bytes (no sRGB decode) and renormalise so the brightest channel is ~1.
-        // Otherwise every "warm off-white" tint would silently darken its piece
-        // by 40% once colour management decoded it.
-        _col.setHex(tint, THREE.LinearSRGBColorSpace);
-        const mx = Math.max(_col.r, _col.g, _col.b) || 1;
-        _col.multiplyScalar((0.80 + 0.32 * mx) / mx);
-        c = _col.clone();
-      }
-    }
+    const c = (tint !== undefined && tint !== null) ? GeoBatch.tint(tint) : null;
     const vc = geo.attributes.position.count;
     const ic = geo.index ? geo.index.count : vc;
     g.items.push({ geo, m, c });
@@ -539,7 +549,18 @@ export function ladder(b, key, x, z, y0, y1, facing, tint) {
   b.pop();
 }
 
-/** Handrail run from (x0,z0) to (x1,z1) at height y. */
+/**
+ * Handrail run from (x0,z0) to (x1,z1) at height y.
+ *
+ * The rails are built in BAYS rather than as one continuous bar, and each bay
+ * is rolled a degree or two about its own axis and set a few millimetres off its
+ * neighbours. That is how a real welded handrail is made, and it is also the fix
+ * for two measured defects on the 312 m conveyor bridge: one unbroken 8 cm bar
+ * presents one unbroken top facet to a 13-degree sun (a 300 m specular line that
+ * clipped to white), and at vista range that bar is a sub-pixel edge whose
+ * highlight aliases into a crawling rainbow. Both need the facet normals to stop
+ * agreeing along the run; neither is reachable from a material.
+ */
 export function railing(b, key, x0, z0, x1, z1, y, h = 1.15, tint) {
   const dx = x1 - x0, dz = z1 - z0;
   const len = Math.hypot(dx, dz);
@@ -551,9 +572,24 @@ export function railing(b, key, x0, z0, x1, z1, y, h = 1.15, tint) {
     const t = -len * 0.5 + (i / posts) * len;
     b.box(key, 0.10, h, 0.10, 0, h * 0.5, t, 0, { tint });
   }
-  b.box(key, 0.08, 0.08, len, 0, h, 0, 0, { tint });
-  b.box(key, 0.07, 0.07, len, 0, h * 0.55, 0, 0, { tint });
-  b.box(key, 0.05, 0.22, len, 0, 0.11, 0, 0, { tint });  // toe plate
+  const bays = Math.max(1, Math.round(posts / 4));
+  for (let i = 0; i < bays; i++) {
+    const t0 = -len * 0.5 + (i / bays) * len;
+    const t1 = -len * 0.5 + ((i + 1) / bays) * len;
+    const bl = (t1 - t0) - 0.09;
+    if (bl < 0.12) continue;
+    // golden-ratio walk: deterministic, never repeats over the run, no rng
+    const j = (i * 0.6180339887 + 0.317) % 1 - 0.5;
+    const k = (i * 0.7548776662 + 0.611) % 1 - 0.5;
+    const roll = j * 0.075;                  // +/- 2.1 degrees about the rail axis
+    const sag = k * 0.030;                   // +/- 15 mm
+    const ct = GeoBatch.tint(tint, 0.94 + (k + 0.5) * 0.13);
+    b.pushTRS(0, h + sag, (t0 + t1) * 0.5, 0, 0, roll);
+    b.box(key, 0.08, 0.08, bl, 0, 0, 0, 0, { tint: ct });
+    b.box(key, 0.07, 0.07, bl, 0, -h * 0.45 - sag * 0.4, 0, 0, { tint: ct });
+    b.pop();
+    b.box(key, 0.05, 0.22, bl, 0, 0.11, (t0 + t1) * 0.5, 0, { tint: ct });  // toe plate
+  }
   b.pop();
 }
 
@@ -1187,8 +1223,37 @@ export function pipeBridge(b, mats, o) {
 
   b.pushTRS(0, y, 0);
   trussBeam(b, dark, { length, depth: 3.4, width, bays: Math.max(6, Math.round(length / 9)), chord: 0.38, brace: 0.2, tint });
-  // deck
-  b.box(dark, length, 0.22, width * 0.78, 0, 3.5, 0, 0, { tint });
+
+  // --- deck ---------------------------------------------------------------
+  // NOT one box. A 312 m slab of deck plate is a single plane presenting a
+  // single normal to a low sun for its whole length, which is exactly the
+  // geometry that produced the vista's continuous blown-white specular band.
+  // Real decking is laid in plates that are bolted down one at a time, sit
+  // proud of each other, and rust at different rates. Each plate here gets its
+  // own roll about the run axis, its own height and its own tint, so the sun
+  // finds a different angle every few metres and the highlight can only ever be
+  // a broken chain of glints. Peak tilt is 1.4 degrees, which lifts a plate edge
+  // by 6 cm — the walkable collision quad sits at deck + 9 cm, so nothing pokes
+  // through the surface the player actually stands on.
+  const dw = width * 0.78;
+  const plates = Math.max(2, Math.round(length / 7.5));
+  const pl = length / plates;
+  for (let i = 0; i < plates; i++) {
+    // golden-ratio walk keeps this deterministic and non-repeating without rng
+    const j = (i * 0.6180339887 + 0.211) % 1 - 0.5;
+    const k = (i * 0.7548776662 + 0.733) % 1 - 0.5;
+    b.pushTRS(-length * 0.5 + (i + 0.5) * pl, 3.5 + k * 0.055, 0, 0, j * 0.049, 0);
+    b.box(dark, pl - 0.05, 0.22, dw, 0, 0, 0, 0, { tint: GeoBatch.tint(tint, 0.92 + (k + 0.5) * 0.16) });
+    b.pop();
+  }
+  // grating treads across the run: 8 cm of relief every ~2.5 m, so even a plate
+  // caught square-on to the sun is broken into short segments
+  const treads = Math.max(2, Math.round(length / 2.5));
+  for (let i = 0; i < treads; i++) {
+    const t = (i * 0.6180339887 + 0.44) % 1 - 0.5;
+    b.box(dark, 0.16, 0.14, dw + 0.20, -length * 0.5 + (i + 0.5) * (length / treads), 3.62, 0, 0,
+      { tint: GeoBatch.tint(tint, 0.84 + (t + 0.5) * 0.16) });
+  }
   railing(b, dark, -length * 0.5, -width * 0.39, length * 0.5, -width * 0.39, 3.61, 1.15, tint);
   railing(b, dark, -length * 0.5, width * 0.39, length * 0.5, width * 0.39, 3.61, 1.15, tint);
   // pipe bundle slung under the truss
@@ -1244,7 +1309,15 @@ export function catwalk(b, key, x0, y0, z0, x1, y1, z1, width, tint, glowKey) {
   const pitch = Math.atan2(dy, Math.hypot(dx, dz));
   b.push(new THREE.Matrix4().makeRotationY(a).setPosition((x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5));
   b.push(new THREE.Matrix4().makeRotationX(-pitch));
-  b.box(key, width, 0.22, len, 0, 0, 0, 0, { tint });
+  // laid in plates, for the same reason the bridge deck is (see `pipeBridge`)
+  const cp = Math.max(1, Math.round(len / 6.5));
+  for (let i = 0; i < cp; i++) {
+    const j = (i * 0.6180339887 + 0.529) % 1 - 0.5;
+    const k = (i * 0.7548776662 + 0.084) % 1 - 0.5;
+    b.pushTRS(0, k * 0.045, -len * 0.5 + (i + 0.5) * (len / cp), 0, 0, j * 0.028);
+    b.box(key, width, 0.22, len / cp - 0.05, 0, 0, 0, 0, { tint: GeoBatch.tint(tint, 0.90 + (k + 0.5) * 0.20) });
+    b.pop();
+  }
   const n = Math.max(2, Math.round(len / 3.2));
   for (let i = 0; i <= n; i++) {
     const z = -len * 0.5 + (i / n) * len;
