@@ -1199,3 +1199,30 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   now owns spawning: detached process group, `process.kill(-pid)`, and reaping
   on exit/SIGINT/uncaughtException. capture, probe and silhouette all use it.
   If you add a tool that spawns a server, use it too.
+- 2026-09-01 [mech] THE LEG'S FLAT PROFILE IS A WIDTH/DEPTH BUDGET PROBLEM, NOT
+  A MISSING-BLOCK PROBLEM. Side-on the width bands from thigh to shin measure
+  0.373 / 0.363 / 0.368 / 0.402: no thigh mass, no knee pinch, no calf. The
+  obvious fix — add a quadriceps wedge and a calf block — was tried and
+  REVERTED. It did produce a visible profile step, but `openRows` at the graded
+  3/4 yaws fell from 0.474 to 0.362 (45 deg) and 0.488 to 0.443 (135 deg),
+  because depth contributes sin(azimuth) of itself to SCREEN width and ~24 cm
+  of extra calf ate ~17 cm of the gap between the legs. `buildShin` already
+  documents this exchange rate in the other direction; the leg has no spare
+  screen width, so mass must come OUT of X as it goes into Z. Whoever takes
+  this on needs to rebalance the whole limb with the arm/thigh clearance check
+  in hand — do not just add another block.
+- 2026-09-01 [tools] The silhouette `widths` profile is NORMALISED BY THE
+  BOUNDING BOX, so it is not comparable across iterations that change the
+  mech's extent. Adding depth grew the box and made bands that had not changed
+  appear to shrink, which read as the thigh getting narrower when it had not
+  moved at all. Compare `widths` WITHIN one frame (is the thigh band wider than
+  the shin band?), never band-by-band between two runs.
+- 2026-09-01 [ui/render] `Pipeline.params.dof` IS AN OBJECT OF TUNABLES, NOT A
+  SCALAR, and the pass switch is `pipeline.q.dof` (a boolean set by
+  `setQuality`). `Garage.open()` was testing `typeof params.dof === 'number'`,
+  which can never be true, so depth of field was never disabled for the
+  assembly preview and it has been rendering defocused — the same class of bug
+  as the `restFocus` mismatch that quietly corrupted every hero review. Fixed
+  in Garage to save/restore `q.dof`. There is no `setPassEnabled` on the
+  pipeline despite `Debug.setPass` calling one; that debug affordance is
+  partially inert for any pass whose params entry is not a bare boolean.

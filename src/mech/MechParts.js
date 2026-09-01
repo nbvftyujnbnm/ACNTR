@@ -1412,24 +1412,23 @@ export function buildThigh(o = {}) {
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.56, 0.86, { tl: 0.20, bl: 0.20, tr: 0.12, br: 0.12 }), 0.06, 0.026),
     _m.compose(_pv.set(s * 0.47, TOP - 0.56, 0.04), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
 
-  // QUADRICEPS WEDGE — depth, which is the axis this leg had none of.
+  // THE LEG IS FLAT IN PROFILE, AND ADDING DEPTH IS NOT THE FIX. Measured with
+  // tools/silhouette.mjs: side-on, the width bands from thigh to shin read
+  // 0.373 / 0.363 / 0.368 / 0.402 — no thigh mass, no knee pinch, no calf. All
+  // the negative space on this leg is slots cut in Y, which survive a yaw
+  // change but say nothing about fore-and-aft shape.
   //
-  // Measured with tools/silhouette.mjs: viewed from the side the width bands
-  // from thigh to shin read 0.373 / 0.363 / 0.368 / 0.402 — dead flat. Every
-  // piece of negative space on this leg is a slot cut in Y, which survives a
-  // yaw change but says nothing about fore-and-aft shape, so the whole limb
-  // was an unbroken slab of constant depth from hip to ankle in any side-ish
-  // view. An AC leg in profile goes deep at the hip, pinches hard at the knee,
-  // swells again over the calf and pinches again at the ankle; that rhythm is
-  // what reads as a jointed machine rather than a trouser leg.
-  //
-  // It is added rather than folded into the main block on purpose. The block's
-  // dimensions are load-bearing for the frontal silhouette and the arm/thigh
-  // clearance documented above, and neither should move to buy a profile.
-  // `taperZ` runs it out to almost nothing by the knee, which is what leaves
-  // the pinch.
-  b.box('armor', MASK.BASE, 0.70, 0.66, 0.36, 0.05, 0, TOP - 0.42, rev ? 0.72 : -0.68, 0, 0, 0,
-    { taperX: 0.82, taperZ: 0.45 });
+  // A quadriceps wedge and a calf block were tried here and REVERTED. They did
+  // give the profile a visible step, but they cost the thing that matters more:
+  // openRows at the graded 3/4 yaws fell from 0.474 to 0.362 (45 deg) and from
+  // 0.488 to 0.443 (135 deg). The reason is written a few lines up — depth
+  // contributes sin(azimuth) of itself to SCREEN width, so ~24 cm of extra calf
+  // ate ~17 cm of the gap between the legs at a 3/4 camera. There is no spare
+  // screen width to spend; the mass has to come OUT of X as it goes into Z, and
+  // rebalancing width against depth along the whole limb is a job for whoever
+  // owns these proportions, with the arm/thigh clearance check in hand. Do not
+  // just add another block here.
+
 
   // --- KNEE ---------------------------------------------------------------
   // The block stops 15 cm above the knee pivot, which opens a second horizontal
@@ -1503,12 +1502,8 @@ export function buildShin(o = {}) {
       { taperX: 0.82, taperZ: 0.88 });
   }
   b.box('armor', MASK.TRIM, 0.72, 0.80, 0.42, 0.04, 0, BOT + 0.66, -shroudZ * 0.76);
-  // CALF — the second half of the profile rhythm the quadriceps wedge starts.
-  // Swells behind the shin at mid-height and tapers out by the ankle, so the
-  // leg reads deep / pinched / deep / pinched from hip to sole instead of one
-  // constant-depth slab. See the note in buildThigh for the measurement.
-  b.box('armor', MASK.BASE, 0.66, 0.86, 0.52, 0.05, 0, BOT + 0.50, -shroudZ * 1.16, 0, 0, 0,
-    { taperX: 0.78, taperZ: 0.34 });
+  // A calf block was tried here to give the leg a profile and reverted — see
+  // the note in buildThigh. Depth is not free at a 3/4 camera.
 
   // --- ANKLE ------------------------------------------------------------
   // Everything above stops at BOT; the foot's own block starts 17 cm lower, so

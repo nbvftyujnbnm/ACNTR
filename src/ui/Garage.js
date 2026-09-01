@@ -342,11 +342,18 @@ export class Garage {
       cam.layers.set(GARAGE_LAYER); // only the preview renders while assembling
     }
 
-    // depth of field would fight a menu preview; it is a documented tunable
-    const params = this.game?.pipeline?.params;
-    if (params && typeof params.dof === 'number') {
-      this._savedDof = params.dof;
-      params.dof = 0;
+    // Depth of field fights a menu preview, so it comes off while assembling.
+    //
+    // This used to test `typeof params.dof === 'number'`, but `params.dof` is
+    // and always was an object of tunables ({ restFocus, subjectRise, ... }).
+    // The test could never be true, so DOF was never actually disabled and the
+    // assembly preview has been rendering defocused — the same class of bug as
+    // the restFocus mismatch that quietly corrupted every hero review. The
+    // real switch is the pipeline's per-quality pass flag.
+    const q = this.game?.pipeline?.q;
+    if (q && typeof q.dof === 'boolean') {
+      this._savedDof = q.dof;
+      q.dof = false;
     }
 
     this._layout();
@@ -365,9 +372,9 @@ export class Garage {
       cam.layers.mask = this._savedLayerMask;
       this._savedLayerMask = null;
     }
-    const params = this.game?.pipeline?.params;
-    if (params && this._savedDof !== null) {
-      params.dof = this._savedDof;
+    const q = this.game?.pipeline?.q;
+    if (q && this._savedDof !== null) {
+      q.dof = this._savedDof;
       this._savedDof = null;
     }
     if (this.stage && this.stage.parent) this.stage.parent.remove(this.stage);
