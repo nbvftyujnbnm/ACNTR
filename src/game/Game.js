@@ -146,8 +146,22 @@ export class Game {
     // The pipeline recreates it on every resize, so re-push whenever it changes
     // rather than wiring once at init.
     this._vfxDepthTex = null;
+    this._vfxColorTex = null;
     this._wireVfxDepth();
     bus.on('engine:resize', () => this._wireVfxDepth());
+
+    // The rig can conform the feet to terrain, but only if it is given a height
+    // sampler. Nothing ever handed it one, so the AC has been standing on the
+    // XZ plane its legs assume rather than on the ground it is actually on —
+    // most visible on the slopes and catwalk edges the hero pose favours.
+    if (this.physics?.groundHeight) {
+      this.player?.rig?.setGroundSampler?.((x, z) => this.physics.groundHeight(x, z));
+    }
+
+    // Persistent damage smoke. VFX has the whole system and it was never
+    // attached to anything, so a mech at 20% AP looked exactly like a fresh
+    // one — the single clearest read on how a fight is going, missing.
+    this.vfx?.attachDamageSmoke?.(this.player);
   }
 
   /** Hand the pipeline's depth texture to the VFX system for soft-particle fade. */
@@ -158,6 +172,32 @@ export class Game {
     this._vfxDepthTex = tex;
     const cam = this.engine.camera;
     this.vfx?.setDepthTexture?.(tex, cam.near, cam.far);
+  }
+
+  /**
+   * Feed the VFX system a scene-colour texture so refracting effects can work.
+   *
+   * `ParticleSystem.setSceneColorTexture(null)` hides the distortion-ring mesh
+   * outright, and nothing ever called it — so explosion shockwaves have never
+   * been visible in this game. Every blast has been missing the ring of bent
+   * air that is most of what sells it.
+   *
+   * The source is the TAA history, i.e. LAST frame's fully resolved colour.
+   * That matters: VFX draws during the scene pass, so sampling the target
+   * currently being rendered into would be a feedback loop. One frame of
+   * staleness is the standard trade and is invisible at these speeds. The
+   * history ping-pongs, so this has to be re-pushed every frame rather than
+   * wired once — `_histIdx` has already flipped by the time we run, which puts
+   * the frame just resolved at `1 - _histIdx`.
+   */
+  _wireVfxSceneColor() {
+    const p = this.pipeline;
+    const hist = p?.rtHist;
+    if (!hist || hist.length < 2) return;
+    const tex = hist[1 - p._histIdx]?.texture || null;
+    if (!tex || tex === this._vfxColorTex) return;
+    this._vfxColorTex = tex;
+    this.vfx?.setSceneColorTexture?.(tex);
   }
 
   /**
@@ -260,6 +300,7 @@ export class Game {
       this.hud.update(dt, t);
       this.audio.update(dt, t);
       this.pipeline.syncFromGame?.(this, dt);
+      this._wireVfxSceneColor(); // history ping-pongs; re-push each frame
       this.input.endFrame();
     });
   }
