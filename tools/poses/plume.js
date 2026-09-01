@@ -8,9 +8,9 @@
 // tall in a hazy frame. Those are different bugs and a full-speed wide shot
 // cannot tell them apart.
 //
-// So: airborne and nearly stationary, camera close and behind so the exhaust
-// blows toward the lens, motion blur OFF. If the plume is invisible here it is
-// not a framing problem.
+// So: airborne and nearly stationary, camera close and BEHIND in the mech's own
+// frame so the exhaust blows toward the lens, motion blur OFF. If the plume is
+// invisible here it is not a framing problem.
 (async () => {
   const { debug, game } = window.__ACNTR__;
   debug.setHudVisible(false);
@@ -29,7 +29,12 @@
   debug.step(1.1);
 
   // Behind and slightly below, looking up the exhaust.
-  debug.cameraRelativeToPlayer({ x: 2.6, y: 3.4, z: -11.5 }, { x: 0, y: 4.6, z: 2.0 }, 38);
+  // BEHIND the mech in its own frame. The first version used world-space
+  // offsets, which put the camera in front of whichever way the mech happened
+  // to be facing — so the pose that exists to photograph the exhaust had the
+  // body between the lens and the plumes, and the empty frame was very nearly
+  // diagnosed as a rendering failure.
+  debug.cameraBehindPlayer({ back: 11.5, up: 3.4, side: 2.6, lookY: 4.6, fov: 38 });
   debug.setPass('motionBlur', false);
   debug.step(0.08);
 

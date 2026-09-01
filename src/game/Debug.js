@@ -152,6 +152,43 @@ export class Debug {
   }
 
   /**
+   * Frame the camera in the mech's OWN frame — behind / above / beside it,
+   * whichever way it happens to be facing.
+   *
+   * `cameraRelativeToPlayer` offsets in world space, so which side of the mech
+   * it lands on depends entirely on the yaw the placement happened to choose.
+   * That is how the thruster close-up ended up looking at the mech's FRONT: the
+   * exhaust blows out of the back, so the pose that existed to photograph the
+   * plumes had the body between the lens and the plumes, and the resulting
+   * empty frame was very nearly diagnosed as a rendering failure.
+   *
+   * @param {{back?:number, up?:number, side?:number, lookY?:number, lookAhead?:number, fov?:number}} [opts]
+   */
+  cameraBehindPlayer({ back = 12, up = 4, side = 0, lookY = 4.6, lookAhead = 0, fov = 38 } = {}) {
+    const p = this.game.player?.root;
+    if (!p) return this;
+    const yaw = p.rotation.y;
+    // Mech forward is (-sin yaw, 0, -cos yaw); behind it is the negation.
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    return this.setCamera(
+      {
+        x: p.position.x - fx * back + rx * side,
+        y: p.position.y + up,
+        z: p.position.z - fz * back + rz * side,
+      },
+      {
+        x: p.position.x + fx * lookAhead,
+        y: p.position.y + lookY,
+        z: p.position.z + fz * lookAhead,
+      },
+      fov,
+    );
+  }
+
+  /**
    * Hold keys down as if the player were pressing them.
    *
    * Setting `controller.state` flags directly does not work: `step()` runs the
@@ -259,13 +296,18 @@ export class Debug {
    * @param {{arc?:number, rays?:number, range?:number}} [opts]
    * @returns {{x:number, z:number, yaw:number, clear:number}|null}
    */
-  placePlayerInOpenGround({ arc = Math.PI * 0.5, rays = 7, range = 140 } = {}) {
+  placePlayerInOpenGround({ arc = Math.PI * 0.5, rays = 7, range = 140, rank = 0 } = {}) {
     const pts = this.game.level?.spawnPoints;
     const ph = this.game.physics;
     if (!pts?.length || !ph?.raycast) return null;
 
     const origin = new THREE.Vector3();
     const dir = new THREE.Vector3();
+    // Every viable (spawn, bearing) pair is kept and sorted, not just the top
+    // one. A pose that needs to SEE something has to be able to ask for the
+    // next-best arena when the best one turns out to be occluded from the
+    // chase camera — scoring cannot know what the camera will end up behind.
+    const candidates = [];
     let best = null;
 
     const low = new THREE.Vector3();
@@ -316,14 +358,23 @@ export class Debug {
         // The rays point along (sin b, 0, cos b); the controller's forward is
         // (-sin yaw, 0, -cos yaw), so facing down that bearing is yaw = b + PI.
         const score = worst - rise * 8;
-        if (!best || score > best.score) {
-          best = { x: sp.x, z: sp.z, yaw: bearing + Math.PI, clear: worst, rise: +rise.toFixed(2), score };
-        }
+        candidates.push({
+          x: sp.x, z: sp.z, yaw: bearing + Math.PI,
+          clear: +worst.toFixed(1), rise: +rise.toFixed(2), score: +score.toFixed(1),
+        });
       }
     }
-    if (!best) return null;
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+
+    // Spread the ranks out. Adjacent bearings at the same spawn are nearly the
+    // same shot, so retrying rank 1 after rank 0 failed would change almost
+    // nothing; step through in strides instead.
+    const idx = Math.min(candidates.length - 1, Math.max(0, rank) * 3);
+    best = candidates[idx];
+    this._openGroundCandidates = candidates.length;
     this.placePlayerOnGround(best.x, best.z, best.yaw, 0.05);
-    this._lastOpenGround = { ...best, clear: +best.clear.toFixed(1), score: +best.score.toFixed(1) };
+    this._lastOpenGround = { ...best, rank, of: candidates.length };
     return this._lastOpenGround;
   }
 
