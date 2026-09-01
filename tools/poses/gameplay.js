@@ -24,36 +24,45 @@
   debug.clearEnemies();
   debug.resetState();
 
-  // Open ground with a real field of fire, facing down it. Placing at a fixed
-  // spot put the mech nose-first against a warehouse wall: it could not move,
-  // and every enemy spawned ahead of it was behind that wall.
-  const open = debug.placePlayerInOpenGround();
-  if (!open) debug.placePlayerOnGround(0, 40, 0, 1.0);
-  debug.step(0.5);
-
-  // Spawn RELATIVE to where the player actually ended up, along the direction
-  // the chase camera is looking, so the engagement is in frame by construction
-  // rather than by luck.
+  // Open ground with a real field of fire, facing down it — and then CHECK,
+  // because scoring the mech's forward arc cannot know what the chase camera
+  // will end up standing behind. Try successively worse-scoring arenas until
+  // one actually shows the fight; a frame that misses it is worthless.
   const p = game.player.root.position;
-  const yaw = game.player.root.rotation.y;
-  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  // Placed ON the terrain, not at the player's y plus a guess — ground that
-  // rises ahead buried the last set inside a hillside while the frustum test
-  // cheerfully reported all four as in frame.
-  const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
-  // Close. The first spread put them 52-96 m out, which sounds reasonable and
-  // is not: the mech boosts ~20 m during the pose and the open pocket it starts
-  // in is smaller than the engagement, so the fight ended up strung out through
-  // scenery. An AC6 gameplay screenshot is a knife fight at 30-60 m.
-  const a = at(34, -12);
-  const b = at(46, 16);
-  const c = at(58, -2);
-  const d = at(40, -22);
-  debug.spawnEnemyOnGround('ac', a.x, a.z, 2, 5);
-  debug.spawnEnemyOnGround('mt', b.x, b.z, 1, 0);
-  debug.spawnEnemyOnGround('mt', c.x, c.z, 1, 0);
-  debug.spawnEnemyOnGround('flyer', d.x, d.z, 1, 18);
+  let open = null;
+  let seen = { inFrustum: 0, visible: 0 };
+  let live = [];
+
+  for (let rank = 0; rank < 4; rank++) {
+    debug.clearEnemies();
+    open = debug.placePlayerInOpenGround({ rank });
+    if (!open && rank === 0) debug.placePlayerOnGround(0, 40, 0, 1.0);
+    debug.step(0.5);
+
+    // Spawn RELATIVE to where the player actually ended up, along the direction
+    // the chase camera is looking, and ON the terrain — absolute coordinates do
+    // not survive real terrain, and a guessed Y buries them in any rise ahead.
+    // Close, too: an AC6 gameplay screenshot is a knife fight at 30-60 m, and
+    // the mech travels far enough during the pose to leave a wider spread
+    // strung out through scenery.
+    const yaw = game.player.root.rotation.y;
+    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
+    const a = at(34, -12);
+    const b = at(46, 16);
+    const c = at(58, -2);
+    const d = at(40, -22);
+    debug.spawnEnemyOnGround('ac', a.x, a.z, 2, 5);
+    debug.spawnEnemyOnGround('mt', b.x, b.z, 1, 0);
+    debug.spawnEnemyOnGround('mt', c.x, c.z, 1, 0);
+    debug.spawnEnemyOnGround('flyer', d.x, d.z, 1, 18);
+    debug.step(0.35);
+
+    live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
+    seen = debug.visibleCount(live);
+    if (seen.visible >= 2) break;
+  }
 
   // Let the AI engage, but not long enough for anything to die or to scatter.
   debug.step(1.2);
@@ -78,14 +87,15 @@
   // this check reported "4 of 4 enemies in frame" for a shot in which all four
   // were behind a warehouse — being inside the frustum and being visible are
   // different questions.
-  const live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
-  const seen = debug.visibleCount(live);
+  live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
+  seen = debug.visibleCount(live);
   const m = game.player.moveState || {};
   window.__POSE_NOTE__ = {
     enemiesAlive: live.length,
     enemiesInFrustum: seen.inFrustum,
     enemiesVisible: seen.visible,
     openGround: open ? open.clear : null,
+    arenaRank: open ? open.rank : null,
     speed: +(m.speed ?? 0).toFixed(1),
     grounded: !!m.grounded,
   };
