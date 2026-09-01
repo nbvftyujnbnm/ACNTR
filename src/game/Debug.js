@@ -93,6 +93,28 @@ export class Debug {
     p.root.position.set(x, y, z);
     p.root.rotation.y = yaw;
     p.velocity?.set?.(0, 0, 0);
+
+    // Setting the ROOT yaw alone does not survive a single second of
+    // simulation. `Entity.aimYaw` is the authority — CameraRig owns it and
+    // PlayerController turns the body to chase it every frame — so a pose that
+    // only rotated the root had the mech quietly swing back to aimYaw 0 while
+    // it settled. That is what made the combat poses walk into scenery and
+    // spawn their enemies off to one side: the placement chose an open bearing,
+    // and by the time anything was captured the mech was facing somewhere else.
+    // CameraRig is the real authority: it writes `p.aimYaw = this.yaw` in
+    // lateUpdate, so setting the entity alone is overwritten on the very next
+    // frame. Set the rig, then the entity, then the controller, then reset the
+    // rig's smoothing so the camera does not sweep across the level catching up.
+    const rig = this.game.cameraRig;
+    if (rig && typeof rig.yaw === 'number') rig.yaw = yaw;
+    p.aimYaw = yaw;
+    const c = this.game.controller;
+    if (c) {
+      if (typeof c.yaw === 'number') c.yaw = yaw;
+      if (typeof c.bodyYaw === 'number') c.bodyYaw = yaw;
+    }
+    rig?.reset?.();
+    this.game.pipeline?.resetHistory?.();
     return this;
   }
 
