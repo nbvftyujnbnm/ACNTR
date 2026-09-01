@@ -1226,7 +1226,10 @@ export function buildUpperArm(o = {}) {
   // upper arm is a short thick limb, not a rod. At the previous 0.52 x 0.56 over
   // 1.50 m the aspect ratio was 1:2.9 and it read as tubing bolted to a pauldron
   // — the single loudest proportion tell in the hero frame.
-  b.box('armor', MASK.BASE, 0.66, L * 0.86, 0.78, 0.055, 0, -L * 0.52, 0.0, 0, 0, 0,
+  // Stops 34 cm short of the elbow pivot, which is what opens the elbow slot —
+  // see buildForeArm. The armour lost 20 cm of length and got it back as depth
+  // (0.78 -> 0.84), so the limb is no lighter, it is simply jointed.
+  b.box('armor', MASK.BASE, 0.66, L * 0.72, 0.84, 0.055, 0, -L * 0.46, 0.0, 0, 0, 0,
     // taperX 1.02, not 1.10: the pivot moved 10 cm outboard to open the armpit,
     // and the arm's outer plating has to give most of that back or the shoulders
     // grow from 36% of height to 39% and the pauldron stops capping the arm.
@@ -1249,15 +1252,19 @@ export function buildUpperArm(o = {}) {
   }
   // strap across the channel, so the split reads as two plates on a frame
   b.box('mech', MASK.TRIM, 0.10, 0.09, 0.30, 0.016, s * 0.30, -L * 0.48, 0.0);
-  // inner actuator + hose
-  b.addM('mech', MASK.TRIM, chamferCyl(0.11, 0.11, L * 0.7, 10, 0.022),
-    _m.compose(_pv.set(s * -0.30, -L * 0.5, 0.08), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  // Inner actuator, and the ELBOW RAM below it. The ram is the only thing that
+  // crosses the elbow slot on the inboard side; it is exposed on purpose,
+  // because a hole in a silhouette only reads as engineering when something
+  // spans it.
+  b.addM('mech', MASK.TRIM, chamferCyl(0.11, 0.11, L * 0.60, 10, 0.022),
+    _m.compose(_pv.set(s * -0.30, -L * 0.46, 0.08), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  piston(b, s * -0.24, -L * 0.70, 0.26, s * -0.19, -L + 0.05, 0.20, 0.050);
   if (d) {
     b.addM('mech', MASK.TRIM, cable([
-      [s * -0.28, -0.14, 0.34], [s * -0.34, -L * 0.5, 0.40], [s * -0.26, -L * 0.94, 0.32],
+      [s * -0.28, -0.14, 0.36], [s * -0.34, -L * 0.5, 0.42], [s * -0.24, -L + 0.06, 0.30],
     ], 0.042, 10, 6), null);
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.35, -L * 0.5, 0.0, 0.52, 0.62, rng, { cols: 2, rows: 3, depth: 0.032, fill: 0.6 });
-    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.5, 0.40, 0.50, 0.72, rng, { cols: 2, rows: 3, depth: 0.034, accent: 0.04 });
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.35, -L * 0.46, 0.0, 0.52, 0.58, rng, { cols: 2, rows: 3, depth: 0.032, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, 'pz', 0, -L * 0.46, 0.43, 0.50, 0.66, rng, { cols: 2, rows: 3, depth: 0.034, accent: 0.04 });
     boltRing(b, 'mech', MASK.TRIM, s > 0 ? 'px' : 'nx', s * 0.38, -0.08, 0, 0.22, 7, 0.026, 0.018);
   }
   return { b, anchors: { elbow: [0, -L, 0] } };
@@ -1270,36 +1277,45 @@ export function buildForeArm(o = {}) {
   const L = MECH_DIMS.wristDrop;
   const b = new GeoBuilder(rng);
 
-  // --- exposed elbow: actuator drum + piston + cable loom -----------------
-  // The drum is deliberately almost as wide as the forearm and proud of it on
-  // both sides. AC elbows are a visible mechanical break between two armoured
-  // masses; at r=0.19 / w=0.46 this one was thinner than the limb it joined and
-  // the arm read as one continuous stick from pauldron to hand.
-  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.25, 0.66, 16);
-  b.addM('mech', MASK.TRIM, ring(0.25, 0.34, 0.36, 16, 0.024),
-    _m.compose(_pv.set(s * 0.26, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
-  // inboard bearing cheek, so the joint reads from the body side too
-  b.addM('mech', MASK.TRIM, ring(0.22, 0.30, 0.20, 14, 0.02),
-    _m.compose(_pv.set(s * -0.28, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
-  piston(b, s * -0.18, 0.20, 0.30, s * -0.18, -0.52, 0.38, 0.056);
+  // --- THE ELBOW IS A HOLE ------------------------------------------------
+  // The upper arm's armour stops 34 cm above this pivot and the forearm's shell
+  // starts 15 cm below it, so there is a ~49 cm horizontal band at the elbow
+  // with nothing in it but a slim axle down the middle, two bearing cheeks and
+  // a pair of rams. Fore and aft of the axle that band is open to the sky, and
+  // because it is cut in Y rather than in X it stays exactly as open when the
+  // camera swings round to the 3/4 hero azimuth — which the old flush elbow
+  // (a 0.34 m radius drum jammed between two armoured masses) never did.
+  //
+  // The cheeks are rings rather than a single drum on purpose: a drum fills the
+  // hole it is supposed to be seen through.
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.135, 0.62, 14);
+  for (let i = -1; i <= 1; i += 2) {
+    b.addM('mech', MASK.TRIM, ring(0.135, 0.27, 0.11, 16, 0.02),
+      _m.compose(_pv.set(s * 0.26 * i + (i > 0 ? 0 : 0), 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  }
+  // outboard bearing boss — the joint still has an outside face to catch light
+  b.addM('mech', MASK.TRIM, ring(0.16, 0.24, 0.14, 14, 0.02),
+    _m.compose(_pv.set(s * 0.34, 0, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  piston(b, s * -0.14, 0.24, 0.30, s * -0.14, -0.46, 0.34, 0.050);
   if (d) {
     for (let i = -1; i <= 1; i += 2) {
       b.addM('mech', MASK.TRIM, cable([
-        [s * 0.02 + i * 0.08, 0.22, 0.28], [s * 0.06 + i * 0.10, 0.0, 0.38], [s * 0.02 + i * 0.08, -0.32, 0.30],
+        [s * 0.02 + i * 0.08, 0.30, 0.26], [s * 0.06 + i * 0.10, 0.0, 0.36], [s * 0.02 + i * 0.08, -0.30, 0.28],
       ], 0.030, 8, 5), null);
     }
-    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.32, 0, 0, 0.17, 6, 0.024, 0.016);
+    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.40, 0, 0, 0.15, 6, 0.022, 0.014);
   }
 
   // --- forearm shell ------------------------------------------------------
   // 0.72 wide x 0.82 deep: deeper than it is wide, which is what makes a mech
-  // forearm read as a weapon mount rather than a limb.
-  b.box('armor', MASK.BASE, 0.72, L * 0.82, 0.82, 0.055, 0, -L * 0.50, 0.0, 0, 0, 0,
+  // forearm read as a weapon mount rather than a limb. It starts at -0.15 so
+  // the elbow band above stays clear.
+  b.box('armor', MASK.BASE, 0.72, L * 0.74, 0.82, 0.055, 0, -L * 0.52, 0.0, 0, 0, 0,
     { taperX: 0.90, taperZ: 0.92 });
-  b.box('armor', MASK.TRIM, 0.60, 0.26, 0.68, 0.035, 0, -0.22, 0.0);
+  b.box('armor', MASK.TRIM, 0.60, 0.22, 0.68, 0.035, 0, -0.26, 0.0);
   // top shell plate, overlapping
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.64, L * 0.68, { tl: 0.16, tr: 0.16, bl: 0.08, br: 0.08 }), 0.11, 0.028),
-    _m.compose(_pv.set(0, -L * 0.50, -0.43), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.64, L * 0.62, { tl: 0.16, tr: 0.16, bl: 0.08, br: 0.08 }), 0.11, 0.028),
+    _m.compose(_pv.set(0, -L * 0.52, -0.43), _q.setFromEuler(_e.set(0, 0, 0)), _sc.set(1, 1, 1)));
 
   // --- weapon hardpoint on the OUTER face ---------------------------------
   const hx = s * 0.41;

@@ -574,18 +574,17 @@ export class MechRig {
 
       const pitchWant = sway - tuckPitch + aimPitch * 0.22 + slack * 0.55
         - recoil.x * 0.055;
-      // Rest roll is half what it was: the arms are now thick enough that a 5
-      // degree inward cant crowded them against the waist. 3 degrees still stops
-      // them hanging perfectly parallel, which is what looks like a mannequin.
-      // Rest cant. The arms are 0.72 m across the forearm now, and at 0.05 the
-      // wrist sat 9-13 cm INSIDE the thigh's outer plate in the default standing
-      // pose — the hands were buried in the legs in every hero frame. 0.085 is
-      // the smallest value that clears them (with the thigh plate pulled in to
-      // match, see buildThigh) without bow-arming the silhouette: it moves the
-      // wrist 24 cm outboard, where 0.12 would have put the hands wider than the
-      // shoulders. Measured clearance at this value: 2.3 cm worst case standing,
-      // 13 cm boosting, 30 cm at assault boost, and a 42 cm median arm-to-leg gap.
-      const rollWant = side * (0.095 + tuckRoll + slack * 0.20);
+      // REST CANT, and it is a silhouette knob, not a styling one. The arm
+      // hangs from a pivot 1.36 m off centre and the thigh block's outer face is
+      // at 1.31, so whatever roll is set here is almost exactly the daylight
+      // between arm and leg: lateral offset at the forearm is sin(roll) times
+      // the drop below the shoulder, ~2.5 m at the thigh's widest.
+      //   0.050 -> wrist 9-13 cm INSIDE the thigh (hands buried in the legs)
+      //   0.095 -> 2.3 cm, i.e. touching, which reads as one welded mass
+      //   0.140 -> 8-16 cm of measured gap, which reads as sky
+      // 0.14 is the ceiling: it already puts the hands 2.05 m out against a
+      // 1.76 m pauldron, and past that the frame reads bow-armed.
+      const rollWant = side * (0.14 + tuckRoll + slack * 0.20);
       // Rest elbow now carries the hands slightly FORWARD (+x rotation) instead
       // of trailing them 35 cm behind the hip. An AC at rest holds its weapons
       // ahead of the frame; trailing arms read as a ragdoll. Boost and assault

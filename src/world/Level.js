@@ -158,6 +158,67 @@ function angField(t, h) {
 }
 
 /* ========================================================================== */
+/*  Stratigraphy — where a cliff's profile rings go                            */
+/* ========================================================================== */
+
+/**
+ * Sampling schedule for a cliff face, shared by the mesa ring and the buttes.
+ * One row per profile ring, as `[s, relief, tint]`:
+ *
+ *  - `s`      position along the face, 0 at the toe of the scree, 1 at the crest;
+ *  - `relief` radial displacement in units of the bed amplitude, POSITIVE
+ *             meaning recessed (a soft bed cut back) and negative meaning proud
+ *             (a hard bed standing out). Callers map the sign onto radius —
+ *             recessed is a larger radius on a ring seen from inside and a
+ *             smaller one on a butte seen from outside;
+ *  - `tint`   vertex-shade multiplier for that ring.
+ *
+ * Rings are deliberately NOT spread evenly. An even ramp is what produces a
+ * smooth cone, and a smooth cone under a 13-degree sun is one coherent normal —
+ * a flat pale cut-out, whatever is done to its texture or its colour. The talus
+ * gets an even ramp because it really is a cone; the cliff band above it is
+ * divided into `beds` and each bed spends its four rings exactly where the
+ * surface turns:
+ *
+ *   u 0.000 -> 0.085  OVERHANG. The hard bed projects over the soft one under
+ *                     it, so this step is a near-horizontal DOWN-facing
+ *                     surface. At a 13-degree sun it receives no key and almost
+ *                     no sky, which makes it the one hard dark horizontal line
+ *                     a landform can still draw from 700-1400 m away — the cue
+ *                     that reads as SEDIMENTARY ROCK rather than as a dune.
+ *   u 0.085 -> 0.130  the lip: freshly broken rock, the lightest band.
+ *   u 0.130 -> 0.700  RISER, within about 3 degrees of vertical.
+ *   u 0.700 -> 1.000  BENCH cut back into the soft bed at roughly the angle of
+ *                     repose, so it faces the sky and collects dust.
+ *
+ * The schedule is indexed by RING and is therefore identical in every column,
+ * which is what makes it aliasing-proof: nothing in it has a phase that can
+ * step from column to column (see the amendment on the strata Nyquist bug).
+ * Everything that varies around the landform — the face height, the bed
+ * amplitude, the gullies — is a band-limited harmonic field.
+ *
+ * @param {number} talusRings rings spent on the scree apron
+ * @param {number} beds hard/soft bed pairs in the cliff band
+ * @param {number} sTalus fraction of the face parameter given to the scree
+ * @returns {number[][]} rows of [s, relief, tint], `s` strictly increasing
+ */
+function cliffFaceProfile(talusRings, beds, sTalus) {
+  const rows = [];
+  for (let i = 0; i < talusRings; i++) {
+    rows.push([(sTalus * i) / (talusRings - 1), 1, 1]);
+  }
+  for (let b = 0; b < beds; b++) {
+    const base = sTalus + ((1 - sTalus) * b) / beds;
+    const span = (1 - sTalus) / beds;
+    rows.push([base + span * 0.085, -1.00, 0.56]);
+    rows.push([base + span * 0.130, -0.97, 1.14]);
+    rows.push([base + span * 0.700, -0.85, 1.02]);
+    rows.push([base + span * 1.000, 1.00, 0.84]);
+  }
+  return rows;
+}
+
+/* ========================================================================== */
 /*  Surface breakup — WORLD-space grime, shared by every structure family      */
 /* ========================================================================== */
 
@@ -621,10 +682,25 @@ export class Level {
    * swings the surface azimuth about +/-27 degrees over a 55-110 m arc, which
    * is 100-190 px of light-and-shade at the vista's sight lines — landform
    * scale, an order of magnitude coarser than a column.
+   *
+   * (3) NO STRATA, which is what was left after (1) and (2) were fixed. The
+   * beds were a pair of `sin(worldY)` terms in the VERTEX COLOUR, and colour is
+   * the one channel aerial perspective can reach: at the vista's 700 m sight
+   * line the veil is about 65%, and through AgX a 2:1 albedo ratio on the
+   * remaining 35% arrives as under 8 display code values — measured on the face,
+   * a vertical run of 14 samples spanning 130 px varied by +/-3. Beds are now
+   * GEOMETRY (see `cliffFaceProfile`), because relief moves N.L instead, and
+   * with a key at 24 against an ambient near 0.2 a bed's down-facing overhang
+   * and its sunward riser are separated by the largest ratio anything in this
+   * frame can offer. The vertex tint still bands, but it bands ON the same
+   * schedule, so the tonal and the physical beds are the same beds.
    */
   _mesaRing() {
     const NA = 384;               // face columns; 7.8 m of arc each
-    const NF = 26;                // profile rings on the visible face
+    /** talus rings, bed count and the share of the face parameter given to scree */
+    const S_TALUS = 0.30;
+    const FACE = cliffFaceProfile(8, 5, S_TALUS);
+    const NF = FACE.length;       // profile rings on the visible face
     const NP = NF + 8;            // plus the back slope down to the far plain
     const NV = NA + 1;            // duplicated seam column, see the UV note
     const rng = mulberry32(SEED ^ 0x31d5);
@@ -635,6 +711,7 @@ export class Level {
      */
     const H_MASS = harmonics(rng, [1, 2, 3, 5, 8, 13], 1.0);  // mesas vs saddles
     const H_CROWN = harmonics(rng, [5, 9, 15, 23], 1.0);      // ragged skyline
+    const H_NOTCH = harmonics(rng, [3, 5, 9, 14, 21], 0.7);   // erosion clefts
     const H_SPUR = harmonics(rng, [2, 3, 5, 8], 1.0);         // buttresses in plan
     const H_GULLY = harmonics(rng, [7, 11, 17, 24], 0.8);     // erosion channels
     const H_CLIFF = harmonics(rng, [2, 3, 6], 1.0);           // sheer .. eroded
@@ -694,7 +771,16 @@ export class Level {
        * as a pale flat band above the crest line. Clamping costs a few of the
        * deepest saddles and buys a silhouette that is always a silhouette.
        */
-      const h = Math.max(112, 176 + mass * 128 + crown * 26);
+      /*
+       * `notch` only ever CUTS. A crest built from a signed sine is a berm: it
+       * rises as often as it falls and the two average out into a smooth arc.
+       * Erosion is one-sided — it removes material at the drainages and leaves
+       * the divides standing — so the deviation has to be rectified. It is
+       * multiplicative, so a tall section gets a deep cleft and a short one is
+       * barely touched, which keeps every saddle above the floor below.
+       */
+      const notch = Math.max(0, angField(t, H_NOTCH) - 0.08);
+      const h = Math.max(112, (176 + mass * 128 + crown * 40) * (1 - notch * 0.40));
       const r0 = R_NOM + spur * 46;
       const talus = lerp(0.16, 0.46, cw);       // fraction of height that is scree
       // Scree stands at its angle of repose (~34 deg), so the apron's RUN follows
@@ -703,39 +789,42 @@ export class Level {
       // sheer section, neither of which is a talus.
       const talusRun = Math.min(h * talus * 1.45, 210);
       const cliffRun = lerp(7, 34, cw);         // the caprock leans back a little
+      // Bed relief in metres. A sheer section carries deeper benches than an
+      // eroded one, and the amplitude is the ONLY thing about the stratigraphy
+      // that varies around the ring — the schedule itself is fixed, which is
+      // what keeps it aliasing-proof.
+      const bedAmp = lerp(4.0, 10.5, cw);
 
       for (let p = 0; p < NP; p++) {
-        let f, off;
+        let f, off, bedTint;
         if (p < NF) {
-          f = p / (NF - 1);
-          // 86% of the radial run is spent in the scree cone; the caprock above
-          // it is near vertical, which is what makes a mesa a mesa
+          const s = FACE[p][0];
+          // The RING schedule is fixed but the talus FRACTION is per-column, so
+          // the two are composed rather than merged: `s` decides which ring this
+          // is, `talus` decides how much of the column's height the scree covers.
+          f = s < S_TALUS
+            ? talus * (s / S_TALUS)
+            : talus + (1 - talus) * (s - S_TALUS) / (1 - S_TALUS);
           off = f < talus
             ? talusRun * Math.pow(f / talus, 0.86)
             : talusRun + cliffRun * (f - talus) / (1 - talus);
+          // Beds are buried at the toe by their own scree and roll over at the
+          // crest, so the relief fades in and out rather than ending on a step.
+          off += FACE[p][1] * bedAmp
+            * smoothstep(S_TALUS * 0.55, S_TALUS * 1.25, s)
+            * (1 - smoothstep(0.94, 1.0, s));
+          bedTint = FACE[p][2];
         } else {
           const b = BACK[p - NF];
           off = talusRun + cliffRun + b[0];
           f = b[1];
+          bedTint = 0.92;
         }
         // Gullies bite deepest in the scree and die out under the caprock, with
         // a little left over on the cliff so it is not a smooth cylinder.
         const gd = Math.pow(Math.sin(Math.PI * clamp((f - 0.02) / 0.74, 0, 1)), 0.7)
           + 0.24 * smoothstep(0.52, 0.96, f);
-        /*
-         * Benches. A hard bed stands proud of the soft one under it, and the
-         * overhang it leaves is the horizontal shadow line that says SEDIMENTARY
-         * ROCK rather than sand dune — the single loudest missing cue at hero
-         * range, where the face was reading as one smooth ramp with a grain on
-         * it. Deliberately a function of the profile fraction and not of world
-         * y: a bench keyed to the 60 m bed would inherit that bed's 0.71 rad
-         * per-column phase step as a RADIAL step of 4 m, which is a 29 degree
-         * azimuth swing per column — a stripe. Keyed to `f` it steps once per
-         * eight rings and its only angular term is `tone`, at 0.09 rad.
-         */
-        const bench = Math.sin(f * 20.4 + tone * 1.2);
-        const r = r0 + off + gully * gd * 24
-          + Math.max(0, bench) * Math.max(0, bench) * 7.0 * (1 - f * 0.45);
+        const r = r0 + off + gully * gd * 24;
         const y = baseY + h * f - clamp(gully, 0, 1) * gd * 4.5;
 
         const k = a * NP + p;
@@ -754,25 +843,23 @@ export class Level {
         uv[k * 2] = a * U_STEP + slide * 1.2;
         uv[k * 2 + 1] = y / UV_CLIFF;
 
-        // Sedimentary beds at 132 m and 44 m, phased off the LOW-ORDER height
-        // only: the crown wobble and the gully cut move the surface, not the
-        // beds that were laid down before it eroded. That is both the correct
-        // geology and what keeps the worst per-column phase step at 0.42 rad.
+        // One SLOW colour bed survives from the old scheme, at 150 m against a
+        // per-column height step of about 0.9 m: it is the large-scale "this
+        // whole band of rock is redder" drift, and at that period its phase
+        // cannot alias. It is phased off the LOW-ORDER height only, because the
+        // crown wobble and the gully cut move the surface, not the beds that
+        // were laid down before it eroded. The FINE banding is no longer a sine
+        // at all — `bedTint` comes off the geometric schedule, so a light band
+        // is a physically proud bed and a dark one is the shadow under it.
         const yBed = baseY + (176 + mass * 128) * f;
-        const s1 = Math.sin(yBed * 0.0476 + tone * 1.7) * 0.5 + 0.5;   // 132 m
-        const s2 = Math.sin(yBed * 0.1047 + tone * 2.4) * 0.5 + 0.5;   // 60 m
+        const s1 = smoothstep(0.32, 0.68, Math.sin(yBed * 0.0419 + tone * 1.7) * 0.5 + 0.5);
         const scree = 1 - smoothstep(talus * 0.72, talus * 1.30, f);
         const cut = clamp(-gully * gd, 0, 1);   // shaded floor of a channel
-        // Beds have EDGES. A raw sine reads as a soft gradient at any distance;
-        // pushing it through a smoothstep gives each bed a defined base and top,
-        // which is what survives being reduced to twenty pixels.
-        const b1 = smoothstep(0.30, 0.70, s1);
-        const b2 = smoothstep(0.36, 0.64, s2);
-        const shade = 0.48 + b1 * 0.30 + b2 * 0.16 + scree * 0.14 - cut * 0.17 + tone * 0.06;
-        const warm = 0.88 + b1 * 0.24 + scree * 0.06;
+        const shade = (0.44 + s1 * 0.24 + scree * 0.12 - cut * 0.16 + tone * 0.05) * bedTint;
+        const warm = 0.88 + s1 * 0.22 + scree * 0.06;
         const k3 = k * 3;
         col[k3] = clamp(shade * warm, 0, 1) * 255;
-        col[k3 + 1] = clamp(shade * (0.93 + b2 * 0.05), 0, 1) * 255;
+        col[k3 + 1] = clamp(shade * (0.93 + s1 * 0.05), 0, 1) * 255;
         col[k3 + 2] = clamp(shade * 0.78, 0, 1) * 255;
       }
     }
