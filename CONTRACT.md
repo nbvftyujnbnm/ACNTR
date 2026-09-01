@@ -1119,3 +1119,44 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   already been captured, report.json included. Failures are now recorded
   per-pose as `shots[].failed`, listed in `report.failedShots`, and the run
   continues and exits 1.
+- 2026-09-01 [mech] THE "ONLY ONE TRUE SKY-GAP" DEFECT IS STALE — DO NOT
+  RE-FIX IT. Measured with `tools/silhouette.mjs` on the current build: at the
+  3/4 yaws the mech has 10-12 enclosed holes and `openRows` 0.47-0.49; head-on
+  it has 9 holes and `openRows` 0.91. The hip / knee / ankle slot scheme
+  documented in `buildThigh` and `buildShin` works. The frontal width profile
+  also tapers the right way now — bands 6-7 (hip/thigh) are the widest at
+  0.97/1.00 against 0.69-0.80 for the shin bands.
+  What IS still weak is the leg **in profile**: at yaw 90 the width bands from
+  thigh to shin read 0.373 / 0.363 / 0.368 / 0.402 — dead flat. The three slots
+  are cut in Y and open across X, so they survive a yaw change but say nothing
+  about depth, and front-to-back the thigh, knee and shin are all the same
+  size. The leg reads as an unbroken slab from hip to ankle in any side-ish
+  view. That is the next real silhouette task, and it is a DEPTH problem, not
+  another hole.
+- 2026-09-01 [tools] SILHOUETTE SCORING: JUDGE THE 3/4 YAWS, AND `fill` IS A
+  TREND NUMBER ONLY. A biped backfills its own negative space at the cardinal
+  angles — dead side-on the far leg sits exactly behind the near one and plugs
+  every gap in it (yaw 90 scores `openRows` 0.245 against 0.91 head-on for the
+  same geometry), and dead front-on the arms hang over the torso. Scoring those
+  views punishes geometry that is fine. Grade 45/135, which is also what the
+  hero and gameplay cameras use.
+  `fill` (mech pixels / bbox pixels) was given an absolute 0.34-0.48 band on
+  first outing. That band was invented, not measured, and it is not defensible:
+  the bounding box rotates with the camera so the denominator is not comparable
+  across yaws, and the same mech reads 0.40 side-on and 0.70 at 3/4. Compare it
+  at a FIXED yaw across iterations and nothing else. `openRows`, `holeCount` and
+  the per-yaw `widths` profile are the numbers that survived contact.
+- 2026-09-01 [game/combat] THE PLAYER HAD NO THRUSTER PLUMES. `VFX.boostFlame()`
+  is a complete persistent-plume system and `MechFactory` builds four exhaust
+  anchors on every biped (`mech.thrusters` — two main nozzles then two
+  verniers), but the only caller of `boostFlame` in the codebase was
+  `ai/Brain.js`. The player's AC crossed the map at speed with cold thrusters
+  while every MT it fought had a burning one. Wired in `Game._wirePlayerThrusters`
+  / `_updatePlayerThrusters`, driven from `player.moveState`.
+  Two things worth keeping: the mains are given an explicit world axis via
+  `handle.setAxis()` because the anchors' own orientation (`rotation.x = PI/2`
+  in `MechFactory`) points the exhaust straight DOWN — right for verniers,
+  wrong for main nozzles, which must blow out the back. And the idle level is
+  0.07 rather than 0: an AC's thrusters idle, they do not extinguish, and that
+  faint blue pilot flame is a large part of why a parked AC still reads as
+  powered.

@@ -92,18 +92,26 @@ It renders the mech as a black shape on white with the post stack bypassed and
 scores the result. Grade category 1 against these numbers *as well as* the
 images, and quote them in the verdict:
 
-| Metric | Floor | What it catches |
-|---|---|---|
-| `fill` | 0.34–0.48 | mech pixels / bbox pixels. The blob detector. Above ~0.60 is a lump with limbs drawn on it. |
-| `openRows` | ≥ 0.35 | fraction of rows you can see sky through. The negative-space measure — an AC reads as struts and armour because of its holes. |
-| `holeCount` | ≥ 2 | fully enclosed sky: through a shoulder gantry, a knee linkage. Rarer and stronger than `openRows`. |
-| `complexity` | ≥ 2.2 | outline busyness vs. a disc of equal area. A smooth capsule scores low. |
-| `widths` | thigh band ≥ shin band | 12-band head-to-foot profile. On an AC the thigh is the widest part of the leg; if band 8 is under band 10 the proportion is inverted and the mech reads spindly. |
+**Judge the 45° and 135° yaws.** Not the mean, and not the 0/90 extremes. A
+biped backfills its own negative space at the cardinal angles — dead side-on,
+the far leg sits exactly behind the near one and plugs every gap in it; dead
+front-on, the arms hang over the torso. Those two views score badly no matter
+how good the design is, so scoring them punishes geometry that is fine. The
+3/4 views are also the ones the hero and gameplay cameras actually use.
 
-These floors come from the shape language described above, **not** from
-measuring the real game — AC6 frames cannot be downloaded in this sandbox. They
-are a floor to clear, not a score to hit exactly. Clearing them is necessary for
-an 8, not sufficient: a shape can hit every number and still be ugly.
+| Metric | Bar | What it catches |
+|---|---|---|
+| `openRows` | ≥ 0.35 at 45°/135° | fraction of rows you can see sky through. The negative-space measure — an AC reads as struts and armour because of its holes. |
+| `holeCount` | ≥ 2 at 45°/135° | fully enclosed sky: through a shoulder gantry, a knee linkage. Rarer and stronger than `openRows`. |
+| `complexity` | ≥ 2.2 | outline busyness vs. a disc of equal area. A smooth capsule scores low. |
+| `widths` | thigh band ≥ shin band | 12-band head-to-foot profile. On an AC the thigh is the widest part of the leg; if band 8 is under band 10 the proportion is inverted and the mech reads spindly. Read it per-yaw: a leg can taper correctly head-on and still be a featureless slab in profile. |
+| `fill` | *trend only* | mech pixels / bbox pixels. Compare the SAME yaw across iterations; do not grade it against an absolute band. The bbox rotates with the camera, so the denominator is not comparable between yaws, and no honest absolute band for it has been established here. |
+
+These bars come from the shape language described above, **not** from measuring
+the real game — AC6 frames cannot be downloaded in this sandbox. Clearing them
+is necessary for an 8, not sufficient: a shape can hit every number and still be
+ugly. Where a number and the image disagree, believe the image and go fix the
+metric — two of these were wrong on their first outing.
 
 ## Required verdict format
 

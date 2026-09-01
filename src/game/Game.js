@@ -101,6 +101,8 @@ export class Game {
     this.weapons.setLoadout(this.loadout);
     this.controller.setLoadout?.(this.loadout);
 
+    this._wirePlayerThrusters();
+
     step(0.85, 'salvage protocol');
     this.loot = new LootSystem(this.scene, this.player, this.loadout, this.vfx);
 
@@ -154,6 +156,68 @@ export class Game {
     this.vfx?.setDepthTexture?.(tex, cam.near, cam.far);
   }
 
+  /**
+   * Give the player's AC its thruster plumes.
+   *
+   * MechFactory builds four exhaust anchors on the backpack — two main nozzles
+   * and two verniers — and VFX has a complete persistent-plume system behind
+   * `boostFlame()`. Nothing connected them: the only caller of `boostFlame` in
+   * the whole codebase was the enemy AI, so the player's AC crossed the map at
+   * 95 m/s with cold thrusters while every MT it fought had a burning one.
+   *
+   * The handles are created once and driven by intensity, because that is what
+   * the VFX side is built for — it converges intensity at 45/s so thrusters
+   * snap rather than swell, and derives length, brightness, colour temperature
+   * and ember rate from it.
+   */
+  _wirePlayerThrusters() {
+    const anchors = this.player?.thrusters;
+    if (!this.vfx?.boostFlame || !anchors?.length) return;
+    this._plumes = anchors.map((anchor, i) => {
+      // MechFactory pushes the two main nozzles first, then the verniers.
+      const main = i < 2;
+      return {
+        main,
+        handle: this.vfx.boostFlame(anchor, true, 0, {
+          radius: main ? 0.36 : 0.15,
+          length: main ? 3.6 : 1.4,
+          embers: main ? 32 : 7,
+        }),
+      };
+    });
+    this._plumeAxis = new THREE.Vector3();
+  }
+
+  /**
+   * Drive the plumes from the controller's published movement state.
+   *
+   * Intensity never reaches zero on the mains: an AC's thrusters idle rather
+   * than extinguish, and that faint blue pilot flame is a large part of why a
+   * parked AC still reads as powered. The anchors' own orientation points the
+   * exhaust straight down, which is right for the verniers and wrong for the
+   * mains, so the mains are given an explicit world axis instead — exhaust
+   * blows out of the back of the machine, opposite the way it is facing.
+   */
+  _updatePlayerThrusters() {
+    if (!this._plumes) return;
+    const m = this.player?.moveState;
+    if (!m) return;
+
+    let level = 0.07;                                   // idle pilot flame
+    if (!m.grounded) level = 0.40;                      // holding altitude
+    if (m.boosting) level = Math.max(level, 0.62);
+    if (m.assaultBoost) level = Math.max(level, 1.05 + 0.35 * (m.assaultRamp ?? 0));
+    if (m.quickBoost || (m.qbTimer ?? 0) > 0) level = 1.55;
+    if (m.staggered) level = 0.03;                      // a staggered AC has lost thrust
+
+    // Mech faces -Z, so +Z in its own frame is out the back.
+    this._plumeAxis.set(0, 0, 1).applyQuaternion(this.player.root.quaternion);
+    for (const p of this._plumes) {
+      if (p.main) p.handle.setAxis(this._plumeAxis);
+      p.handle.set(true, p.main ? level : level * 0.5);
+    }
+  }
+
   _registerLoop() {
     this.engine.addUpdate((dt, t) => {
       if (this.state === 'garage') {
@@ -172,6 +236,7 @@ export class Game {
       this.level.update(dt, t, this.player.root.position);
 
       this.controller.update(dt, t);
+      this._updatePlayerThrusters();
       this.enemies.update(dt, t);
       this.physics.update(dt);
 

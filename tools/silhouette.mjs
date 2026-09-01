@@ -62,6 +62,16 @@ const YAWS = String(arg('yaws', '0,45,90,135,180'))
 const W = parseInt(arg('w', '1000'), 10);
 const H = parseInt(arg('h', '1000'), 10);
 
+function run(cmd, args) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (out += d));
+    p.on('close', (code) => resolve({ code, out }));
+  });
+}
+
 async function waitForServer(url, timeoutMs = 90000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -223,15 +233,26 @@ const shutdown = async (code) => {
   const outDir = resolve(ROOT, OUT_DIR);
   mkdirSync(outDir, { recursive: true });
 
+  // Serve a PRODUCTION BUILD through `vite preview`, not the dev server — the
+  // same reason capture.mjs does. Under HMR, any edit to a source file while a
+  // run is in flight reloads the page out from under the in-flight
+  // page.evaluate, whose promise then never settles: the run hangs until its
+  // timeout rather than failing. A built bundle is immutable for the life of
+  // the run, so editing and auditing can happen at the same time.
+  const lint = await run('node', ['tools/lint-glsl.mjs']);
+  if (lint.code !== 0) { console.error(lint.out); await shutdown(3); }
+  const built = await run('npx', ['vite', 'build']);
+  if (built.code !== 0) { console.error('=== BUILD FAILED ===\n' + built.out.slice(-4000)); await shutdown(3); }
+
   const port = 5900 + Math.floor(Math.random() * 400);
-  server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  server = spawn('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
   });
   let log = '';
   server.stdout.on('data', (d) => (log += d));
   server.stderr.on('data', (d) => (log += d));
   const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('vite failed:\n' + log); await shutdown(3); }
+  if (!(await waitForServer(url))) { console.error('vite preview failed:\n' + log); await shutdown(3); }
 
   browser = await launch();
   const page = await browser.newPage({ viewport: { width: W, height: H } });
