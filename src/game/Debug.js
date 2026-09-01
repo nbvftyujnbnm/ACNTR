@@ -731,17 +731,45 @@ export class Debug {
     return { w, h, mask };
   }
 
-  /** Toggle individual post passes so a critic can isolate what a pass costs. */
+  /**
+   * Toggle individual post passes so a critic can isolate what a pass costs.
+   *
+   * The real switches are the booleans on `pipeline.q` — `{ taa, ssao, ssr,
+   * motionBlur, dof, ... }`, set by `setQuality()`. This used to write
+   * `pipeline.params[name]` and then call a `setPassEnabled` that does not
+   * exist on the pipeline, so for every pass whose params entry is an object of
+   * tunables rather than a bare boolean (dof, bloom, taa, vignette — most of
+   * them) it silently did nothing and reported success. A debug affordance that
+   * quietly no-ops is worse than one that is missing: it makes an A/B look
+   * conclusive when both frames are identical.
+   *
+   * Returns `this` for chaining; read `debug.passes()` to see what actually took.
+   */
   setPass(name, on) {
     const p = this.game.pipeline;
     if (!p) return this;
+    let applied = false;
+    if (p.q && typeof p.q[name] === 'boolean') {
+      p.q[name] = !!on;
+      applied = true;
+    }
     if (p.params && name in p.params) {
       const v = p.params[name];
-      if (typeof v === 'object' && v && 'enabled' in v) v.enabled = on;
-      else p.params[name] = on;
+      if (v && typeof v === 'object' && 'enabled' in v) { v.enabled = !!on; applied = true; }
+      else if (typeof v === 'boolean') { p.params[name] = !!on; applied = true; }
     }
-    p.setPassEnabled?.(name, on);
+    if (typeof p.setPassEnabled === 'function') { p.setPassEnabled(name, on); applied = true; }
+    if (!applied) console.warn(`[debug] setPass('${name}') matched no switch — try one of: ${Object.keys(p.q || {}).join(', ')}`);
     return this;
+  }
+
+  /** The pass switches that actually exist, and their current state. */
+  passes() {
+    const q = this.game.pipeline?.q;
+    if (!q) return null;
+    const out = {};
+    for (const k of Object.keys(q)) if (typeof q[k] === 'boolean') out[k] = q[k];
+    return out;
   }
 }
 

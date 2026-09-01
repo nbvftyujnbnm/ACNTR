@@ -201,7 +201,7 @@ const CLASSIFY = String.raw`
   const hide = (o) => { if (o.visible) { hidden.push(o); o.visible = false; } };
   // EVERY mech in frame, not just the player's. The combat pose's subject is a
   // spawned enemy AC and the boost pose's is the player; classifying only
-  // `game.player.root` silently scored the combat frame's mech as `world` and
+  // game.player.root silently scored the combat frame's mech as "world" and
   // made the two poses' numbers incomparable.
   const mechRoots = [game.player.root];
   for (const e of (game.enemies?.list || [])) if (e && e.root) mechRoots.push(e.root);
