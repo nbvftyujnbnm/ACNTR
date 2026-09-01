@@ -38,20 +38,18 @@
   const yaw = game.player.root.rotation.y;
   const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
   const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  const at = (ahead, side, up) => {
-    const v = p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
-    v.y += up;
-    return v;
-  };
-
-  const a = at(52, -14, 6);
-  const b = at(74, 22, 0);
-  const c = at(96, 4, 0);
-  const d = at(66, -30, 26);
-  debug.spawnEnemy('ac', a.x, a.y, a.z, 2);
-  debug.spawnEnemy('mt', b.x, b.y, b.z, 1);
-  debug.spawnEnemy('mt', c.x, c.y, c.z, 1);
-  debug.spawnEnemy('flyer', d.x, d.y, d.z, 1);
+  // Placed ON the terrain, not at the player's y plus a guess — ground that
+  // rises ahead buried the last set inside a hillside while the frustum test
+  // cheerfully reported all four as in frame.
+  const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
+  const a = at(52, -14);
+  const b = at(74, 22);
+  const c = at(96, 4);
+  const d = at(66, -30);
+  debug.spawnEnemyOnGround('ac', a.x, a.z, 2, 6);
+  debug.spawnEnemyOnGround('mt', b.x, b.z, 1, 0);
+  debug.spawnEnemyOnGround('mt', c.x, c.z, 1, 0);
+  debug.spawnEnemyOnGround('flyer', d.x, d.z, 1, 26);
 
   // Let the AI engage and close, but not long enough for anything to die.
   debug.step(2.0);

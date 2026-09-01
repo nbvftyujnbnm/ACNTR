@@ -246,34 +246,75 @@ export class Debug {
     const dir = new THREE.Vector3();
     let best = null;
 
+    const low = new THREE.Vector3();
     for (const sp of pts) {
       const g = ph.groundHeight?.(sp.x, sp.z);
       if (!isFinite(g)) continue;
       origin.set(sp.x, g + 5.5, sp.z); // roughly the mech's chest
+      low.set(sp.x, g + 1.8, sp.z);    // roughly its knees
 
       // Sweep whole-circle bearings, and for each, measure the WORST ray in a
       // forward arc. The worst ray is what actually blocks a shot; an average
       // would let one clear lane hide a wall filling the rest of the view.
+      //
+      // Rays are cast at TWO heights. Chest height alone scored a spot as
+      // 140 m clear when the mech was standing behind a knee-high lip it could
+      // not walk over — the pose reported 0 m/s with a completely open view.
       for (let b = 0; b < 16; b++) {
         const bearing = (b / 16) * Math.PI * 2;
         let worst = Infinity;
         for (let i = 0; i < rays; i++) {
           const a = bearing + (i / (rays - 1) - 0.5) * arc;
           dir.set(Math.sin(a), 0, Math.cos(a));
-          const h = ph.raycast(origin, dir, range);
-          worst = Math.min(worst, h && h.hit ? h.distance : range);
+          const hi = ph.raycast(origin, dir, range);
+          const lo = ph.raycast(low, dir, range);
+          worst = Math.min(
+            worst,
+            hi && hi.hit ? hi.distance : range,
+            lo && lo.hit ? lo.distance : range,
+          );
         }
+        if (worst < 25) continue;
+
+        // Rays clear terrain they pass OVER, so a spot can be ray-clear and
+        // still be a pit or a hillside. Walk the heightfield instead: the
+        // ground must not rise more than a couple of metres over the first
+        // 40 m, or the mech has nowhere to go and anything spawned ahead of it
+        // at ground level is buried in the slope.
+        const fx = Math.sin(bearing);
+        const fz = Math.cos(bearing);
+        let rise = 0;
+        for (let s = 5; s <= 40; s += 5) {
+          const gh = ph.groundHeight?.(sp.x + fx * s, sp.z + fz * s);
+          if (!isFinite(gh)) { rise = Infinity; break; }
+          rise = Math.max(rise, gh - g);
+        }
+        if (rise > 2.5) continue;
+
         // The rays point along (sin b, 0, cos b); the controller's forward is
         // (-sin yaw, 0, -cos yaw), so facing down that bearing is yaw = b + PI.
-        if (!best || worst > best.clear) {
-          best = { x: sp.x, z: sp.z, yaw: bearing + Math.PI, clear: worst };
+        const score = worst - rise * 8;
+        if (!best || score > best.score) {
+          best = { x: sp.x, z: sp.z, yaw: bearing + Math.PI, clear: worst, rise: +rise.toFixed(2), score };
         }
       }
     }
     if (!best) return null;
     this.placePlayerOnGround(best.x, best.z, best.yaw, 0.05);
-    this._lastOpenGround = { ...best, clear: +best.clear.toFixed(1) };
+    this._lastOpenGround = { ...best, clear: +best.clear.toFixed(1), score: +best.score.toFixed(1) };
     return this._lastOpenGround;
+  }
+
+  /**
+   * Spawn an enemy standing ON the terrain at (x, z) rather than at a y you
+   * guessed. Poses kept placing enemies at the player's own y plus an offset,
+   * which buries them in any ground that rises ahead — one review frame had
+   * four enemies inside a hillside and reported all four as "in frame".
+   */
+  spawnEnemyOnGround(archetype, x, z, tier = 1, above = 0) {
+    const g = this.game.physics?.groundHeight?.(x, z);
+    const y = isFinite(g) ? g + above : (this.game.player?.root?.position?.y ?? 0) + above;
+    return this.spawnEnemy(archetype, x, y, z, tier);
   }
 
   /**

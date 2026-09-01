@@ -26,19 +26,16 @@
   const yaw = game.player.root.rotation.y;
   const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
   const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  const at = (ahead, side, up) => {
-    const v = p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
-    v.y += up;
-    return v;
-  };
+  // Placed ON the terrain — see the note in gameplay.js.
+  const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
   const spots = [
-    ['ac', at(46, -16, 8), 3],
-    ['mt', at(68, 24, 0), 1],
-    ['mt', at(58, -34, 0), 1],
-    ['flyer', at(80, 30, 22), 2],
-    ['tank', at(98, 2, 0), 2],
+    ['ac', at(46, -16), 3, 8],
+    ['mt', at(68, 24), 1, 0],
+    ['mt', at(58, -34), 1, 0],
+    ['flyer', at(80, 30), 2, 22],
+    ['tank', at(98, 2), 2, 0],
   ];
-  for (const [kind, v, tier] of spots) debug.spawnEnemy(kind, v.x, v.y, v.z, tier);
+  for (const [kind, v, tier, up] of spots) debug.spawnEnemyOnGround(kind, v.x, v.z, tier, up);
   debug.step(2.0);
 
   // Boosting hard, so the speed readout and the movement-state chips are
