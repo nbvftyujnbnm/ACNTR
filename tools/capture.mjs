@@ -170,30 +170,50 @@ async function startServer() {
     // A single frame of the full level can take well over Playwright's 30s
     // default under SwiftShader, and a timeout here reads as a broken build
     // rather than a slow one.
-    await page.screenshot({ path: resolve(outDir, file), type: 'png', timeout: 180000 });
+    //
+    // A pose that still blows the budget must not take the review set with it.
+    // One CSS backdrop-filter over the canvas was enough to make the garage
+    // pose unscreenshottable, and an unhandled rejection there threw away six
+    // frames that had already been captured successfully — including the
+    // report.json that says what happened.
+    let shotFailed = null;
+    try {
+      await page.screenshot({ path: resolve(outDir, file), type: 'png', timeout: 180000 });
+    } catch (e) {
+      shotFailed = String(e.message || e).split('\n')[0].slice(0, 200);
+      console.error(`  FAILED ${file}: ${shotFailed}`);
+    }
     const stats = await page.evaluate(() => {
       try { return window.__ACNTR__.debug.stats(); } catch { return null; }
-    });
-    report.shots.push({ pose, file, stats, newErrors: consoleErrors.length - before });
-    console.log(`  captured ${file}${stats ? `  (${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps)` : ''}`);
+    }).catch(() => null);
+    const shot = { pose, file, stats, newErrors: consoleErrors.length - before };
+    if (shotFailed) shot.failed = shotFailed;
+    report.shots.push(shot);
+    if (!shotFailed) {
+      console.log(`  captured ${file}${stats ? `  (${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps)` : ''}`);
+    }
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
       try {
         window.__ACNTR__.debug
+          .silhouette({ on: false })
           .releaseCamera()
           .freeze(false)
           .setHudVisible(true)
           .resetState()
           .clearEnemies();
+        window.__ACNTR__.game?.closeGarage?.();
       } catch { /* noop */ }
-    });
+    }).catch(() => {});
   }
 
+  const failed = report.shots.filter((s) => s.failed);
+  report.failedShots = failed.map((s) => s.pose);
   report.consoleErrors = [...new Set(consoleErrors)].slice(0, 30);
   writeFileSync(resolve(outDir, 'report.json'), JSON.stringify(report, null, 2));
   console.log('\n' + JSON.stringify({ shots: report.shots.map((s) => s.file), errors: report.consoleErrors }, null, 2));
 
   await browser.close();
   server?.kill();
-  process.exit(report.consoleErrors.length ? 1 : 0);
+  process.exit(report.consoleErrors.length || failed.length ? 1 : 0);
 })();
