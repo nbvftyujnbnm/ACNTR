@@ -154,6 +154,7 @@ async function startServer() {
   for (const pose of poses) {
     const src = readFileSync(resolve(POSE_DIR, `${pose}.js`), 'utf8');
     const before = consoleErrors.length;
+    await page.evaluate(() => { delete window.__POSE_NOTE__; }).catch(() => {});
     try {
       await page.evaluate(src);
     } catch (e) {
@@ -182,12 +183,19 @@ async function startServer() {
     const stats = await page.evaluate(() => {
       try { return window.__ACNTR__.debug.stats(); } catch { return null; }
     }).catch(() => null);
+    // A pose can report what it actually managed to set up. A "gameplay" frame
+    // with no enemies in it, or a "boost" frame at 0 m/s, is worse than a
+    // failed shot: it looks fine and gets graded as though it showed the thing
+    // it was supposed to show. Both of those had happened.
+    const note = await page.evaluate(() => window.__POSE_NOTE__ ?? null).catch(() => null);
     const shot = { pose, file, stats, shotMs, newErrors: consoleErrors.length - before };
+    if (note) shot.note = note;
     if (shotFailed) shot.failed = shotFailed;
     report.shots.push(shot);
     if (!shotFailed) {
       console.log(`  captured ${file}  (${(shotMs / 1000).toFixed(1)}s${stats ? `, ${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps` : ''})`);
     }
+    if (note?.warning) console.error(`  [pose:${pose}] ${note.warning}`);
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
       try {
