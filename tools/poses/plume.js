@@ -34,7 +34,11 @@
   // to be facing — so the pose that exists to photograph the exhaust had the
   // body between the lens and the plumes, and the empty frame was very nearly
   // diagnosed as a rendering failure.
-  debug.cameraBehindPlayer({ back: 11.5, up: 3.4, side: 2.6, lookY: 4.6, fov: 38 });
+  // Three-quarter rear, not straight behind. A cone aimed at the lens projects
+  // as a small disc, and the shader weights alpha by fresnel so a head-on plume
+  // is its own dimmest view — the worst possible angle for the one frame whose
+  // job is to show it.
+  debug.cameraBehindPlayer({ back: 9.0, up: 3.2, side: 7.0, lookY: 5.4, fov: 40 });
   debug.setPass('motionBlur', false);
   debug.step(0.08);
 

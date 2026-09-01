@@ -544,18 +544,33 @@ export class MechFactory {
       hardpoints.cannon = hpC;
     }
 
-    // thruster anchors for VFX boost flames
+    // Thruster anchors for VFX boost flames.
+    //
+    // VFX fires a plume along the anchor's local +Z (`FlameHandle` reads
+    // matrixWorld's third basis vector). Every anchor used to be built with
+    // `rotation.x = Math.PI * 0.5`, which maps local +Z to WORLD DOWN — so the
+    // main nozzles blew a 3.6 m column straight down from 6 m up, through the
+    // mech's own torso and legs, where the depth test ate all of it. Measured:
+    // direction (0, -0.98, 0.20) from an anchor 6.05 m above the mech origin.
+    // That is why no plume has ever been visible on the player OR on any
+    // enemy, despite the flame layer itself being correct.
+    //
+    // Mechs face -Z, so an unrotated anchor already points +Z out the back:
+    // that is what a main nozzle wants. The verniers keep the downward
+    // orientation, which is what a lift jet wants.
     const thrusters = [];
-    const addThruster = (parent, arr) => {
+    const addThruster = (parent, arr, pitch) => {
       if (!arr) return;
       const o = new THREE.Object3D();
       o.position.fromArray(arr);
-      o.rotation.x = Math.PI * 0.5; // -Z points down the exhaust
+      o.rotation.x = pitch;
       parent.add(o);
       thrusters.push(o);
     };
-    addThruster(backpack, ba.nozzleL); addThruster(backpack, ba.nozzleR);
-    addThruster(backpack, ba.vernL); addThruster(backpack, ba.vernR);
+    // Mains first — Game._wirePlayerThrusters relies on that order to give them
+    // the larger radius and length.
+    addThruster(backpack, ba.nozzleL, 0); addThruster(backpack, ba.nozzleR, 0);
+    addThruster(backpack, ba.vernL, Math.PI * 0.5); addThruster(backpack, ba.vernR, Math.PI * 0.5);
 
     return { root, bones, hardpoints, materials: mats, thrusters, legType };
   }
