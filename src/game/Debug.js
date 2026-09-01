@@ -525,6 +525,13 @@ export class Debug {
       g.scene.fog = s.fog;
       renderer.toneMapping = s.toneMapping;
       renderer.setClearColor(s.clearColor, s.clearAlpha);
+      g.engine.timeScale = s.timeScale;
+      if (s.near != null) {
+        const cam = g.engine.camera;
+        cam.near = s.near;
+        cam.far = s.far;
+        cam.updateProjectionMatrix();
+      }
       for (const [obj, vis] of s.hidden) obj.visible = vis;
       for (const [mesh, mat] of s.materials) mesh.material = mat;
       for (const m of s.temp) m.dispose();
@@ -542,11 +549,19 @@ export class Debug {
       toneMapping: renderer.toneMapping,
       clearColor: new THREE.Color(),
       clearAlpha: renderer.getClearAlpha(),
+      timeScale: g.engine.timeScale,
       hidden: [],
       materials: [],
       temp: [],
     };
     renderer.getClearColor(s.clearColor);
+
+    // Freeze the simulation for the duration. Hiding the level takes the ground
+    // out from under the controller, so the mech free-falls — it was 16 m lower
+    // by the second capture and had left the frame the camera was fitted to,
+    // which presented as "the renderer draws nothing" for three runs. A shape
+    // test wants a static subject anyway.
+    g.engine.timeScale = 0;
 
     // Bypass the whole post stack. Bloom would eat into the shape's edge from
     // the white side and DOF would soften it, and both would do so by an amount
@@ -574,18 +589,39 @@ export class Debug {
       child.visible = false;
     }
 
+    // Solid chassis only. Trails, plumes, sprites and debug lines are hidden
+    // rather than blacked out: a silhouette test measures the machine, not its
+    // exhaust, and a Points cloud drawn black would both corrupt the shape and
+    // (because its bounding volume is far larger than the geometry it draws)
+    // drag the framing off the mech entirely.
     const black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false });
     s.temp.push(black);
+    const chassis = [];
     root.traverse((o) => {
-      if (!o.isMesh && !o.isSkinnedMesh) return;
-      s.materials.push([o, o.material]);
-      o.material = black;
+      if (o.isMesh || o.isSkinnedMesh) {
+        if (!o.visible) return;
+        s.materials.push([o, o.material]);
+        o.material = black;
+        chassis.push(o);
+      } else if (o.isPoints || o.isSprite || o.isLine || o.isLineSegments) {
+        s.hidden.push([o, o.visible]);
+        o.visible = false;
+      }
     });
 
     // Frame from the mech's own bounds so the shape lands at the same size in
     // every iteration, whatever the geometry underneath has done.
     root.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(root);
+    const box = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    for (const m of chassis) {
+      if (!m.geometry) continue;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      if (!m.geometry.boundingBox) continue;
+      meshBox.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+      box.union(meshBox);
+    }
+    if (box.isEmpty()) box.setFromObject(root);
     const centre = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const cam = g.engine.camera;
@@ -596,14 +632,56 @@ export class Debug {
     const distH = (spanH * 0.5 * pad) / (Math.tan(vFov * 0.5) * aspect);
     const dist = Math.max(distV, distH);
 
-    this.setCamera(
-      { x: centre.x + Math.sin(yaw) * dist, y: centre.y, z: centre.z + Math.cos(yaw) * dist },
-      { x: centre.x, y: centre.y, z: centre.z },
-      fov,
-    );
+    // The shape must not be clipped by a near/far tuned for gameplay ranges.
+    s.near = cam.near;
+    s.far = cam.far;
+    cam.near = Math.max(0.05, dist * 0.05);
+    cam.far = dist * 4 + size.length();
+    cam.updateProjectionMatrix();
 
+    const eye = {
+      x: centre.x + Math.sin(yaw) * dist,
+      y: centre.y,
+      z: centre.z + Math.cos(yaw) * dist,
+    };
+    this.setCamera(eye, { x: centre.x, y: centre.y, z: centre.z }, fov);
+    // Apply it now rather than waiting for a late-update: the sim is frozen, so
+    // there may not be another one before the mask is read.
+    this._applyCameraOverride(0, 0);
+
+    // Recorded so the audit tool can report the framing it actually got. An
+    // empty mask is otherwise indistinguishable between "the mech has no
+    // geometry", "the box is wrong" and "the camera override never applied",
+    // and guessing between those cost two runs.
+    s.framing = {
+      chassisMeshes: chassis.length,
+      sceneChildrenHidden: s.hidden.length,
+      boxMin: centre.clone().sub(size.clone().multiplyScalar(0.5)).toArray().map((n) => +n.toFixed(2)),
+      boxSize: size.toArray().map((n) => +n.toFixed(2)),
+      centre: centre.toArray().map((n) => +n.toFixed(2)),
+      dist: +dist.toFixed(2),
+      eye: [eye.x, eye.y, eye.z].map((n) => +n.toFixed(2)),
+      near: +cam.near.toFixed(2),
+      far: +cam.far.toFixed(2),
+    };
     this._silhouette = s;
     return this;
+  }
+
+  /**
+   * Where the camera actually ended up in silhouette mode, and what it is
+   * looking at. `camPos` is read live, so it also reveals whether the camera
+   * override survived the frame or something else moved the camera afterwards.
+   */
+  silhouetteInfo() {
+    if (!this._silhouette) return null;
+    const cam = this.game.engine.camera;
+    return {
+      ...this._silhouette.framing,
+      camPos: cam.position.toArray().map((n) => +n.toFixed(2)),
+      camFov: cam.fov,
+      overrideActive: !!this.cameraOverride,
+    };
   }
 
   /**

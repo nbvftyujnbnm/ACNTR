@@ -250,15 +250,22 @@ const shutdown = async (code) => {
   }
   await page.waitForTimeout(2500);
 
-  // Settle the rig into a neutral standing pose before shape-judging it.
-  await page.evaluate(() => {
+  // Settle the rig into a neutral standing pose before shape-judging it. This
+  // has to happen BEFORE silhouette mode, which freezes the simulation — the
+  // pose must be the one a player would see standing still, not a rag-doll
+  // caught mid-fall.
+  const placed = await page.evaluate(() => {
     const d = window.__ACNTR__.debug;
     d.setHudVisible(false);
     d.clearEnemies();
     d.resetState();
+    d.placePlayerAtSpawn(0, 0);
+    d.step(1.2);
     d.poseMech({ grounded: true, aimYaw: 0, aimPitch: 0, speed: 0 });
-    d.step(1.5);
+    d.step(0.4);
+    return d.game.player.root.position.toArray().map((n) => +n.toFixed(2));
   });
+  console.log(`mech standing at ${JSON.stringify(placed)}`);
 
   const results = [];
   for (const yaw of YAWS) {
@@ -272,7 +279,9 @@ const shutdown = async (code) => {
     await page.screenshot({ path: resolve(outDir, name), timeout: 180000 });
     const r = await page.evaluate(analyseInPage, { yawDeg: yaw, maskWidth: 512 });
     r.file = name;
+    r.framing = await page.evaluate(() => window.__ACNTR__.debug.silhouetteInfo());
     results.push(r);
+    if (r.error) console.log(`yaw ${String(yaw).padStart(4)}  ${r.error}  framing ${JSON.stringify(r.framing)}`);
 
     const bars = (r.widths || []).map((v) => '#'.repeat(Math.max(1, Math.round(v * 24)))).join('|');
     console.log(

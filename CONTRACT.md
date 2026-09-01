@@ -1078,3 +1078,44 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   heavily-veiled far-field regions (the 2 km ridges, the 300-800 m plain) move
   by several code values between any two frames taken at different times, even
   in the same build. Near-field regions reproduce to under 1%.
+- 2026-09-01 [tools] SILHOUETTE AUDIT — `node tools/silhouette.mjs [--out DIR]
+  [--yaws 0,45,90,135,180]`, backed by `debug.silhouette()` /
+  `debug.silhouetteMask()`. Renders the mech as a flat black shape on white
+  with the entire post stack bypassed, then scores it. This exists because
+  "does the silhouette read as an Armored Core" was argued from lit screenshots
+  three separate times and settled none of them — a lit render hands the eye
+  paint, panel lines and rim light to latch onto, and the shape underneath
+  never has to carry its own weight.
+  The metric that matters most is `openRows`: the fraction of occupied rows
+  containing two or more separate runs of mech, i.e. rows you can see sky
+  through. It deliberately does NOT require a gap to be enclosed, because the
+  single most important gap on a biped (between the legs) is open at the bottom
+  and an enclosed-hole count scores it zero. `fill` (mech pixels / bbox pixels)
+  is the blob detector; `complexity` is perimeter over the perimeter of an
+  equal-area disc; `widths` is a 12-band head-to-foot profile, which is how leg
+  taper becomes a number instead of an argument.
+  The targets in the tool's output are derived from the shape language REVIEW.md
+  describes, NOT measured from the real game — we cannot download AC6 frames in
+  this sandbox. Treat them as a floor to clear, not a score to hit.
+- 2026-09-01 [tools] The silhouette framing must be computed from CHASSIS
+  MESHES ONLY. `Box3.setFromObject(player.root)` includes the thruster Points
+  clouds and sprites parented to the mech, whose bounding volumes are far
+  larger than anything they draw; framing off that box pushed the mech low and
+  small in one view and completely out of frame in four others, which read as a
+  broken renderer rather than a bad box. `debug.silhouette()` now hides
+  Points/Sprite/Line children, unions only visible mesh geometry bounds, and
+  pins near/far around the fitted distance.
+- 2026-09-01 [tools] DO NOT EDIT ANYTHING UNDER `src/` WHILE A PROBE OR CAPTURE
+  IS RUNNING. `tools/probe.mjs` serves through the vite DEV server, so a source
+  edit triggers HMR, the page reloads out from under the in-flight
+  `page.evaluate`, and the promise never settles — the run hangs until its
+  timeout instead of failing. Cost this session: two ten-minute stalls.
+  `tools/capture.mjs` is immune (it builds and serves the immutable bundle
+  through `vite preview`) — this applies to probes and to `tools/silhouette.mjs`.
+- 2026-09-01 [tools] `tools/capture.mjs` no longer aborts the run when one pose
+  cannot be screenshotted. The garage pose blows Playwright's 180 s budget under
+  SwiftShader — a full-viewport `backdrop-filter: blur()` over the WebGL canvas
+  is the suspect — and the unhandled rejection discarded six frames that had
+  already been captured, report.json included. Failures are now recorded
+  per-pose as `shots[].failed`, listed in `report.failedShots`, and the run
+  continues and exits 1.

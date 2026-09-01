@@ -79,6 +79,32 @@ actionable defect list. 8+ in every category on every pose ends the loop.
 | 9 | Motion & speed | Does the boost frame read as fast | `boost` |
 | 10 | Performance | ≥50 fps target, <400 draw calls, <4M tris, zero console errors | `report.json` |
 
+### Category 1 has a measured half
+
+Silhouette is the one part of this rubric that does not have to be argued from
+a lit screenshot, and it should not be. Run:
+
+```bash
+node tools/silhouette.mjs --out shots/silNN
+```
+
+It renders the mech as a black shape on white with the post stack bypassed and
+scores the result. Grade category 1 against these numbers *as well as* the
+images, and quote them in the verdict:
+
+| Metric | Floor | What it catches |
+|---|---|---|
+| `fill` | 0.34–0.48 | mech pixels / bbox pixels. The blob detector. Above ~0.60 is a lump with limbs drawn on it. |
+| `openRows` | ≥ 0.35 | fraction of rows you can see sky through. The negative-space measure — an AC reads as struts and armour because of its holes. |
+| `holeCount` | ≥ 2 | fully enclosed sky: through a shoulder gantry, a knee linkage. Rarer and stronger than `openRows`. |
+| `complexity` | ≥ 2.2 | outline busyness vs. a disc of equal area. A smooth capsule scores low. |
+| `widths` | thigh band ≥ shin band | 12-band head-to-foot profile. On an AC the thigh is the widest part of the leg; if band 8 is under band 10 the proportion is inverted and the mech reads spindly. |
+
+These floors come from the shape language described above, **not** from
+measuring the real game — AC6 frames cannot be downloaded in this sandbox. They
+are a floor to clear, not a score to hit exactly. Clearing them is necessary for
+an 8, not sufficient: a shape can hit every number and still be ugly.
+
 ## Required verdict format
 
 ```
