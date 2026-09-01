@@ -1243,3 +1243,24 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   cascade — but that is a HYPOTHESIS, not a measurement. Check
   `renderer.info.render.calls` with shadows disabled before optimising
   anything; do not assume the cascades are the cause because it sounds right.
+- 2026-09-01 [tools] TWO POSE PRIMITIVES, AND THE MISTAKE THEY EXIST TO STOP.
+  `debug.placePlayerInOpenGround({arc, rays, range})` scores every level spawn
+  by how far a fan of rays reaches across a forward arc — keeping the WORST ray,
+  never the average, because one clear lane will otherwise hide a wall filling
+  the rest of the view — and returns the yaw it chose so a pose can spawn
+  enemies down it. `debug.visibleCount(entities)` raycasts from the camera to
+  each entity as well as frustum-testing it.
+  Both exist because the rewritten gameplay pose reported "4 of 4 enemies in
+  frame" for a shot in which all four were behind a warehouse. The mech had
+  been placed at a fixed coordinate that put it nose-first against a wall: it
+  reported 0.1 m/s while holding forward, and everything ahead of it was
+  occluded. BEING INSIDE THE FRUSTUM AND BEING VISIBLE ARE DIFFERENT QUESTIONS
+  — the same distinction that made the first hero framing scorer shoot the
+  inside of a wall. Any pose that needs to see something must check the second.
+- 2026-09-01 [tools] POSES CAN REPORT INTO report.json. Set `window.__POSE_NOTE__`
+  and `capture.mjs` folds it into that pose's entry; a `warning` field is also
+  printed to stderr. Use it for whatever the pose was supposed to establish —
+  enemies visible, speed reached, whether the mech is grounded. A "gameplay"
+  frame with no enemies, or a "boost" frame at 0 m/s, is WORSE than a failed
+  shot: it looks fine and gets graded as though it showed the thing it was
+  meant to show, and both of those had already happened here.
