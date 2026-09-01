@@ -111,7 +111,11 @@ export class Game {
     this.garage = new Garage(document.getElementById('ui-root'), this);
 
     step(0.97, 'audio');
-    this.audio = new AudioDirector(this.engine.camera);
+    // Pass the game explicitly. AudioDirector will fall back to
+    // window.__ACNTR__.game if we don't, but that global exists only because
+    // the debug hook installs it — the continuous engine, servo and alarm
+    // layers should not depend on a debug affordance to find the player.
+    this.audio = new AudioDirector(this.engine.camera, { game: this });
 
     this._wire();
     this._registerLoop();

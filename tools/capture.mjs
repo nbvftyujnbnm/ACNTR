@@ -31,6 +31,7 @@ const OUT_DIR = arg('out', 'shots/latest');
 const W = parseInt(arg('w', '1920'), 10);
 const H = parseInt(arg('h', '1080'), 10);
 const SETTLE = parseInt(arg('settle', '1100'), 10);
+const SHOT_TIMEOUT = parseInt(arg('shotTimeout', '180000'), 10);
 
 const POSE_DIR = resolve(ROOT, 'tools/poses');
 const allPoses = readdirSync(POSE_DIR)
@@ -170,20 +171,22 @@ async function startServer() {
     // frames that had already been captured successfully — including the
     // report.json that says what happened.
     let shotFailed = null;
+    const shotStart = Date.now();
     try {
-      await page.screenshot({ path: resolve(outDir, file), type: 'png', timeout: 180000 });
+      await page.screenshot({ path: resolve(outDir, file), type: 'png', timeout: SHOT_TIMEOUT });
     } catch (e) {
       shotFailed = String(e.message || e).split('\n')[0].slice(0, 200);
       console.error(`  FAILED ${file}: ${shotFailed}`);
     }
+    const shotMs = Date.now() - shotStart;
     const stats = await page.evaluate(() => {
       try { return window.__ACNTR__.debug.stats(); } catch { return null; }
     }).catch(() => null);
-    const shot = { pose, file, stats, newErrors: consoleErrors.length - before };
+    const shot = { pose, file, stats, shotMs, newErrors: consoleErrors.length - before };
     if (shotFailed) shot.failed = shotFailed;
     report.shots.push(shot);
     if (!shotFailed) {
-      console.log(`  captured ${file}${stats ? `  (${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps)` : ''}`);
+      console.log(`  captured ${file}  (${(shotMs / 1000).toFixed(1)}s${stats ? `, ${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps` : ''})`);
     }
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
