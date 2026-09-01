@@ -1226,3 +1226,20 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   in Garage to save/restore `q.dof`. There is no `setPassEnabled` on the
   pipeline despite `Debug.setPass` calling one; that debug affordance is
   partially inert for any pass whose params entry is not a bare boolean.
+- 2026-09-01 [perf] DRAW CALLS SCALE AT ~130 PER MECH AND THE BUDGET IS ALREADY
+  BLOWN. Measured across three poses in one session: hero (0 enemies) 328 calls
+  / 2.63 M tris; gameplay (4 enemies) 837 / 3.71 M; hud (5 enemies) 996 /
+  4.13 M. That is 127-134 draw calls per additional enemy, and REVIEW.md's
+  budget is under 400 calls and under 4 M triangles — both are exceeded at five
+  enemies, which is an ordinary wave, not a stress case.
+  What IS measured: the player mech is 66 meshes (counted directly by
+  `debug.silhouette()`, which enumerates chassis meshes). Roughly 15
+  independently animated parts times four material buckets accounts for that,
+  so the parts are probably already merged per-part-per-bucket and there is no
+  easy win there.
+  What is NOT measured, and should be before anyone acts on it: 66 meshes does
+  not explain 130 calls, so something is drawing each mech about twice. The
+  obvious suspect is the CSM cascades — every shadow caster is redrawn per
+  cascade — but that is a HYPOTHESIS, not a measurement. Check
+  `renderer.info.render.calls` with shadows disabled before optimising
+  anything; do not assume the cascades are the cause because it sounds right.
