@@ -65,8 +65,35 @@ const _moveOut = {
 // This scratch carries the converted position across that boundary.
 const _capsuleC = new THREE.Vector3();
 
-/** Nominal part stats used to normalise `loadout.derived` into multipliers. */
-const NOMINAL = { boostSpeed: 340, qbThrust: 400, enRecharge: 1650, enMax: 4000 };
+/**
+ * Nominal part stats used to normalise `loadout.derived` into multipliers.
+ *
+ * THESE MUST BE IN THE UNITS LOADOUT ACTUALLY EMITS, and they were not. Loadout
+ * computes `boostSpeed = K_BOOST * thrust / sqrt(weight)` and labels it m/s;
+ * the starter AC derives 45.2 m/s, 42.6 m/s of dash impulse and 617 EN/s. They
+ * were being divided by 340, 400 and 1650, so every ratio came out at 0.11-0.37
+ * and `statMul` clamped ALL THREE to their floors — 0.65 boost, 0.60 quick
+ * boost, 0.50 EN recharge. The consequences were not subtle:
+ *
+ *   - assault boost topped out at 95 * 0.65 = 61.8 m/s, measured, against a
+ *     tuned 95; ground boost, jump impulse and ascent were cut the same way
+ *   - quick boost fired at 60% strength permanently
+ *   - EN recharged at half rate
+ *   - and because every build saturated the clamp, NO booster or generator in
+ *     the parts DB could change any of it. The whole progression axis was dead
+ *     weight, which is the part a looter shooter cannot afford.
+ *
+ * They are now the starter AC's own derived values, so a starter build sits at
+ * exactly 1.0 and parts move it either way. If PartsDB is rebalanced these have
+ * to move with it — `_refreshDerived` warns when a multiplier saturates, which
+ * is the signature of this bug and would have caught it in seconds.
+ *
+ * `enMax` is deliberately NOT changed. It feeds `enScale`, which is a ratio
+ * against the reference pool rather than a clamped multiplier, and at 2325/4000
+ * it is operating exactly as intended. Retuning it is a balance decision, not a
+ * units fix.
+ */
+const NOMINAL = { boostSpeed: 45, qbThrust: 43, enRecharge: 615, enMax: 4000 };
 
 /**
  * Turn a part stat into a safe multiplier. The parts DB is authored by another
@@ -77,6 +104,31 @@ function statMul(value, nominal, lo, hi) {
   if (typeof value !== 'number' || !isFinite(value) || value <= 0) return 1;
   const m = value <= 3 ? value : value / nominal;
   return M.clamp(m, lo, hi);
+}
+
+const _warned = new Set();
+/**
+ * Shout when a loadout multiplier lands exactly on a clamp bound.
+ *
+ * A single build sitting on a bound is a legitimate extreme. But a bound is
+ * also what a units mismatch looks like, and that mismatch is invisible from
+ * inside the game — it does not throw, it just quietly makes the AC slower than
+ * it was tuned to be, and it makes every part in that slot interchangeable
+ * because they all saturate. All three of these were pinned for the life of the
+ * project before anyone measured. One line per multiplier, once.
+ */
+function warnIfSaturated(rows) {
+  for (const [name, mul, value, nominal, lo, hi] of rows) {
+    if (mul !== lo && mul !== hi) continue;
+    if (_warned.has(name)) continue;
+    _warned.add(name);
+    console.warn(
+      `[controller] loadout multiplier '${name}' is saturated at ${mul} ` +
+      `(derived ${Number(value).toFixed(2)} / nominal ${nominal} = ` +
+      `${(Number(value) / nominal).toFixed(3)}). If every build saturates here, ` +
+      `NOMINAL.${name} is in the wrong units and this stat is doing nothing.`,
+    );
+  }
 }
 
 const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
@@ -853,6 +905,11 @@ export class PlayerController {
     m.boost = statMul(d.boostSpeed, NOMINAL.boostSpeed, 0.65, 1.55);
     m.qb = statMul(d.qbThrust, NOMINAL.qbThrust, 0.6, 1.6);
     m.enRech = statMul(d.enRecharge, NOMINAL.enRecharge, 0.5, 1.8);
+    warnIfSaturated([
+      ['boost', m.boost, d.boostSpeed, NOMINAL.boostSpeed, 0.65, 1.55],
+      ['qb', m.qb, d.qbThrust, NOMINAL.qbThrust, 0.6, 1.6],
+      ['enRech', m.enRech, d.enRecharge, NOMINAL.enRecharge, 0.5, 1.8],
+    ]);
 
     const w = num(d.weight, 0);
     const ll = num(d.loadLimit, 0);

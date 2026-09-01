@@ -1165,3 +1165,37 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   0.07 rather than 0: an AC's thrusters idle, they do not extinguish, and that
   faint blue pilot flame is a large part of why a parked AC still reads as
   powered.
+- 2026-09-01 [player/loot] EVERY LOADOUT MULTIPLIER WAS PINNED AT ITS CLAMP
+  FLOOR. `PlayerController.NOMINAL` was not in the units `Loadout.derived`
+  emits. Loadout computes `boostSpeed = K_BOOST * thrust / sqrt(weight)` and
+  labels it m/s; the starter AC derives 45.2 m/s boost, 42.6 m/s of dash
+  impulse and 617 EN/s. Those were being divided by 340, 400 and 1650, giving
+  ratios of 0.133 / 0.107 / 0.374 — so `statMul` clamped all three to their
+  floors: 0.65 boost, 0.60 quick boost, 0.50 EN recharge.
+  Measured consequences: assault boost topped out at 95 * 0.65 = **61.8 m/s**
+  against a tuned 95; ground boost, jump impulse and ascent were cut by the
+  same 0.65; quick boost fired at 60% strength permanently; EN recharged at
+  half rate. And because EVERY build saturated the clamp, no booster or
+  generator in the parts DB could move any of it — the entire progression axis
+  was inert, which is the part a looter shooter cannot afford.
+  NOMINAL is now the starter AC's own derived values (45 / 43 / 615), so a
+  starter build sits at exactly 1.0 and parts move it either way. Re-measured
+  after the fix: assault boost reaches **95.5 m/s** at ramp 1.0, ~1.3 s from a
+  standing start.
+  `NOMINAL.enMax` was deliberately left at 4000. It feeds `enScale`, which is a
+  ratio rather than a clamped multiplier and at 2325/4000 is working as
+  intended; retuning it is a balance decision, not a units fix.
+  IF PARTSDB IS REBALANCED, THESE MUST MOVE WITH IT. `_refreshDerived` now
+  calls `warnIfSaturated()`, which logs once per multiplier when one lands on a
+  clamp bound — the signature of exactly this bug, and it would have caught it
+  in seconds. Do not silence that warning by widening the clamps.
+- 2026-09-01 [tools] THE HARNESS WAS LEAKING A SERVER PER RUN, and it presented
+  as "everything is mysteriously slow". `spawn('npx', ['vite', ...])` creates
+  npx -> sh -c -> node vite, and `child.kill()` signals only the npx wrapper, so
+  the real server outlived every capture, probe and silhouette run. Seven had
+  accumulated in one session, each holding a port and competing for the CPU
+  SwiftShader needs; a four-second `vite build` was taking minutes and two runs
+  were misdiagnosed as hangs before anyone counted the processes. `tools/server.mjs`
+  now owns spawning: detached process group, `process.kill(-pid)`, and reaping
+  on exit/SIGINT/uncaughtException. capture, probe and silhouette all use it.
+  If you add a tool that spawns a server, use it too.
