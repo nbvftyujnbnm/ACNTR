@@ -911,7 +911,22 @@ export class RenderPipeline {
     const speed = cs?.speed || 0;
     const assault = cs?.assaultBoost ? 1 : 0;
     const boosting = cs?.boosting ? 1 : 0;
-    const speedNorm = clamp((speed - 55) / 170, 0, 1);
+    // MEASURED BUG, and it is why the boost pose had no speed cues at all.
+    // This used to be `(speed - 55) / 170`, i.e. it reached full strength at
+    // 225 m/s — a speed the movement model cannot produce. PlayerController's
+    // tuning table caps assault boost at `assaultMax` 95 m/s and hard-clamps
+    // everything at `maxSpeed` 145, so the old range delivered speedNorm 0.235
+    // at the game's actual top speed and the radial blur term
+    // (`uRadial = d.speed * 0.055`) topped out at 0.013 — under two pixels of
+    // stretch at the frame corner. The one term in the pipeline whose job is to
+    // say "90 m/s" was permanently at a quarter throttle.
+    //
+    // The band is now the one the movement model actually occupies: 30 m/s is
+    // just under ground boost (`boostSpeed` 34), 95 is assault-boost terminal,
+    // so an assault boost reaches 1.0 and a ground boost sits near zero. The
+    // 30% scale on the non-assault branch keeps quick boosts (55-78 m/s) as a
+    // flick rather than a sustained smear.
+    const speedNorm = clamp((speed - 30) / 65, 0, 1);
     d.speedT = assault ? speedNorm : speedNorm * 0.30 * boosting;
 
     // ---- autofocus ---------------------------------------------------------
@@ -1000,7 +1015,16 @@ export class RenderPipeline {
 
     const f = this.mFinal.uniforms;
     f.uExposure.value = p.exposure * (1 + flicker + hitFlash);
-    f.uChromatic.value = p.chromatic.amount + d.crit * 3.4 + d.hit * 5.0 + d.speed * 1.8;
+    // The speed coefficient came down 1.8 -> 0.95 in the same pass that fixed
+    // `speedNorm` above. It was written against a term that could only ever
+    // reach 0.235, so it was really a 0.42 fringe; left at 1.8 with a corrected
+    // normalisation an assault boost would run uChromatic at 2.14, which is
+    // 3.0 texels of per-channel offset at the frame corner — a 6 px rainbow
+    // outline on every edge out there, the exact defect `chromatic.amount` was
+    // cut from 0.85 to 0.34 to remove. At 0.95 a full assault boost reaches
+    // 1.29, i.e. 1.8 texels: an unmistakable prismatic edge stretch in the
+    // corners that still never separates into three legible fringes.
+    f.uChromatic.value = p.chromatic.amount + d.crit * 3.4 + d.hit * 5.0 + d.speed * 0.95;
     f.uVignette.value = p.vignette.amount + d.crit * 0.10;
     f.uDamage.value = clamp(d.crit * 0.55 + d.hit * 0.65, 0, 1);
     f.uGrain.value = p.grain.amount * (1 + d.crit * 1.4);

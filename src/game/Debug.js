@@ -495,6 +495,164 @@ export class Debug {
     };
   }
 
+  /**
+   * Render the mech as a flat black shape on white, framed to a fixed size.
+   *
+   * This exists because "does the silhouette read as an Armored Core" had been
+   * argued three times from screenshots and settled none of them. A lit render
+   * hides the answer: paint, panel lines and rim light all give the eye things
+   * to latch onto that a black shape does not. Strip those away and the
+   * question becomes measurable — see tools/silhouette.mjs, which counts the
+   * enclosed sky-gaps, the fill ratio and the width profile down the body.
+   *
+   * The framing is derived from the mech's own bounding box rather than a fixed
+   * camera, so the numbers stay comparable across iterations that change the
+   * mech's size. Everything is restored by `silhouette({ on: false })`.
+   *
+   * @param {{on?:boolean, yaw?:number, fov?:number, pad?:number}} [opts]
+   */
+  silhouette({ on = true, yaw = 0, fov = 26, pad = 1.14 } = {}) {
+    const g = this.game;
+    const root = g.player?.root;
+    const renderer = g.engine?.renderer;
+    if (!root || !renderer) return this;
+
+    if (!on) {
+      const s = this._silhouette;
+      if (!s) return this;
+      if (s.pipelineRender) g.pipeline.render = s.pipelineRender;
+      g.scene.background = s.background;
+      g.scene.fog = s.fog;
+      renderer.toneMapping = s.toneMapping;
+      renderer.setClearColor(s.clearColor, s.clearAlpha);
+      for (const [obj, vis] of s.hidden) obj.visible = vis;
+      for (const [mesh, mat] of s.materials) mesh.material = mat;
+      for (const m of s.temp) m.dispose();
+      this._silhouette = null;
+      this.releaseCamera();
+      return this;
+    }
+
+    if (this._silhouette) this.silhouette({ on: false });
+
+    const s = {
+      pipelineRender: null,
+      background: g.scene.background,
+      fog: g.scene.fog,
+      toneMapping: renderer.toneMapping,
+      clearColor: new THREE.Color(),
+      clearAlpha: renderer.getClearAlpha(),
+      hidden: [],
+      materials: [],
+      temp: [],
+    };
+    renderer.getClearColor(s.clearColor);
+
+    // Bypass the whole post stack. Bloom would eat into the shape's edge from
+    // the white side and DOF would soften it, and both would do so by an amount
+    // that varies with the framing — which is exactly the measurement noise
+    // this mode exists to remove.
+    if (g.pipeline?.render) {
+      s.pipelineRender = g.pipeline.render;
+      g.pipeline.render = () => {
+        renderer.setRenderTarget(null);
+        renderer.clear();
+        renderer.render(g.scene, g.engine.camera);
+      };
+    }
+
+    const WHITE = new THREE.Color(1, 1, 1);
+    g.scene.background = WHITE;
+    g.scene.fog = null;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.setClearColor(WHITE, 1);
+
+    // Only the mech. Sky domes, terrain and props are all top-level children.
+    for (const child of g.scene.children) {
+      if (child === root) continue;
+      s.hidden.push([child, child.visible]);
+      child.visible = false;
+    }
+
+    const black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false });
+    s.temp.push(black);
+    root.traverse((o) => {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      s.materials.push([o, o.material]);
+      o.material = black;
+    });
+
+    // Frame from the mech's own bounds so the shape lands at the same size in
+    // every iteration, whatever the geometry underneath has done.
+    root.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(root);
+    const centre = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const cam = g.engine.camera;
+    const aspect = cam.aspect || 16 / 9;
+    const vFov = (fov * Math.PI) / 180;
+    const distV = (size.y * 0.5 * pad) / Math.tan(vFov * 0.5);
+    const spanH = Math.max(size.x, size.z);
+    const distH = (spanH * 0.5 * pad) / (Math.tan(vFov * 0.5) * aspect);
+    const dist = Math.max(distV, distH);
+
+    this.setCamera(
+      { x: centre.x + Math.sin(yaw) * dist, y: centre.y, z: centre.z + Math.cos(yaw) * dist },
+      { x: centre.x, y: centre.y, z: centre.z },
+      fov,
+    );
+
+    this._silhouette = s;
+    return this;
+  }
+
+  /**
+   * Read the current silhouette back as a binary mask.
+   *
+   * Renders to an offscreen target rather than scraping the canvas: the
+   * drawing buffer is not guaranteed to survive to the next task, so canvas
+   * readback returns whatever the compositor left behind. Aspect is matched to
+   * the live camera so the mask frames exactly like the screenshot beside it.
+   *
+   * @param {number} [width]
+   * @returns {{w:number,h:number,mask:Uint8Array}|null} 1 = mech, 0 = background
+   */
+  silhouetteMask(width = 512) {
+    const g = this.game;
+    const renderer = g.engine?.renderer;
+    if (!renderer || !this._silhouette) return null;
+
+    const cam = g.engine.camera;
+    const w = Math.max(64, Math.round(width));
+    const h = Math.max(64, Math.round(w / (cam.aspect || 16 / 9)));
+
+    const rt = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      colorSpace: THREE.NoColorSpace,
+    });
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(g.scene, cam);
+
+    const buf = new Uint8Array(w * h * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
+    renderer.setRenderTarget(prevTarget);
+    rt.dispose();
+
+    // readRenderTargetPixels returns bottom-up; flip so row 0 is the top of the
+    // frame and the width profile reads head-to-foot.
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const src = (h - 1 - y) * w;
+      for (let x = 0; x < w; x++) {
+        mask[y * w + x] = buf[(src + x) * 4] < 128 ? 1 : 0;
+      }
+    }
+    return { w, h, mask };
+  }
+
   /** Toggle individual post passes so a critic can isolate what a pass costs. */
   setPass(name, on) {
     const p = this.game.pipeline;

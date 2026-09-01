@@ -603,8 +603,14 @@ export const MECH_DIMS = {
   waistY: 4.35,    // torso bone origin
   shoulderY: 6.07, // waistY + buildCore's shoulder anchor
   neckY: 7.07,     // waistY + buildCore's neck anchor (top of the neck column)
-  hipX: 0.72,
-  footX: 1.02,
+  // Hip pivots sit 8 cm further outboard than they used to (0.72). The thigh
+  // block is the widest part of the leg now, and it had to grow OUTBOARD:
+  // growing it inboard would have eaten the gap between the legs, which is the
+  // one hole this silhouette has always had. `footX` went out with it so the
+  // stance keeps its splay — the legs still angle out from hip to sole, which
+  // is what turns that gap into a wedge that stays open at a 3/4 camera.
+  hipX: 0.80,
+  footX: 1.14,
   // Shoulder PIVOT, not the outer edge of the shoulder. The arm's own armour
   // reaches ~0.33 m outboard of this and the pauldron caps it at ~1.61, so the
   // frame measures 3.2 m across the shoulders — 36% of its 9 m height. It used
@@ -1054,17 +1060,20 @@ export function buildPelvis(o = {}) {
   // where the frame's mass has to visibly transfer into the legs; at 1.24 it was
   // narrower than the waist block sitting on top of it, which is why the whole
   // middle of the mech read as a taper down to nothing.
-  b.box('armor', MASK.BASE, 1.42, 0.62, 1.06, 0.055, 0, 0.02, 0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
-  b.box('mech', MASK.TRIM, 1.58, 0.32, 0.80, 0.035, 0, -0.14, 0);
+  b.box('armor', MASK.BASE, 1.52, 0.62, 1.06, 0.055, 0, 0.02, 0, 0, 0, 0, { taperX: 0.9, taperZ: 0.92 });
+  b.box('mech', MASK.TRIM, 1.68, 0.32, 0.80, 0.035, 0, -0.14, 0);
 
   for (let s = -1; s <= 1; s += 2) {
-    // hip actuator housing
-    axleJoint(b, 'mech', MASK.TRIM, s * hx, -0.10, 0, 0.26, 0.36, 14);
-    b.addM('armor', MASK.BASE, chamferCyl(0.30, 0.26, 0.22, 14, 0.03),
-      _m.compose(_pv.set(s * (hx + 0.02), -0.10, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+    // Hip actuator housing. Tighter than it was (0.26/0.30) because the thigh
+    // no longer reaches up to meet it: there is a 22 cm horizontal slot of
+    // daylight between this housing and the top of the thigh block, and a fat
+    // housing simply fills the hole back in. See buildThigh.
+    axleJoint(b, 'mech', MASK.TRIM, s * hx, -0.10, 0, 0.22, 0.34, 14);
+    b.addM('armor', MASK.BASE, chamferCyl(0.26, 0.23, 0.20, 14, 0.03),
+      _m.compose(_pv.set(s * (hx + 0.03), -0.10, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
     // skirt plates: front and rear, angled outward
     b.addM('armor', MASK.BASE, plate(beveledRectShape(0.60, 0.80, { bl: 0.22, br: 0.22 }), 0.11, 0.028),
-      _m.compose(_pv.set(s * 0.46, -0.36, -0.54), _q.setFromEuler(_e.set(0.18, s * 0.22, 0)), _sc.set(1, 1, 1)));
+      _m.compose(_pv.set(s * 0.50, -0.36, -0.54), _q.setFromEuler(_e.set(0.18, s * 0.22, 0)), _sc.set(1, 1, 1)));
     // Hardware ON the front skirt. This is the largest unbroken plate on the
     // whole frame and it hangs clear of the hip cavity, so it is the one surface
     // the sky can reach unoccluded — measured at 129,127,129 in the hero frame
@@ -1076,7 +1085,7 @@ export function buildPelvis(o = {}) {
     if (d) {
       _q.setFromEuler(_e.set(0.18, s * 0.22, 0)); _sc.set(1, 1, 1);
       const onSkirt = (bucket, mask, geo, lx, ly) => {
-        _pv.set(s * 0.40, -0.34, -0.50);
+        _pv.set(s * 0.44, -0.34, -0.50);
         _m.compose(_pv, _q, _sc);
         _mr.makeTranslation(lx, ly, -0.072);
         _m.multiply(_mr);
@@ -1090,7 +1099,7 @@ export function buildPelvis(o = {}) {
       onSkirt('mech', MASK.TRIM, chamferBox(0.30, 0.05, 0.04, 0.010), 0, -0.22);
     }
     b.addM('armor', MASK.BASE, plate(beveledRectShape(0.56, 0.72, { bl: 0.20, br: 0.20 }), 0.11, 0.028),
-      _m.compose(_pv.set(s * 0.50, -0.32, 0.52), _q.setFromEuler(_e.set(-0.16, s * -0.20, 0)), _sc.set(1, 1, 1)));
+      _m.compose(_pv.set(s * 0.54, -0.32, 0.52), _q.setFromEuler(_e.set(-0.16, s * -0.20, 0)), _sc.set(1, 1, 1)));
     // hip thruster: nozzle rearward + emissive core
     _q.setFromEuler(_e.set(Math.PI * 0.5 + 0.28, 0, 0));
     _pv.set(s * (hx + 0.10), 0.10, 0.42); _sc.set(1, 1, 1);
@@ -1098,7 +1107,7 @@ export function buildPelvis(o = {}) {
     b.addM('mech', MASK.TRIM, nozzle(0.10, 0.17, 0.20, 14), _m);
     _pv.set(s * (hx + 0.10), 0.115, 0.46); _m.compose(_pv, _q, _sc);
     b.addM('glow', MASK.BASE, chamferCyl(0.105, 0.10, 0.03, 14, 0.008), _m);
-    if (d) boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.62, 0.02, 0, 0.18, 6, 0.024, 0.018);
+    if (d) boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.68, 0.02, 0, 0.18, 6, 0.024, 0.018);
   }
 
   if (d) {
@@ -1338,39 +1347,83 @@ export function buildThigh(o = {}) {
   const L = MECH_DIMS.thigh;
   const b = new GeoBuilder(rng);
 
-  // Hip joint housing. Width here is capped by the ARM, not by taste: the hands
-  // hang past this and the measured rest-pose clearance is only a few cm. Depth
-  // is free, so most of the added mass goes into Z.
-  axleJoint(b, 'mech', MASK.TRIM, 0, 0, 0, 0.32, 0.56, 16);
-  b.box('armor', MASK.BASE, 0.88, 0.54, 1.00, 0.055, 0, -0.18, 0, 0, 0, 0, { taperX: 0.94 });
+  // -----------------------------------------------------------------------
+  // HIP YOKE — and the daylight slot under the pelvis.
+  //
+  // The thigh no longer reaches the pelvis. Its armour starts 48 cm below the
+  // hip pivot and hangs off a narrow neck under a slim axle, so a ~26 cm
+  // horizontal slot runs right through the hip with nothing in it but the
+  // axle, the neck and two exposed rams.
+  //
+  // A HORIZONTAL slot is the only kind of negative space that survives a 3/4
+  // camera. A vertical gap between two masses of depth `d` closes as soon as
+  // the camera swings, because each mass sweeps `d * sin(az)` of extra screen
+  // width — at the review's 35 degree hero azimuth a 1 m deep mass eats 57 cm
+  // of gap, and nothing on this frame has 57 cm to give. Yaw cannot change a
+  // height, so a slot cut in Y stays exactly as open at 35 degrees as it is
+  // head-on. Both legs carry it at the SAME height on purpose: the sight line
+  // through the near hip exits through the far one, so what is behind the hole
+  // is sky rather than the other leg.
+  const TOP = -0.48;                 // top face of the thigh block, thigh-local
+  axleJoint(b, 'mech', MASK.STEEL, 0, -0.05, 0, 0.21, 0.66, 16);
+  b.box('mech', MASK.TRIM, 0.42, 0.52, 0.58, 0.035, 0, -0.26, 0.02);
+  // The rams are the connective structure that justifies the hole: they read as
+  // detail at 200 m and as hip actuators up close.
+  piston(b, s * 0.29, 0.02, -0.30, s * 0.23, TOP - 0.16, -0.42, 0.052);
+  piston(b, s * 0.29, 0.02, 0.32, s * 0.23, TOP - 0.16, 0.44, 0.052);
 
-  // main thigh mass
-  b.box('armor', MASK.BASE, 0.90, L * 0.76, 1.04, 0.06, 0, -L * 0.50, rev ? 0.06 : -0.02, 0, 0, 0,
-    { taperX: rev ? 1.06 : 0.86, taperZ: rev ? 1.02 : 0.88 });
-  // outer / front armour plates
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.60, L * 0.60, { tl: 0.20, tr: 0.20, bl: 0.12, br: 0.12 }), 0.12, 0.03),
-    _m.compose(_pv.set(0, -L * 0.48, (rev ? 0.52 : -0.48)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
-  // OUTBOARD plate. Pulled in from 0.44/0.12 (outer face 1.22 in torso space):
-  // that put the top corner of this plate 9-13 cm inside the forearm at the rest
-  // pose, so the hands were buried in the thighs in every standing frame. At
-  // 0.36/0.11 its outer face is 1.135 and the thigh's own box is the widest thing
-  // on the leg again, which is also 8 cm more daylight between arm and leg.
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.52, L * 0.52, { tl: 0.18, bl: 0.18, tr: 0.10, br: 0.10 }), 0.11, 0.03),
-    _m.compose(_pv.set(s * 0.36, -L * 0.46, 0), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
+  // --- MAIN THIGH BLOCK --------------------------------------------------
+  // The widest part of the whole leg, and it is meant to be: an AC's upper leg
+  // is a slab, not a rod. It was 0.90 m across against a 1.22 m shin, i.e. the
+  // limb tapered the wrong way and read as a spindly toy. It is 1.00 m across
+  // at the hip now, wider than the 1.06 m shin is deep and 6 cm wider than the
+  // shin, and the taper runs the right way (wide at the hip, narrow at the
+  // knee).
+  //
+  // The OUTBOARD budget is set by the hanging forearm, not by taste. With the
+  // hip pivot at 0.80 the block's outer face is 1.30 in torso space, and the
+  // forearm's inner face at the same height is 1.37 (rest roll 0.13). That
+  // 7 cm is not slack — it is a deliberate sky gap between arm and thigh, and
+  // it is the second hole this silhouette gained. Re-run the arm/leg clearance
+  // check in any tool that measures it before widening this further.
+  b.box('armor', MASK.BASE, 0.94, 1.22, 1.20, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.06, 0, 0, 0,
+    { taperX: 1.06, taperZ: rev ? 0.92 : 0.80 });
+  // front / rear armour plate over the block
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.66, 1.00, { tl: 0.22, tr: 0.22, bl: 0.14, br: 0.14 }), 0.12, 0.03),
+    _m.compose(_pv.set(0, TOP - 0.60, (rev ? 0.66 : -0.54)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+  // Outboard cheek, stepped off the block face so the widest plane on the leg
+  // is broken by a shadow line rather than presenting one flat slab to the key.
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.56, 0.86, { tl: 0.20, bl: 0.20, tr: 0.12, br: 0.12 }), 0.06, 0.026),
+    _m.compose(_pv.set(s * 0.47, TOP - 0.56, 0.04), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
 
-  // knee actuator arm + hydraulics
+  // --- KNEE ---------------------------------------------------------------
+  // The block stops 15 cm above the knee pivot, which opens a second horizontal
+  // slot at exactly the height the shin's own cap stops below. The axle crosses
+  // it in the middle (z +-0.17) and the actuator crosses it at the back, so the
+  // hole is a pair of windows fore and aft of the joint — you see the mechanism
+  // AND you see sky through it.
   const kz = rev ? -0.34 : 0.34;
-  piston(b, s * 0.0, -0.30, kz * 0.7, 0, -L + 0.22, kz, 0.070);
-  b.box('mech', MASK.TRIM, 0.44, 0.34, 0.30, 0.03, 0, -L + 0.12, kz * 0.9);
-  axleJoint(b, 'mech', MASK.TRIM, 0, -L, 0, 0.26, 0.60, 14);
+  piston(b, s * 0.0, TOP - 0.30, kz * 0.7, 0, -L + 0.10, kz, 0.070);
+  b.box('mech', MASK.TRIM, 0.46, 0.34, 0.32, 0.03, 0, TOP - 0.98, kz * 0.94);
+  // Knee FORK: two cheeks either side of the shin's axle instead of one drum
+  // straddling it, so the joint reads as a hinge and the middle stays open.
+  for (let i = -1; i <= 1; i += 2) {
+    b.addM('mech', MASK.STEEL, ring(0.10, 0.23, 0.10, 14, 0.02),
+      _m.compose(_pv.set(i * 0.28, -L, 0), _q.setFromEuler(_e.set(0, 0, Math.PI * 0.5)), _sc.set(1, 1, 1)));
+  }
 
   if (d) {
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.42, -L * 0.5, 0, 0.7, L * 0.5, rng, { cols: 3, rows: 3, depth: 0.035, fill: 0.6 });
-    greebleFace(b, 'armor', MASK.BASE, rev ? 'nz' : 'pz', 0, -L * 0.5, rev ? -0.44 : 0.44, 0.6, L * 0.5, rng, { cols: 3, rows: 3, depth: 0.04, accent: 0.04 });
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.50, TOP - 0.60, 0.06, 0.72, 0.86, rng, { cols: 3, rows: 3, depth: 0.035, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, rev ? 'nz' : 'pz', 0, TOP - 0.60, rev ? -0.44 : 0.54, 0.62, 0.90, rng, { cols: 3, rows: 3, depth: 0.04, accent: 0.04 });
+    // Cable loom bridging the hip slot, and a second one down to the knee. A
+    // hole in a silhouette only reads as engineering if something crosses it.
     b.addM('mech', MASK.TRIM, cable([
-      [s * 0.20, -0.16, kz * 0.8], [s * 0.26, -L * 0.5, kz * 1.05], [s * 0.18, -L + 0.14, kz * 0.9],
+      [s * 0.14, -0.02, 0.30], [s * 0.30, -0.30, 0.44], [s * 0.24, TOP - 0.18, 0.52],
+    ], 0.040, 10, 6), null);
+    b.addM('mech', MASK.TRIM, cable([
+      [s * 0.22, TOP - 0.20, kz * 0.9], [s * 0.28, TOP - 0.70, kz * 1.12], [s * 0.18, -L + 0.12, kz * 0.96],
     ], 0.042, 10, 6), null);
-    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.30, 0, 0, 0.22, 8, 0.026, 0.018);
+    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.22, -0.05, 0, 0.16, 6, 0.024, 0.016);
   }
   return { b, anchors: { knee: [0, -L, 0] } };
 }
@@ -1383,54 +1436,64 @@ export function buildShin(o = {}) {
   const L = MECH_DIMS.shin;
   const b = new GeoBuilder(rng);
 
-  // THE LOWER LEG CARRIES THE WEIGHT OF THE READ.
-  // At 0.94 across the shroud and 0.96 across the skirts this was 10.5% of the
-  // mech's height, against a chest 21% wide — from hero distance the frame read
-  // tall and spindly, like a figure on stilts, no matter how good the close-up
-  // detail was. AC bipeds run their lower leg at 14-16% of height. Everything
-  // here is up 15-25%, which lands the shin at 1.32 m across (14.7%) and the sole
-  // at 1.49 m. None of it can touch the arms: the hands bottom out at y 2.91 and
-  // the shin's top is 2.10, so the lower leg is the one place on the frame where
-  // mass is free.
-  // knee cap
-  b.box('armor', MASK.ACCENT, 0.74, 0.48, 0.66, 0.05, 0, -0.10, rev ? 0.26 : -0.26, 0, 0, 0, { taperZ: 0.9 });
-  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.19, 0.78, 14);
+  // THE LOWER LEG NO LONGER CARRIES THE WHOLE READ.
+  // It was 1.22 m across against a 0.90 m thigh — the limb tapered the wrong
+  // way and the frame read spindly at the top of the leg and clubbed at the
+  // bottom. AC legs run the other way round: a slab thigh, a slightly narrower
+  // shin, a splayed foot. The shin is 1.02 m across now and it did NOT lose
+  // mass doing it — the 20 cm came off X and went into Z (skirt depth 0.86 ->
+  // 1.02, shroud 0.24 -> 0.32), which is the cheaper axis anyway: at the
+  // review's 35 degree hero azimuth depth contributes sin(35) = 0.57 of itself
+  // to the screen width, so 16 cm of extra depth buys back 9 cm of the 20.
+  //
+  // The masses also stop 24 cm short of the ankle pivot and 10 cm short of the
+  // knee pivot. Those two horizontal bands, plus the hip band in buildThigh,
+  // are the negative space: three see-through slots per leg that a 3/4 camera
+  // cannot close, because yaw does not change a height.
+  const BOT = -L + 0.34;             // bottom face of the shin masses
+  // knee cap — dropped clear of the thigh block's underside
+  b.box('armor', MASK.ACCENT, 0.72, 0.48, 0.66, 0.05, 0, -0.26, rev ? 0.26 : -0.26, 0, 0, 0, { taperZ: 0.9 });
+  axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.17, 0.60, 14);
 
   // structural shin core
-  b.box('mech', MASK.TRIM, 0.70, L * 0.86, 0.74, 0.045, 0, -L * 0.50, 0);
+  b.box('mech', MASK.TRIM, 0.62, 1.16, 0.92, 0.045, 0, BOT + 0.58, 0);
 
   // LARGE armour shroud — the dominant leg silhouette element
-  const shroudZ = rev ? 0.48 : -0.46;
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(1.10, L * 0.92, { tl: 0.32, tr: 0.32, bl: 0.24, br: 0.24 }), 0.24, 0.05),
-    _m.compose(_pv.set(0, -L * 0.48, shroudZ), _q.setFromEuler(_e.set(rev ? -0.06 : 0.06, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
-  // side skirts wrapping the shroud
+  const shroudZ = rev ? 0.50 : -0.48;
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(1.00, 1.20, { tl: 0.30, tr: 0.30, bl: 0.22, br: 0.22 }), 0.32, 0.05),
+    _m.compose(_pv.set(0, BOT + 0.60, shroudZ), _q.setFromEuler(_e.set(rev ? -0.06 : 0.06, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+  // side skirts wrapping the shroud — narrower across, deeper fore-and-aft
   for (let i = -1; i <= 1; i += 2) {
-    b.box('armor', MASK.BASE, 0.20, L * 0.84, 0.86, 0.045, i * 0.50, -L * 0.50, shroudZ * 0.35, 0, 0, i * -0.05,
-      { taperX: 0.8, taperZ: 0.86 });
+    b.box('armor', MASK.BASE, 0.18, 1.16, 1.02, 0.045, i * 0.42, BOT + 0.58, shroudZ * 0.30, 0, 0, i * -0.05,
+      { taperX: 0.82, taperZ: 0.88 });
   }
-  b.box('armor', MASK.TRIM, 0.78, L * 0.5, 0.34, 0.04, 0, -L * 0.44, -shroudZ * 0.78);
+  b.box('armor', MASK.TRIM, 0.72, 0.80, 0.42, 0.04, 0, BOT + 0.66, -shroudZ * 0.76);
 
-  // ankle piston cluster
+  // --- ANKLE ------------------------------------------------------------
+  // Everything above stops at BOT; the foot's own block starts 17 cm lower, so
+  // the ankle is an open cage of an axle and three rams rather than a filled
+  // taper. Same trick as the hip and the knee, and the three slots land at
+  // three different heights so the leg reads as jointed rather than sliced.
   for (let i = -1; i <= 1; i += 2) {
-    piston(b, i * 0.20, -L * 0.42, shroudZ * 0.30, i * 0.24, -L + 0.10, shroudZ * 0.5, 0.052);
+    piston(b, i * 0.20, BOT + 0.24, shroudZ * 0.26, i * 0.24, -L + 0.04, shroudZ * 0.46, 0.052);
   }
-  piston(b, 0, -L * 0.40, -shroudZ * 0.55, 0, -L + 0.12, -shroudZ * 0.62, 0.060);
-  axleJoint(b, 'mech', MASK.TRIM, 0, -L, 0, 0.22, 0.52, 14);
+  piston(b, 0, BOT + 0.22, -shroudZ * 0.50, 0, -L + 0.06, -shroudZ * 0.58, 0.060);
+  axleJoint(b, 'mech', MASK.TRIM, 0, -L, 0, 0.16, 0.48, 14);
 
   // ankle thruster
   _q.setFromEuler(_e.set(Math.PI * 0.5 - 0.30, 0, 0));
-  _pv.set(0, -L * 0.62, -shroudZ * 0.9); _sc.set(1, 1, 1);
+  _pv.set(0, BOT + 0.52, -shroudZ * 0.86); _sc.set(1, 1, 1);
   _m.compose(_pv, _q, _sc);
   b.addM('mech', MASK.TRIM, nozzle(0.085, 0.15, 0.22, 14), _m);
-  _pv.set(0, -L * 0.63, -shroudZ * 1.02); _m.compose(_pv, _q, _sc);
+  _pv.set(0, BOT + 0.51, -shroudZ * 0.98); _m.compose(_pv, _q, _sc);
   b.addM('glow', MASK.BASE, chamferCyl(0.082, 0.076, 0.03, 12, 0.008), _m);
-  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.47, -L * 0.55, shroudZ * 0.30);
+  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.49, BOT + 0.62, shroudZ * 0.28);
 
   if (d) {
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.48, -L * 0.5, shroudZ * 0.35, 0.66, L * 0.55, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
-    greebleFace(b, 'armor', MASK.BASE, rev ? 'pz' : 'nz', 0, -L * 0.5, shroudZ * 1.12, 0.72, L * 0.6, rng, { cols: 3, rows: 4, depth: 0.038, accent: 0.04 });
-    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, -L * 0.36, -shroudZ * 0.94, 0.44, 0.42, 4, 0.07);
-    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.35, 0, 0, 0.19, 8, 0.024, 0.016);
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.50, BOT + 0.58, shroudZ * 0.30, 0.78, 0.86, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, rev ? 'pz' : 'nz', 0, BOT + 0.60, shroudZ * 1.16, 0.66, 0.90, rng, { cols: 3, rows: 4, depth: 0.038, accent: 0.04 });
+    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, BOT + 0.74, -shroudZ * 0.92, 0.44, 0.42, 4, 0.07);
+    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.30, -0.26, rev ? 0.26 : -0.26, 0.19, 8, 0.024, 0.016);
   }
   return { b, anchors: { ankle: [0, -L, 0] } };
 }
