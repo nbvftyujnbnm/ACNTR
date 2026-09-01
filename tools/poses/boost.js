@@ -48,12 +48,26 @@
   // return behaviour above, this is a LOWER bound on what the captured frame
   // shows rather than the exact value — but a run that is already slow here
   // was never going to produce a fast frame.
-  const m = window.__ACNTR__.game.player.moveState || {};
+  const g = window.__ACNTR__.game;
+  const m = g.player.moveState || {};
+  // Plume diagnostics. At 93 m/s under assault boost the mains should be at
+  // full intensity, and the frame still shows no bright core — so report what
+  // the handles actually hold rather than inferring it from a screenshot.
+  const flames = (g.vfx?._flames || []).map((f) => ({
+    i: +(f.intensity ?? 0).toFixed(2),
+    t: +(f.target ?? 0).toFixed(2),
+    r: f.radius,
+    len: f.length,
+    anchored: !!f.anchor?.parent,
+  }));
   window.__POSE_NOTE__ = {
     speedAtPoseEnd: +(m.speed ?? 0).toFixed(1),
     assaultBoost: !!m.assaultBoost,
     assaultRamp: +(m.assaultRamp ?? 0).toFixed(2),
     openGround: open ? open.clear : null,
+    plumeHandles: flames.length,
+    plumes: flames,
+    plumeCapacity: g.vfx?.ps?.flameCapacity ?? null,
   };
   if ((m.speed ?? 0) < 70) {
     window.__POSE_NOTE__.warning = `only ${(m.speed ?? 0).toFixed(0)} m/s at pose end — cannot judge whether the game reads fast`;
