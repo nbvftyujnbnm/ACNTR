@@ -300,8 +300,21 @@ void main() {
   disp *= 1.0 - uVignette * smoothstep( clamp( uVignetteSmooth, 0.0, 0.98 ), 1.0, rEdge );
 
   // ---- damage rim (screen blend so it glows rather than muddies) ----------
+  //
+  // A RIM, NOT A WASH. This began at rEdge 0.28 — barely a quarter of the way
+  // out from centre — so on a 23% AP frame the red covered the middle of the
+  // screen: the mech was unreadable and even the HUD's cyan read as pale red.
+  // That blinds the player at exactly the moment they most need to see. A
+  // low-AP warning has to leave the centre legible, because you are still
+  // expected to fight through it.
+  //
+  // Urgency is carried by a PULSE rather than by coverage, which is how AC6
+  // does it, and squaring the ramp keeps the falloff tight against the edge
+  // instead of bleeding inward.
   if ( uDamage > 0.001 ) {
-    float dv = smoothstep( 0.28, 1.0, rEdge ) * uDamage;
+    float pulse = 0.72 + 0.28 * sin( uTime * 7.0 );
+    float dv = smoothstep( 0.60, 1.02, rEdge );
+    dv = dv * dv * uDamage * pulse;
     disp = disp + uDamageColor * dv * ( 1.0 - disp );
   }
 
