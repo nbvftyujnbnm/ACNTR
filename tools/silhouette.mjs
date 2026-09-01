@@ -12,10 +12,19 @@
  *
  * What the numbers mean — the reason each one is here:
  *
- *   fill          mech pixels / bounding-box pixels. The single best blob
- *                 detector. A real AC silhouette is mostly holes and notches
- *                 and lands around 0.34-0.48; anything over ~0.60 is a lump
- *                 with limbs drawn on it.
+ * GRADE THE 45 AND 135 YAWS, not the mean and not the cardinals. A biped
+ * backfills its own negative space head-on and side-on — dead side-on the far
+ * leg sits exactly behind the near one and plugs every gap in it, and the same
+ * geometry scores openRows 0.245 at yaw 90 against 0.91 at yaw 0. Those views
+ * punish shapes that are fine. The 3/4 views are also the ones the hero and
+ * gameplay cameras use.
+ *
+ *   fill          mech pixels / bounding-box pixels. A TREND number only —
+ *                 compare it at a FIXED yaw across iterations. It was given an
+ *                 absolute 0.34-0.48 band on its first outing; that band was
+ *                 invented rather than measured and does not hold, because the
+ *                 bounding box rotates with the camera so the denominator is
+ *                 not comparable between yaws.
  *
  *   openRows      fraction of occupied rows that contain two or more separate
  *                 runs of mech — i.e. rows you can see sky through. This is the
@@ -40,7 +49,7 @@
  * Exits 2 if the game fails to boot, 1 if any pose produced console errors.
  */
 import { launch } from './browser.mjs';
-import { spawn } from 'node:child_process';
+import { spawnServer, killTree, waitForServer, run } from './server.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,28 +70,6 @@ const YAWS = String(arg('yaws', '0,45,90,135,180'))
   .filter((n) => isFinite(n));
 const W = parseInt(arg('w', '1000'), 10);
 const H = parseInt(arg('h', '1000'), 10);
-
-function run(cmd, args) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
-    p.on('close', (code) => resolve({ code, out }));
-  });
-}
-
-async function waitForServer(url, timeoutMs = 90000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok || r.status === 304) return true;
-    } catch { /* not up */ }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return false;
-}
 
 /**
  * Runs in page context. Kept as one self-contained function because
@@ -225,7 +212,7 @@ let server = null;
 let browser = null;
 const shutdown = async (code) => {
   try { if (browser) await browser.close(); } catch { /* already gone */ }
-  try { if (server) server.kill(); } catch { /* already gone */ }
+  try { if (server) killTree(server); } catch { /* already gone */ }
   process.exit(code);
 };
 
@@ -239,20 +226,15 @@ const shutdown = async (code) => {
   // page.evaluate, whose promise then never settles: the run hangs until its
   // timeout rather than failing. A built bundle is immutable for the life of
   // the run, so editing and auditing can happen at the same time.
-  const lint = await run('node', ['tools/lint-glsl.mjs']);
+  const lint = await run('node', ['tools/lint-glsl.mjs'], ROOT);
   if (lint.code !== 0) { console.error(lint.out); await shutdown(3); }
-  const built = await run('npx', ['vite', 'build']);
+  const built = await run('npx', ['vite', 'build'], ROOT);
   if (built.code !== 0) { console.error('=== BUILD FAILED ===\n' + built.out.slice(-4000)); await shutdown(3); }
 
   const port = 5900 + Math.floor(Math.random() * 400);
-  server = spawn('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
-  });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d));
-  server.stderr.on('data', (d) => (log += d));
+  server = spawnServer('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], ROOT);
   const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('vite preview failed:\n' + log); await shutdown(3); }
+  if (!(await waitForServer(url))) { console.error('vite preview failed:\n' + server.log()); await shutdown(3); }
 
   browser = await launch();
   const page = await browser.newPage({ viewport: { width: W, height: H } });

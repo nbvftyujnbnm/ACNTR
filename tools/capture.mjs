@@ -12,7 +12,7 @@
  * WebGL/shader/runtime console errors occurred, 0 on a clean run.
  */
 import { launch } from './browser.mjs';
-import { spawn } from 'node:child_process';
+import { spawnServer, killTree, waitForServer, run } from './server.mjs';
 import { readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,28 +39,6 @@ const allPoses = readdirSync(POSE_DIR)
 const requested = arg('poses', null);
 const poses = requested && requested !== true ? String(requested).split(',').map((s) => s.trim()) : allPoses;
 
-async function waitForServer(url, timeoutMs = 90000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const res = await fetch(url);
-      if (res.ok || res.status === 304) return true;
-    } catch { /* not up */ }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return false;
-}
-
-function run(cmd, args) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
-    p.on('close', (code) => resolve({ code, out }));
-  });
-}
-
 let server = null;
 /**
  * Capture against a PRODUCTION BUILD served by `vite preview`, not the dev
@@ -79,14 +57,14 @@ async function startServer() {
   // A stray backtick in a GLSL comment still BUILDS (it is valid JS) and only
   // fails at import time with an unrelated-looking error, after ~8 minutes of
   // capture. Catch it in milliseconds instead.
-  const lint = await run('node', ['tools/lint-glsl.mjs']);
+  const lint = await run('node', ['tools/lint-glsl.mjs'], ROOT);
   if (lint.code !== 0) {
     console.error(lint.out);
     process.exit(3);
   }
 
   if (!useDev) {
-    const b = await run('npx', ['vite', 'build']);
+    const b = await run('npx', ['vite', 'build'], ROOT);
     if (b.code !== 0) {
       console.error('=== BUILD FAILED ===\n' + b.out.slice(-4000));
       process.exit(3);
@@ -96,17 +74,10 @@ async function startServer() {
   const args = useDev
     ? ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
     : ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'];
-  server = spawn('npx', args, {
-    cwd: ROOT,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NO_COLOR: '1' },
-  });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d.toString()));
-  server.stderr.on('data', (d) => (log += d.toString()));
+  server = spawnServer('npx', args, ROOT);
   const url = `http://127.0.0.1:${port}/`;
   if (!(await waitForServer(url))) {
-    console.error('server failed to start:\n' + log);
+    console.error('server failed to start:\n' + server.log());
     process.exit(3);
   }
   return url;
@@ -136,7 +107,7 @@ async function startServer() {
     if (err) console.error(err);
     for (const e of consoleErrors.slice(0, 40)) console.error('  console: ' + e);
     await browser.close();
-    server?.kill();
+    killTree(server);
     process.exit(2);
   }
 
@@ -214,6 +185,6 @@ async function startServer() {
   console.log('\n' + JSON.stringify({ shots: report.shots.map((s) => s.file), errors: report.consoleErrors }, null, 2));
 
   await browser.close();
-  server?.kill();
+  killTree(server);
   process.exit(report.consoleErrors.length || failed.length ? 1 : 0);
 })();

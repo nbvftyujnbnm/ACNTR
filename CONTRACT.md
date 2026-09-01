@@ -1105,13 +1105,18 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   broken renderer rather than a bad box. `debug.silhouette()` now hides
   Points/Sprite/Line children, unions only visible mesh geometry bounds, and
   pins near/far around the fitted distance.
-- 2026-09-01 [tools] DO NOT EDIT ANYTHING UNDER `src/` WHILE A PROBE OR CAPTURE
-  IS RUNNING. `tools/probe.mjs` serves through the vite DEV server, so a source
-  edit triggers HMR, the page reloads out from under the in-flight
-  `page.evaluate`, and the promise never settles — the run hangs until its
-  timeout instead of failing. Cost this session: two ten-minute stalls.
-  `tools/capture.mjs` is immune (it builds and serves the immutable bundle
-  through `vite preview`) — this applies to probes and to `tools/silhouette.mjs`.
+- 2026-09-01 [tools] EVERY HEADLESS TOOL NOW SERVES A BUILT BUNDLE, NOT THE DEV
+  SERVER. Under vite's dev server, editing any file under `src/` while a run is
+  in flight triggers HMR: the page reloads out from under the in-flight
+  `page.evaluate` and its promise never settles, so the run HANGS until its
+  timeout rather than failing with something legible. That cost two ten-minute
+  stalls before it was diagnosed, and it is a standing hazard whenever several
+  agents edit and measure at the same time. `tools/capture.mjs` already built
+  and served through `vite preview`; `tools/probe.mjs` and
+  `tools/silhouette.mjs` now do the same. A built bundle is immutable for the
+  life of the run, so editing while measuring is safe again.
+  `tools/probe.mjs --dev` opts back into the dev server for the rare case where
+  you want to probe unbuilt source — accept the hazard if you use it.
 - 2026-09-01 [tools] `tools/capture.mjs` no longer aborts the run when one pose
   cannot be screenshotted. The garage pose blows Playwright's 180 s budget under
   SwiftShader — a full-viewport `backdrop-filter: blur()` over the WebGL canvas

@@ -8,7 +8,7 @@
  *   node tools/probe.mjs --file tools/probes/scene.js
  */
 import { launch } from './browser.mjs';
-import { spawn } from 'node:child_process';
+import { spawnServer, killTree, waitForServer, run } from './server.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,29 +22,29 @@ function arg(name, def = null) {
   return v && !v.startsWith('--') ? v : true;
 }
 
-async function waitForServer(url, timeoutMs = 90000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok || r.status === 304) return true;
-    } catch { /* not up */ }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return false;
-}
-
 let server = null;
 (async () => {
+  // Probe a PRODUCTION BUILD served by `vite preview` by default. Under the dev
+  // server, editing any source file while a probe is in flight triggers HMR,
+  // the page reloads out from under the in-flight page.evaluate, and its
+  // promise never settles — the run hangs until its timeout instead of failing.
+  // That cost two ten-minute stalls before it was diagnosed. Pass --dev to opt
+  // back in when you specifically want to probe unbuilt source.
+  const useDev = !!arg('dev', false);
+  if (!useDev) {
+    const lint = await run('node', ['tools/lint-glsl.mjs'], ROOT);
+    if (lint.code !== 0) { console.error(lint.out); process.exit(3); }
+    const built = await run('npx', ['vite', 'build'], ROOT);
+    if (built.code !== 0) { console.error('=== BUILD FAILED ===\n' + built.out.slice(-4000)); process.exit(3); }
+  }
+
   const port = 5900 + Math.floor(Math.random() * 400);
-  server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
-  });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d));
-  server.stderr.on('data', (d) => (log += d));
+  const serverArgs = useDev
+    ? ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
+    : ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'];
+  server = spawnServer('npx', serverArgs, ROOT);
   const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('vite failed:\n' + log); process.exit(3); }
+  if (!(await waitForServer(url))) { console.error('vite failed:\n' + server.log()); process.exit(3); }
 
   const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -59,7 +59,7 @@ let server = null;
     const err = await page.evaluate(() => window.__ACNTR_ERROR__ || null);
     console.error('BOOT FAILED\n' + (err || ''));
     for (const e of errors.slice(0, 30)) console.error('  ' + e);
-    await browser.close(); server.kill(); process.exit(2);
+    await browser.close(); killTree(server); process.exit(2);
   }
   await page.waitForTimeout(2000);
 
@@ -75,5 +75,5 @@ let server = null;
   if (errors.length) console.error('\nconsole errors:\n' + [...new Set(errors)].slice(0, 20).join('\n'));
 
   await browser.close();
-  server.kill();
+  killTree(server);
 })();
