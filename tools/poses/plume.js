@@ -22,9 +22,18 @@
   if (!open) debug.placePlayerOnGround(0, 150, 0, 0.05);
   debug.step(0.4);
 
-  // Hold Space with no direction: per the contract's control-resolution note
-  // that is pure vertical thrust, so the mech climbs and hovers rather than
-  // travelling — the mains and verniers all fire while it stays put.
+  // Start HIGH, then hold Space. The harness renders the captured frame about
+  // 1.1 s of real time after this script returns, so a mech that is merely
+  // airborne at pose end can be back on the ground by the shutter — and a
+  // grounded mech drops to the 0.07 idle thruster level, which is correctly
+  // almost invisible. Starting 30 m up means it cannot reach the ground inside
+  // that window even if energy runs out, so whatever is photographed is a mech
+  // under thrust.
+  const gy = game.physics?.groundHeight?.(game.player.root.position.x, game.player.root.position.z);
+  if (Number.isFinite(gy)) {
+    debug.placePlayer(game.player.root.position.x, gy + 30, game.player.root.position.z,
+                      game.player.root.rotation.y);
+  }
   debug.holdKeys(['Space']);
   debug.step(1.1);
 

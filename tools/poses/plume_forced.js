@@ -56,6 +56,20 @@
   for (const f of (game.vfx?._flames || [])) {
     f.intensity = 6; f.target = 6; f.radius = 1.2; f.length = 7;
   }
+
+  // Last discriminator. Draw the flame layer over everything, opaquely: if it
+  // is being submitted at all it cannot fail to be seen now. If the frame is
+  // STILL empty, the draw call is not reaching the GPU and no amount of
+  // material or intensity tuning is relevant.
+  const THREE = window.__ACNTR__.THREE;
+  for (const m of [game.vfx.ps.flameInner, game.vfx.ps.flameOuter]) {
+    m.material.depthTest = false;
+    m.material.depthWrite = false;
+    m.material.blending = THREE.NormalBlending;
+    m.material.transparent = true;
+    m.renderOrder = 9999;
+    m.material.needsUpdate = true;
+  }
   debug.step(0.02);
 
   const g = game;
@@ -84,6 +98,8 @@
     litPlumes: flames.length,
     plumes: flames,
     passes: debug.passes(),
+    innerInstances: game.vfx.ps.flameInner.geometry.instanceCount,
+    innerVisible: game.vfx.ps.flameInner.visible,
   };
   if (!flames.length) window.__POSE_NOTE__.warning = 'no plume above idle — the thruster drive is not running';
 
