@@ -1353,3 +1353,23 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   photographed for at least the settle window, or hold it with a
   `setTimeout(..., 3000)` release like boost.js does. Reading state at the end
   of the script tells you what was true 1.1 s before the picture.
+- 2026-09-01 [combat] THE INSTANCED PARTICLE PATH WORKS — hypothesis tested and
+  REFUTED, recorded so nobody spends a day on it again. Because the flame layer
+  produced no pixels under every possible forcing, the natural suspicion was
+  that `InstancedBufferGeometry` + `InstancedInterleavedBuffer` + offset
+  `InterleavedBufferAttribute` simply does not work under this container's
+  SwiftShader, which would have meant no explosion, spark, smoke puff or plume
+  had ever been visible in any capture. `tools/poses/particles.js` settles it:
+  shots/iter24/particles.png shows the explosion shockwave ring, long bright
+  arcing streaks, scattered debris and a muzzle flash. The technique is fine.
+  So the FLAME LAYER SPECIFICALLY is broken while the quad-particle and
+  ring/shell paths built the same way are not. Narrowing left to do is in the
+  plume geometry, `flameVert`, or how `flameInner`/`flameOuter` differ from the
+  particle mesh — note that `flameGeo` shares its `position` BufferAttribute
+  object with `_plumeGeo` and shares one geometry between the two flame meshes,
+  neither of which the particle path does.
+  The symptom to explain: a draw that IS submitted (instanceCount 4, mesh
+  visible, layers matching, material forced to opaque NormalBlending with
+  depthTest false and renderOrder 9999) and rasterises zero pixels. `flameVert`
+  early-outs to `gl_Position = vec4(0,0,2,1)` — clipped — when `aParams.y`
+  reads 0, which fits, but the particle shaders read their attributes fine.
