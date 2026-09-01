@@ -162,6 +162,23 @@ export class Game {
     // attached to anything, so a mech at 20% AP looked exactly like a fresh
     // one — the single clearest read on how a fight is going, missing.
     this.vfx?.attachDamageSmoke?.(this.player);
+
+    // Enemies get the same two treatments as they spawn. Reading how hurt a
+    // target is matters more on THEM than on the player, whose AP is on the
+    // HUD in numerals — an enemy's condition is only ever legible from how it
+    // looks. EnemyManager announces both ends of the lifecycle, so the handle
+    // is disposed rather than leaked when the wave is cleared.
+    bus.on('ai:spawned', ({ entity }) => {
+      if (!entity) return;
+      if (this.physics?.groundHeight) {
+        entity.rig?.setGroundSampler?.((x, z) => this.physics.groundHeight(x, z));
+      }
+      entity._damageSmoke = this.vfx?.attachDamageSmoke?.(entity) || null;
+    });
+    bus.on('ai:removed', ({ entity }) => {
+      entity?._damageSmoke?.dispose?.();
+      if (entity) entity._damageSmoke = null;
+    });
   }
 
   /** Hand the pipeline's depth texture to the VFX system for soft-particle fade. */
