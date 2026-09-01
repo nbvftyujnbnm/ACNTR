@@ -529,7 +529,23 @@ export class Brain {
     if (on === this._boostOn && Math.abs(intensity - this._boostIntensity) < 0.3) return;
     this._boostOn = on;
     this._boostIntensity = intensity;
-    this.manager?.vfx?.boostFlame?.(this.agent.hardpoints?.core || this.agent.root, on, intensity);
+
+    // `boostFlame()` is a FACTORY, not a setter — it allocates a persistent
+    // handle and pushes it onto the VFX pool on every call. This used to call
+    // it on each state change, so every enemy leaked one handle per boost
+    // transition: a capture with NO enemies alive in the scene still had 20 of
+    // them burning at intensity 1.0-1.6, anchored to mechs that were gone.
+    //
+    // The pool holds 64. Once it is full `boostFlame()` returns a null handle,
+    // which means a long enough fight silently disables every plume in the
+    // game — including the player's, which are allocated once at startup and
+    // could never be replaced. Allocate one handle per brain, then drive it.
+    if (!this._flame) {
+      const anchor = this.agent.hardpoints?.core || this.agent.root;
+      this._flame = this.manager?.vfx?.boostFlame?.(anchor, on, intensity) || null;
+    } else {
+      this._flame.set(on, intensity);
+    }
   }
 
   setState(name) {
@@ -1183,6 +1199,8 @@ export class Brain {
 
   dispose() {
     this.weapons.length = 0;
+    this._flame?.dispose?.();
+    this._flame = null;
     this.manager = null;
     this.physics = null;
     this.level = null;
