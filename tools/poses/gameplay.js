@@ -42,21 +42,27 @@
   // rises ahead buried the last set inside a hillside while the frustum test
   // cheerfully reported all four as in frame.
   const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
-  const a = at(52, -14);
-  const b = at(74, 22);
-  const c = at(96, 4);
-  const d = at(66, -30);
-  debug.spawnEnemyOnGround('ac', a.x, a.z, 2, 6);
+  // Close. The first spread put them 52-96 m out, which sounds reasonable and
+  // is not: the mech boosts ~20 m during the pose and the open pocket it starts
+  // in is smaller than the engagement, so the fight ended up strung out through
+  // scenery. An AC6 gameplay screenshot is a knife fight at 30-60 m.
+  const a = at(34, -12);
+  const b = at(46, 16);
+  const c = at(58, -2);
+  const d = at(40, -22);
+  debug.spawnEnemyOnGround('ac', a.x, a.z, 2, 5);
   debug.spawnEnemyOnGround('mt', b.x, b.z, 1, 0);
   debug.spawnEnemyOnGround('mt', c.x, c.z, 1, 0);
-  debug.spawnEnemyOnGround('flyer', d.x, d.z, 1, 26);
+  debug.spawnEnemyOnGround('flyer', d.x, d.z, 1, 18);
 
-  // Let the AI engage and close, but not long enough for anything to die.
-  debug.step(2.0);
+  // Let the AI engage, but not long enough for anything to die or to scatter.
+  debug.step(1.2);
 
-  // Boost through it, driving REAL input so the movement model actually runs.
-  debug.holdKeys(['KeyW', 'Space']);
-  debug.step(0.9);
+  // Moving, not sprinting. Real input so the movement model runs, but held
+  // briefly: a full boost carries the mech clean out of the pocket it started
+  // in and smears it into an unreadable blur.
+  debug.holdKeys(['KeyW']);
+  debug.step(0.35);
 
   // Mid-fight: hurt, stagger building, energy spent, lock acquired.
   debug.hudState({ ap: 0.62, acs: 0.44, en: 0.38, lockProgress: 1 });
