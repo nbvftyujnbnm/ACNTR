@@ -1307,3 +1307,25 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   nothing and reported success. Any A/B run through it before 2026-09-01 was
   comparing two identical frames. `debug.passes()` lists the switches that
   actually exist.
+- 2026-09-01 [mech/combat] THE THRUSTER ANCHORS POINTED THE WRONG WAY, AND THAT
+  IS WHY NO PLUME HAS EVER BEEN VISIBLE — on the player or on any enemy.
+  `FlameHandle` fires along the anchor's local +Z (it reads the third basis
+  vector of `matrixWorld`). `MechFactory.addThruster` built every anchor with
+  `rotation.x = Math.PI * 0.5`, which maps local +Z to world DOWN; the comment
+  beside it ("-Z points down the exhaust") describes the opposite convention to
+  the one VFX uses. Measured on the player: direction (0, -0.98, 0.20) from an
+  anchor 6.05 m above the mech origin, plume length 3.6 m — i.e. a column fired
+  straight down through its own torso and legs, where the depth test removed
+  all of it. Mechs face -Z, so an UNROTATED anchor already points out the back,
+  which is what a main nozzle wants; the verniers keep the downward pitch.
+  Everything else about the flame layer was correct the whole time, and was
+  verified so at length before this was found — see the previous amendment.
+  A second, softer trap on top of it: a cone aimed straight at the lens
+  projects as a small disc, and `flameFrag` weights alpha by fresnel, so
+  head-on is a plume's DIMMEST view. Photograph plumes from a three-quarter
+  rear angle, never from directly behind.
+- 2026-09-01 [tools] `debug.visibleCount()` must aim at the CHEST, not the
+  entity root. Mech roots are authored at the feet, so a ray to `root.position`
+  runs along the ground and is blocked by any rise between camera and target —
+  it reported all four enemies occluded in an arena where they were standing in
+  the open, which sent two iterations chasing the arena scoring instead.

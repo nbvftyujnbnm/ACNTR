@@ -403,15 +403,22 @@ export class Debug {
       new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse),
     );
     const dir = new THREE.Vector3();
+    const aim = new THREE.Vector3();
     let inFrustum = 0;
     let visible = 0;
     for (const e of entities || []) {
       if (!e?.root) continue;
-      const p = e.root.position;
-      if (!frustum.containsPoint(p)) continue;
+      // Aim at the CHEST, not the root. Mech roots are authored at the feet
+      // (see the capsule-centre amendment), so a ray to `root.position` runs
+      // along the ground and is blocked by any rise between here and there —
+      // which reported every enemy as occluded in an arena where they were
+      // plainly standing in the open.
+      aim.copy(e.root.position);
+      aim.y += (e.collider?.height ?? 8) * 0.5;
+      if (!frustum.containsPoint(aim)) continue;
       inFrustum++;
       if (!ph?.raycast) { visible++; continue; }
-      dir.subVectors(p, cam.position);
+      dir.subVectors(aim, cam.position);
       const d = dir.length();
       dir.divideScalar(d || 1);
       const hit = ph.raycast(cam.position, dir, d - 3);
