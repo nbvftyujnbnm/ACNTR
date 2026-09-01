@@ -1281,3 +1281,29 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   `debug.placePlayer()` now sets rig yaw, entity aimYaw, controller yaw and
   bodyYaw together, then resets the rig smoothing and the TAA history. Any new
   code that repositions the player must do the same or it will drift.
+- 2026-09-01 [combat/tools] THE THRUSTER PLUMES RENDER. Before touching the
+  flame layer again, know that all of this was checked and is CORRECT: the
+  meshes are in the scene under the "VFX" group, visible, `frustumCulled` is
+  false with a 1e7 bounding sphere, `instanceCount` reaches 4, the mesh layer
+  mask and the camera layer mask both read 1, the material is additive and
+  transparent with `depthWrite` false, the geometry is a real
+  `InstancedBufferGeometry` whose contract (position.xy a unit circle,
+  position.z the 0..1 axial parameter) matches `flameVert` exactly, and the
+  12-float interleaved layout written by `_updateFlames` matches the
+  aOrigin/aAxis/aParams offsets. The soft-depth fade was also ruled out by A/B:
+  handing VFX a null depth texture (`uSoftParams.x = 0`, so `softDepthFade()`
+  returns 1.0) changed the frame by nothing.
+  The frames that showed no plume were CAMERA-SIDE. `cameraRelativeToPlayer()`
+  offsets in WORLD space, so which side of the mech it lands on depends on the
+  yaw the placement chose; the thruster close-up was looking at the mech's
+  front while the exhaust blew out of its back. Use `cameraBehindPlayer()`,
+  which frames in the mech's own basis, for anything that needs a known side.
+  Cost of this one: two full diagnostic probes and an A/B capture.
+- 2026-09-01 [tools] `debug.setPass(name, on)` NOW WORKS — it drives
+  `pipeline.q[name]`, the per-quality booleans set by `setQuality()`. It used to
+  write `pipeline.params[name]` and call a `setPassEnabled` that does not exist,
+  so for every pass whose params entry is an object of tunables rather than a
+  bare boolean (dof, bloom, taa, vignette — most of them) it silently did
+  nothing and reported success. Any A/B run through it before 2026-09-01 was
+  comparing two identical frames. `debug.passes()` lists the switches that
+  actually exist.
