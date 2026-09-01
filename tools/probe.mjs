@@ -8,7 +8,7 @@
  *   node tools/probe.mjs --file tools/probes/scene.js
  */
 import { launch } from './browser.mjs';
-import { spawnServer, killTree, waitForServer, run } from './server.mjs';
+import { spawnServer, killTree, waitForServer, run, buildAndPreview } from './server.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,20 +31,19 @@ let server = null;
   // That cost two ten-minute stalls before it was diagnosed. Pass --dev to opt
   // back in when you specifically want to probe unbuilt source.
   const useDev = !!arg('dev', false);
-  if (!useDev) {
-    const lint = await run('node', ['tools/lint-glsl.mjs'], ROOT);
-    if (lint.code !== 0) { console.error(lint.out); process.exit(3); }
-    const built = await run('npx', ['vite', 'build'], ROOT);
-    if (built.code !== 0) { console.error('=== BUILD FAILED ===\n' + built.out.slice(-4000)); process.exit(3); }
-  }
-
   const port = 5900 + Math.floor(Math.random() * 400);
-  const serverArgs = useDev
-    ? ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
-    : ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'];
-  server = spawnServer('npx', serverArgs, ROOT);
-  const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('vite failed:\n' + server.log()); process.exit(3); }
+  let url;
+  if (useDev) {
+    server = spawnServer('npx',
+      ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], ROOT);
+    url = `http://127.0.0.1:${port}/`;
+    if (!(await waitForServer(url))) { console.error('vite failed:\n' + server.log()); process.exit(3); }
+  } else {
+    const built = await buildAndPreview(ROOT, port);
+    if (built.server) server = built.server;
+    if (built.error) { console.error(built.error); process.exit(3); }
+    url = built.url;
+  }
 
   const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });

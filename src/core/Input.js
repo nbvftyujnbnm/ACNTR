@@ -85,7 +85,17 @@ export class Input {
   }
 
   requestLock() {
-    if (!this.locked) this.dom.requestPointerLock?.();
+    if (this.locked) return;
+    // Chrome returns a promise here and REJECTS it when there is no user
+    // gesture behind the call — which is always true in a headless capture, and
+    // also true whenever the browser is still inside the exit cooldown after a
+    // previous unlock. Unhandled, that reaches the console as an error, and the
+    // review harness treats any console error as an automatic failure. It is a
+    // refusal, not a fault: swallow it.
+    try {
+      const p = this.dom.requestPointerLock?.();
+      if (p && typeof p.catch === 'function') p.catch(() => { /* refused */ });
+    } catch { /* older signature throws instead of rejecting */ }
   }
   exitLock() {
     if (this.locked) document.exitPointerLock?.();

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# Per-run build directories from tools/server.mjs — several agents capture at
+# once and a shared dist/ would let two vite builds interleave.
+.builds/
 shots/
 .vite/
 *.log

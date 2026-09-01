@@ -16,13 +16,20 @@
  * server rather than orphaning it.
  */
 import { spawn } from 'node:child_process';
+import { rmSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const live = new Set();
+const tempBuilds = new Set();
 let hooked = false;
 
 function reapAll() {
   for (const child of live) killTree(child);
   live.clear();
+  for (const dir of tempBuilds) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+  tempBuilds.clear();
 }
 
 function hookExit() {
@@ -79,6 +86,38 @@ export async function waitForServer(url, timeoutMs = 90000) {
     await new Promise((r) => setTimeout(r, 300));
   }
   return false;
+}
+
+/**
+ * Build the app into a directory of this run's own, and start a preview server
+ * on it. Returns `{ url, outDir }`.
+ *
+ * The per-run directory is the point. Several agents capture at the same time,
+ * and `vite build` into a shared `dist/` lets two builds interleave — the
+ * second one clears the directory while the first is still writing it, and the
+ * preview that follows serves a bundle that is half one revision and half
+ * another. That failure does not announce itself; it shows up as a review frame
+ * that disagrees with the source, which is worse than a crash. Directories are
+ * removed when the process exits.
+ */
+export async function buildAndPreview(root, port, { lint = true } = {}) {
+  hookExit();
+  if (lint) {
+    const l = await run('node', ['tools/lint-glsl.mjs'], root);
+    if (l.code !== 0) return { error: l.out };
+  }
+  const outDir = resolve(root, '.builds', `run-${process.pid}-${Date.now().toString(36)}`);
+  tempBuilds.add(outDir);
+  const b = await run('npx', ['vite', 'build', '--outDir', outDir, '--emptyOutDir'], root);
+  if (b.code !== 0) return { error: '=== BUILD FAILED ===\n' + b.out.slice(-4000) };
+
+  const child = spawnServer('npx', [
+    'vite', 'preview', '--outDir', outDir,
+    '--host', '127.0.0.1', '--port', String(port), '--strictPort',
+  ], root);
+  const url = `http://127.0.0.1:${port}/`;
+  if (!(await waitForServer(url))) return { error: 'vite preview failed:\n' + child.log(), server: child };
+  return { url, outDir, server: child };
 }
 
 /** Run a command to completion, capturing combined output. */

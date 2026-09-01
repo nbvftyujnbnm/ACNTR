@@ -49,7 +49,7 @@
  * Exits 2 if the game fails to boot, 1 if any pose produced console errors.
  */
 import { launch } from './browser.mjs';
-import { spawnServer, killTree, waitForServer, run } from './server.mjs';
+import { killTree, buildAndPreview } from './server.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -226,15 +226,11 @@ const shutdown = async (code) => {
   // page.evaluate, whose promise then never settles: the run hangs until its
   // timeout rather than failing. A built bundle is immutable for the life of
   // the run, so editing and auditing can happen at the same time.
-  const lint = await run('node', ['tools/lint-glsl.mjs'], ROOT);
-  if (lint.code !== 0) { console.error(lint.out); await shutdown(3); }
-  const built = await run('npx', ['vite', 'build'], ROOT);
-  if (built.code !== 0) { console.error('=== BUILD FAILED ===\n' + built.out.slice(-4000)); await shutdown(3); }
-
   const port = 5900 + Math.floor(Math.random() * 400);
-  server = spawnServer('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], ROOT);
-  const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('vite preview failed:\n' + server.log()); await shutdown(3); }
+  const built = await buildAndPreview(ROOT, port);
+  if (built.server) server = built.server;
+  if (built.error) { console.error(built.error); await shutdown(3); }
+  const url = built.url;
 
   browser = await launch();
   const page = await browser.newPage({ viewport: { width: W, height: H } });

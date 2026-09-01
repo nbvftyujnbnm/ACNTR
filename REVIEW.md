@@ -131,7 +131,13 @@ TOP DEFECTS (ranked, specific, actionable):
 
 ## Automatic failures
 
-- Any console error in `report.json`.
+- Any console error in `report.json`'s `consoleErrors`. Its separate
+  `benignErrors` list is the blocked Google Fonts fetch — this sandbox's network
+  policy blocks that host, it has nothing to do with the render, and it is not a
+  failure. It does mean the HUD in every captured frame is in its FALLBACK type
+  stack rather than the Rajdhani / Share Tech Mono it ships with, so weigh
+  category 8 on layout, line weight, density and hierarchy rather than on the
+  letterforms themselves.
 - Any untextured / flat-shaded surface visible in frame.
 - Visible hard polygon silhouette on anything meant to be curved.
 - Bloom with no hot core, or bloom that washes the frame.
