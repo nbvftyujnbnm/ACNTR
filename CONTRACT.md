@@ -1333,3 +1333,23 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   runs along the ground and is blocked by any rise between camera and target —
   it reported all four enemies occluded in an arena where they were standing in
   the open, which sent two iterations chasing the arena scoring instead.
+- 2026-09-01 [tools] THE HARNESS RENDERS THE CAPTURED FRAME ~1.1 s OF REAL TIME
+  AFTER THE POSE SCRIPT RETURNS, AND THIS TRAP HAS NOW BITTEN THREE TIMES.
+  `debug.step()` advances the simulation but does NOT render; `capture.mjs`
+  waits `--settle` (default 1100 ms) and screenshots whatever the live rAF loop
+  has drawn by then. So anything a pose sets at the end of its script is
+  subject to another second of simulation before it is photographed:
+    1. boost.js released its keys at the end and captured 56 m/s instead of 95,
+       because the deceleration model owned that window (already recorded).
+    2. plume_forced.js set `handle.intensity = 6` to test whether the flame
+       layer draws at all; `Game._updatePlayerThrusters` runs every frame and
+       reset the target to 0.62 long before the shutter. The test measured
+       nothing and looked like a negative result. Detach the driver
+       (`game._plumes = null`) before forcing anything it owns.
+    3. Any pose that leaves the mech airborne will have it LAND in that window,
+       which drops the thruster level to the 0.07 idle — so a plume shot can be
+       correct at pose end and legitimately empty in the frame.
+  Rule: a pose must leave the game in a state that SUSTAINS what it wants
+  photographed for at least the settle window, or hold it with a
+  `setTimeout(..., 3000)` release like boost.js does. Reading state at the end
+  of the script tells you what was true 1.1 s before the picture.
