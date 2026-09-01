@@ -1264,3 +1264,20 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   frame with no enemies, or a "boost" frame at 0 m/s, is WORSE than a failed
   shot: it looks fine and gets graded as though it showed the thing it was
   meant to show, and both of those had already happened here.
+- 2026-09-01 [player/tools] ROOT ROTATION IS NOT THE AIM, AND A POSE THAT SETS
+  ONLY THE ROOT WILL BE UNDONE. The authority chain is: CameraRig owns `yaw`
+  and writes `player.aimYaw = this.yaw` every lateUpdate; PlayerController reads
+  that entity field back (`if (typeof p?.aimYaw === 'number') this.yaw =
+  p.aimYaw`) and damps `bodyYaw` toward it every frame. So writing
+  `player.root.rotation.y` alone survives about a second: the mech swings back
+  to whatever aim the rig holds, which in a headless capture is 0.
+  This was NOT a hypothesis about the combat poses, it was their actual defect.
+  `placePlayerInOpenGround` was choosing a genuinely open bearing — measured
+  140 m of clearance with a flat approach — and the mech then turned off it
+  before anything was captured, walked into whatever was now in front (the pose
+  reported 0 m/s while holding forward) and left its enemies out to one side,
+  where the frustum test still counted all four. Two earlier "fixes" aimed at
+  the ray scoring and at enemy spawn heights were aimed at the wrong thing.
+  `debug.placePlayer()` now sets rig yaw, entity aimYaw, controller yaw and
+  bodyYaw together, then resets the rig smoothing and the TAA history. Any new
+  code that repositions the player must do the same or it will drift.
