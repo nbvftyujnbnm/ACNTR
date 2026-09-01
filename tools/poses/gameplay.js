@@ -24,8 +24,11 @@
   debug.clearEnemies();
   debug.resetState();
 
-  // On the ground, with room ahead. Let it settle before anything else runs.
-  debug.placePlayerOnGround(0, 40, 0, 1.0);
+  // Open ground with a real field of fire, facing down it. Placing at a fixed
+  // spot put the mech nose-first against a warehouse wall: it could not move,
+  // and every enemy spawned ahead of it was behind that wall.
+  const open = debug.placePlayerInOpenGround();
+  if (!open) debug.placePlayerOnGround(0, 40, 0, 1.0);
   debug.step(0.5);
 
   // Spawn RELATIVE to where the player actually ended up, along the direction
@@ -67,18 +70,23 @@
 
   // Say what actually made it into the shot, so a frame that misses the fight
   // reports the fact instead of being silently graded as a combat frame.
-  const cam = game.engine.camera;
-  cam.updateMatrixWorld();
-  const frustum = new THREE.Frustum().setFromProjectionMatrix(
-    new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse),
-  );
+  // visibleCount() raycasts as well as frustum-testing. The first version of
+  // this check reported "4 of 4 enemies in frame" for a shot in which all four
+  // were behind a warehouse — being inside the frustum and being visible are
+  // different questions.
   const live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
-  const onScreen = live.filter((e) => frustum.containsPoint(e.root.position));
+  const seen = debug.visibleCount(live);
+  const m = game.player.moveState || {};
   window.__POSE_NOTE__ = {
     enemiesAlive: live.length,
-    enemiesInFrame: onScreen.length,
-    speed: +(game.player.moveState?.speed ?? 0).toFixed(1),
-    grounded: !!game.player.moveState?.grounded,
+    enemiesInFrustum: seen.inFrustum,
+    enemiesVisible: seen.visible,
+    openGround: open ? open.clear : null,
+    speed: +(m.speed ?? 0).toFixed(1),
+    grounded: !!m.grounded,
   };
-  if (!onScreen.length) window.__POSE_NOTE__.warning = 'NO ENEMIES IN FRAME — cannot judge combat';
+  const problems = [];
+  if (!seen.visible) problems.push('NO ENEMIES VISIBLE — cannot judge combat');
+  if ((m.speed ?? 0) < 8) problems.push('mech nearly stationary — check it is not against a wall');
+  if (problems.length) window.__POSE_NOTE__.warning = problems.join('; ');
 })();

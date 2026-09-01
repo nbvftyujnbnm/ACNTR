@@ -219,6 +219,93 @@ export class Debug {
    *
    * @returns {boolean} true if a valid framing was found
    */
+  /**
+   * Stand the mech somewhere with a genuinely open field of fire, and face it
+   * down the open direction.
+   *
+   * Combat poses need more than flat ground. `placePlayerOnGround(0, 40, ...)`
+   * put the mech nose-first against a warehouse wall: it could not move (the
+   * frame reported 0.1 m/s while holding forward) and every enemy spawned ahead
+   * of it was behind that wall. The frustum test still said "4 of 4 enemies in
+   * frame", because being inside the frustum and being VISIBLE are different
+   * questions — the same distinction that made the first hero framing scorer
+   * shoot the inside of a wall.
+   *
+   * Scores each level spawn by how far a fan of rays reaches across a forward
+   * arc, and returns the yaw it chose so a pose can spawn enemies down it.
+   *
+   * @param {{arc?:number, rays?:number, range?:number}} [opts]
+   * @returns {{x:number, z:number, yaw:number, clear:number}|null}
+   */
+  placePlayerInOpenGround({ arc = Math.PI * 0.5, rays = 7, range = 140 } = {}) {
+    const pts = this.game.level?.spawnPoints;
+    const ph = this.game.physics;
+    if (!pts?.length || !ph?.raycast) return null;
+
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    let best = null;
+
+    for (const sp of pts) {
+      const g = ph.groundHeight?.(sp.x, sp.z);
+      if (!isFinite(g)) continue;
+      origin.set(sp.x, g + 5.5, sp.z); // roughly the mech's chest
+
+      // Sweep whole-circle bearings, and for each, measure the WORST ray in a
+      // forward arc. The worst ray is what actually blocks a shot; an average
+      // would let one clear lane hide a wall filling the rest of the view.
+      for (let b = 0; b < 16; b++) {
+        const bearing = (b / 16) * Math.PI * 2;
+        let worst = Infinity;
+        for (let i = 0; i < rays; i++) {
+          const a = bearing + (i / (rays - 1) - 0.5) * arc;
+          dir.set(Math.sin(a), 0, Math.cos(a));
+          const h = ph.raycast(origin, dir, range);
+          worst = Math.min(worst, h && h.hit ? h.distance : range);
+        }
+        // The rays point along (sin b, 0, cos b); the controller's forward is
+        // (-sin yaw, 0, -cos yaw), so facing down that bearing is yaw = b + PI.
+        if (!best || worst > best.clear) {
+          best = { x: sp.x, z: sp.z, yaw: bearing + Math.PI, clear: worst };
+        }
+      }
+    }
+    if (!best) return null;
+    this.placePlayerOnGround(best.x, best.z, best.yaw, 0.05);
+    this._lastOpenGround = { ...best, clear: +best.clear.toFixed(1) };
+    return this._lastOpenGround;
+  }
+
+  /**
+   * Of the entities given, how many are both inside the frustum AND not behind
+   * geometry? Poses use this to report whether the fight they set up is
+   * actually in the picture.
+   */
+  visibleCount(entities) {
+    const cam = this.game.engine.camera;
+    const ph = this.game.physics;
+    cam.updateMatrixWorld();
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse),
+    );
+    const dir = new THREE.Vector3();
+    let inFrustum = 0;
+    let visible = 0;
+    for (const e of entities || []) {
+      if (!e?.root) continue;
+      const p = e.root.position;
+      if (!frustum.containsPoint(p)) continue;
+      inFrustum++;
+      if (!ph?.raycast) { visible++; continue; }
+      dir.subVectors(p, cam.position);
+      const d = dir.length();
+      dir.divideScalar(d || 1);
+      const hit = ph.raycast(cam.position, dir, d - 3);
+      if (!hit || !hit.hit) visible++;
+    }
+    return { inFrustum, visible };
+  }
+
   frameHeroShot({ dist = 18.4, height = 6.4, lookY = 4.7, fov = 34, yaw = null } = {}) {
     const sun = this.game.sky?.sunDirection;
     const pts = this.game.level?.spawnPoints;

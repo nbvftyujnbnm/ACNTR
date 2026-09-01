@@ -14,7 +14,10 @@
   debug.clearEnemies();
   debug.resetState();
 
-  debug.placePlayerOnGround(0, 30, 0, 1.0);
+  // Open ground with a real field of fire, facing down it — see the note in
+  // gameplay.js about the mech that ended up nose-first against a warehouse.
+  const open = debug.placePlayerInOpenGround();
+  if (!open) debug.placePlayerOnGround(0, 30, 0, 1.0);
   debug.step(0.5);
 
   // Spawn relative to the player, ahead of the chase camera — absolute world
@@ -50,11 +53,15 @@
   debug.releaseKeys();
 
   const m = game.player.moveState || {};
+  const live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
+  const seen = debug.visibleCount(live);
   window.__POSE_NOTE__ = {
     speed: +(m.speed ?? 0).toFixed(1),
     grounded: !!m.grounded,
     assaultBoost: !!m.assaultBoost,
-    enemiesAlive: (game.enemies?.list || []).filter((e) => e && e.alive !== false).length,
+    enemiesAlive: live.length,
+    enemiesVisible: seen.visible,
+    openGround: open ? open.clear : null,
   };
-  if ((m.speed ?? 0) < 20) window.__POSE_NOTE__.warning = 'HUD pose is nearly stationary — speed readout and movement chips are not under load';
+  if ((m.speed ?? 0) < 20) window.__POSE_NOTE__.warning = 'HUD pose nearly stationary — speed readout and movement chips are not under load';
 })();
