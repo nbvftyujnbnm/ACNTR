@@ -40,14 +40,29 @@
 
   const g = game;
   const m = g.player.moveState || {};
+  // Where the plumes actually ARE, in world space, and which way they point —
+  // relative to the mech and to the camera. Everything structural about the
+  // flame layer has already been verified correct, so if nothing is on screen
+  // the remaining possibilities are all geometric and all visible here.
+  const cam = g.engine.camera;
+  const root = g.player.root.position;
   const flames = (g.vfx?._flames || [])
     .filter((f) => f.intensity > 0.01)
-    .map((f) => +(f.intensity ?? 0).toFixed(2));
+    .map((f) => ({
+      i: +f.intensity.toFixed(2),
+      len: +f.length.toFixed(2),
+      // offset from the mech's origin, so a plume buried in the body is obvious
+      off: f.pos.clone().sub(root).toArray().map((n) => +n.toFixed(2)),
+      dir: f.dirW.toArray().map((n) => +n.toFixed(2)),
+      // does the plume run toward the camera or away from it?
+      towardCam: +f.dirW.dot(cam.position.clone().sub(f.pos).normalize()).toFixed(2),
+      camDist: +cam.position.distanceTo(f.pos).toFixed(1),
+    }));
   window.__POSE_NOTE__ = {
     grounded: !!m.grounded,
     speed: +(m.speed ?? 0).toFixed(1),
     litPlumes: flames.length,
-    intensities: flames,
+    plumes: flames,
     passes: debug.passes(),
   };
   if (!flames.length) window.__POSE_NOTE__.warning = 'no plume above idle — the thruster drive is not running';

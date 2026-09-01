@@ -271,12 +271,13 @@ export class Game {
     if (m.quickBoost || (m.qbTimer ?? 0) > 0) level = 1.55;
     if (m.staggered) level = 0.03;                      // a staggered AC has lost thrust
 
-    // Mech faces -Z, so +Z in its own frame is out the back.
-    this._plumeAxis.set(0, 0, 1).applyQuaternion(this.player.root.quaternion);
-    for (const p of this._plumes) {
-      if (p.main) p.handle.setAxis(this._plumeAxis);
-      p.handle.set(true, p.main ? level : level * 0.5);
-    }
+    // The axis is deliberately NOT overridden. MechFactory orients each thruster
+    // anchor so its local +Z runs down the exhaust, and VFX reads exactly that
+    // when no explicit axis is set — which is also what the enemy AI relies on.
+    // Forcing a world-space "out the back" direction here fought the authored
+    // orientation and pushed the plume through the mech's own body, where the
+    // depth test ate it.
+    for (const p of this._plumes) p.handle.set(true, p.main ? level : level * 0.5);
   }
 
   _registerLoop() {
