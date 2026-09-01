@@ -1307,8 +1307,12 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   nothing and reported success. Any A/B run through it before 2026-09-01 was
   comparing two identical frames. `debug.passes()` lists the switches that
   actually exist.
-- 2026-09-01 [mech/combat] THE THRUSTER ANCHORS POINTED THE WRONG WAY, AND THAT
-  IS WHY NO PLUME HAS EVER BEEN VISIBLE — on the player or on any enemy.
+- 2026-09-01 [mech/combat] THE `mech.thrusters` ANCHORS POINTED THE WRONG WAY,
+  WHICH IS WHY THE PLAYER HAD NO VISIBLE PLUME. Scope, corrected: this affects
+  the `thrusters` array only, which is what `Game._wirePlayerThrusters` uses.
+  `ai/Brain.js` anchors its plume to `hardpoints.core`, and hardpoints are
+  authored "-Z forward" (MechFactory), so their +Z already runs out the back
+  and enemy plume DIRECTION was always correct.
   `FlameHandle` fires along the anchor's local +Z (it reads the third basis
   vector of `matrixWorld`). `MechFactory.addThruster` built every anchor with
   `rotation.x = Math.PI * 0.5`, which maps local +Z to world DOWN; the comment
