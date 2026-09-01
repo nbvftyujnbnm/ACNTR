@@ -13,13 +13,20 @@
   debug.clearEnemies();
   debug.resetState();
 
-  // Start high and with clear air ahead so the run doesn't end in a wall.
-  debug.placePlayerOnGround(0, 150, 0, 40);
+  // Point the run down the LONGEST clear lane on the map, not at a fixed
+  // coordinate. Assault boost now reaches 95.5 m/s (a units bug had it capped
+  // at 61.8 until this was measured and fixed), and at that speed a fixed
+  // start burns through its clearance and ends against terrain: the captured
+  // frame read 38 m/s after a collision, i.e. the frame that exists to judge
+  // whether the game reads FAST was graded on 40% of the speed it should show.
+  const open = debug.placePlayerInOpenGround({ arc: Math.PI * 0.3, range: 260 });
+  if (!open) debug.placePlayerOnGround(0, 150, 0, 40);
+  debug.step(0.4);
 
   // Hold forward + boost + assault boost, then let the real movement model
-  // spin up: assault boost ramps to ~95 m/s over roughly 1.2 s.
+  // spin up: assault boost ramps to ~95 m/s over roughly 1.3 s (measured).
   debug.holdKeys(['KeyW', 'Space', 'ControlLeft']);
-  debug.step(2.2);
+  debug.step(1.5);
 
   // The throttle stays OPEN through the harness's settle window, and this is
   // the difference between grading a 95 m/s frame and grading a 56 m/s one.
@@ -36,4 +43,19 @@
   // session and boost sorts FIRST, so a stuck key would drive every frame
   // after it.
   setTimeout(() => debug.releaseKeys(), 3000);
+
+  // Report the speed the pose actually reached. Because of the render-after-
+  // return behaviour above, this is a LOWER bound on what the captured frame
+  // shows rather than the exact value — but a run that is already slow here
+  // was never going to produce a fast frame.
+  const m = window.__ACNTR__.game.player.moveState || {};
+  window.__POSE_NOTE__ = {
+    speedAtPoseEnd: +(m.speed ?? 0).toFixed(1),
+    assaultBoost: !!m.assaultBoost,
+    assaultRamp: +(m.assaultRamp ?? 0).toFixed(2),
+    openGround: open ? open.clear : null,
+  };
+  if ((m.speed ?? 0) < 70) {
+    window.__POSE_NOTE__.warning = `only ${(m.speed ?? 0).toFixed(0)} m/s at pose end — cannot judge whether the game reads fast`;
+  }
 })();
