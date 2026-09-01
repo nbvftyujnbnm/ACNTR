@@ -433,9 +433,20 @@ export class Garage {
       this.rig.add(l);
       return l;
     };
-    this.keyLight = mkDir(0xdff4ff, 3.4, 3.2, 4.0, 3.4);
-    this.fillLight = mkDir(0x5f92b4, 1.15, -4.0, 1.0, 2.6);
-    this.rimLight = mkDir(0xffb96a, 4.2, -1.6, 2.6, -4.6);
+    // Intensities are sized against the OUTDOOR SUN, which is 24.0 in
+    // Lighting.js, because both are graded through the same pipeline exposure
+    // (0.662) and the same AgX tonemap. The rig used to run at 3.4 / 1.15 / 4.2
+    // — roughly a seventh of that — and against mech paint that is deliberately
+    // 0.075-0.15 albedo the preview came out as a near-black silhouette in a
+    // dark box. That is the worst possible failure for an assembly screen,
+    // whose entire job is to let you read the parts you are choosing.
+    //
+    // The author's ratios are kept (1 : 0.34 : 1.24) and simply scaled. The rim
+    // stays the hottest light: separating a dark AC from a dark backdrop is the
+    // signature look of this screen, and it is doing the most work here.
+    this.keyLight = mkDir(0xdff4ff, 22.0, 3.2, 4.0, 3.4);
+    this.fillLight = mkDir(0x5f92b4, 7.5, -4.0, 1.0, 2.6);
+    this.rimLight = mkDir(0xffb96a, 27.0, -1.6, 2.6, -4.6);
 
     this.stage = stage;
     this._applyLayer(stage);

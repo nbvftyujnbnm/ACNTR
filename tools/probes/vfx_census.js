@@ -175,9 +175,14 @@
   const fd = ps.flameData;
   const n = ps._flameGeo.instanceCount;
   const plumes = [];
+  let nanPlumes = 0;
   cam.updateMatrixWorld();
   for (let i = 0; i < n; i++) {
     const o = i * 12;
+    if (!Number.isFinite(fd[o]) || !Number.isFinite(fd[o + 1]) || !Number.isFinite(fd[o + 2])) {
+      nanPlumes++;
+      continue;
+    }
     const pos = new THREE.Vector3(fd[o], fd[o + 1], fd[o + 2]);
     const dir = new THREE.Vector3(fd[o + 4], fd[o + 5], fd[o + 6]);
     const len = fd[o + 7];
@@ -201,7 +206,7 @@
       dotToCam: +dir.dot(cam.position.clone().sub(pos).normalize()).toFixed(2),
     });
   }
-  out.plumes = { count: n, moveState: {
+  out.plumes = { count: n, nanPlumes, moveState: {
     grounded: !!game.player.moveState?.grounded,
     boosting: !!game.player.moveState?.boosting,
     assaultBoost: !!game.player.moveState?.assaultBoost,
@@ -213,7 +218,13 @@
   const r = game.engine.renderer;
   const gl = r.getContext();
   const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
-  const buf = new Uint8Array(W * H * 4);
+  // Grain, TAA jitter and motion blur all decorrelate two otherwise identical
+  // renders, which buries a small emitter in noise. Turn them off for the A/B.
+  const pq = game.pipeline.q;
+  const grain = game.pipeline.params.grain.amount;
+  const savedQ = { taa: pq.taa, motionBlur: pq.motionBlur };
+  pq.taa = false; pq.motionBlur = false;
+  game.pipeline.params.grain.amount = 0;
   const shoot = (visible) => {
     ps.flameInner.visible = visible;
     ps.flameOuter.visible = visible;
@@ -228,29 +239,41 @@
   const off = shoot(false);
   ps.flameInner.visible = true;
   ps.flameOuter.visible = true;
-  let changed = 0, sumDelta = 0, maxDelta = 0;
+  pq.taa = savedQ.taa; pq.motionBlur = savedQ.motionBlur;
+  game.pipeline.params.grain.amount = grain;
+
+  const above = { d4: 0, d10: 0, d25: 0, d50: 0 };
+  let sumDelta = 0, maxDelta = 0, brightestIdx = -1;
   let bx0 = 1e9, bx1 = -1, by0 = 1e9, by1 = -1;
   for (let i = 0; i < W * H; i++) {
     const o = i * 4;
-    const d = Math.abs(on[o] - off[o]) + Math.abs(on[o + 1] - off[o + 1]) + Math.abs(on[o + 2] - off[o + 2]);
-    if (d > 6) {
-      changed++;
-      sumDelta += d / 3;
-      if (d / 3 > maxDelta) maxDelta = d / 3;
+    const d = (Math.abs(on[o] - off[o]) + Math.abs(on[o + 1] - off[o + 1])
+      + Math.abs(on[o + 2] - off[o + 2])) / 3;
+    if (d > 4) above.d4++;
+    if (d > 10) above.d10++;
+    if (d > 25) {
+      above.d25++;
       const x = i % W, y = (i / W) | 0;
       if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
       if (y < by0) by0 = y; if (y > by1) by1 = y;
     }
+    if (d > 50) above.d50++;
+    sumDelta += d;
+    if (d > maxDelta) { maxDelta = d; brightestIdx = i; }
   }
   out.plumeContribution = {
     viewport: [W, H],
-    pixelsChanged: changed,
-    fractionOfFrame: +(changed / (W * H)).toFixed(5),
-    meanDeltaCodeValues: changed ? +(sumDelta / changed).toFixed(1) : 0,
+    pixelsAboveDelta: above,
+    meanDeltaWholeFrame: +(sumDelta / (W * H)).toFixed(2),
     maxDeltaCodeValues: +maxDelta.toFixed(1),
-    bboxPx: changed ? [bx0, by0, bx1 - bx0, by1 - by0] : null,
+    brightestPx: brightestIdx >= 0 ? [brightestIdx % W, (brightestIdx / W) | 0] : null,
+    bboxOfDelta25: above.d25 ? [bx0, by0, bx1 - bx0, by1 - by0] : null,
+    // What is actually on screen where the plume draws?
+    onAtBrightest: brightestIdx >= 0
+      ? [on[brightestIdx * 4], on[brightestIdx * 4 + 1], on[brightestIdx * 4 + 2]] : null,
+    offAtBrightest: brightestIdx >= 0
+      ? [off[brightestIdx * 4], off[brightestIdx * 4 + 1], off[brightestIdx * 4 + 2]] : null,
   };
-  buf.fill(0);
   debug.releaseKeys();
   return out;
 })();

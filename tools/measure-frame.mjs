@@ -199,9 +199,14 @@ const CLASSIFY = String.raw`
   // would then swallow the whole sky. Hide anything that is not a solid.
   const hidden = [];
   const hide = (o) => { if (o.visible) { hidden.push(o); o.visible = false; } };
-  const mechRoot = game.player.root;
+  // EVERY mech in frame, not just the player's. The combat pose's subject is a
+  // spawned enemy AC and the boost pose's is the player; classifying only
+  // `game.player.root` silently scored the combat frame's mech as `world` and
+  // made the two poses' numbers incomparable.
+  const mechRoots = [game.player.root];
+  for (const e of (game.enemies?.list || [])) if (e && e.root) mechRoots.push(e.root);
   const isMechDescendant = (o) => {
-    for (let p = o; p; p = p.parent) if (p === mechRoot) return true;
+    for (let p = o; p; p = p.parent) if (mechRoots.indexOf(p) !== -1) return true;
     return false;
   };
   scene.traverse((o) => {
@@ -315,6 +320,92 @@ function pct(sorted, p) {
 }
 
 /**
+ * Silhouette separation. Splits a `band`-pixel collar either side of the mech's
+ * outline and reports what each side of that edge actually renders at.
+ *
+ * This is the number the "backlit mech reads as a black blob" complaint is
+ * really about, and neither a whole-mech median nor a hand-drawn rectangle can
+ * answer it: a subject can be correctly exposed everywhere and still have no
+ * edge, and a subject that is 40 code values darker than its surround reads as
+ * a hole in the frame however much internal detail it carries.
+ *
+ * @param {{width:number,height:number,data:Uint8Array}} img
+ * @param {Uint8Array} cls  per-pixel class, 3..5 = mech
+ * @param {number} band     collar width in pixels
+ */
+function rimStats(img, cls, W, H, band = 3) {
+  const isMech = (i) => cls[i] >= 3;
+  const inner = [], outer = [];
+  const px = img.data;
+  const L = (i) => 0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2];
+
+  for (let y = band; y < H - band; y++) {
+    for (let x = band; x < W - band; x++) {
+      const i = y * W + x;
+      const me = isMech(i);
+      let edge = false;
+      for (let dy = -band; dy <= band && !edge; dy++) {
+        for (let dx = -band; dx <= band; dx++) {
+          if (isMech(i + dy * W + dx) !== me) { edge = true; break; }
+        }
+      }
+      if (!edge) continue;
+      (me ? inner : outer).push(L(i));
+    }
+  }
+  if (!inner.length || !outer.length) return null;
+  inner.sort((a, b) => a - b);
+  outer.sort((a, b) => a - b);
+  const mi = pct(inner, 50), mo = pct(outer, 50);
+  return {
+    band,
+    innerPx: inner.length, outerPx: outer.length,
+    innerMed: +mi.toFixed(1), innerP95: +pct(inner, 95).toFixed(1),
+    outerMed: +mo.toFixed(1), outerP95: +pct(outer, 95).toFixed(1),
+    // Weber contrast across the outline. Negative = the mech is darker than
+    // what it sits against, i.e. a silhouette; near zero = it disappears.
+    contrast: +((mi - mo) / Math.max(mo, 1)).toFixed(3),
+  };
+}
+
+/**
+ * Where the frame bottoms out, PER CHANNEL. A grade that pushes a channel
+ * negative before the final clamp does not merely tint the shadows — it
+ * destroys every value below the crossing point in that channel, so the whole
+ * toe collapses onto one hue and the detail in it is unrecoverable. That is
+ * invisible in a luminance histogram, which is why this is reported separately.
+ *
+ * @param {{width:number,height:number,data:Uint8Array}} img
+ */
+function blackPoint(img) {
+  const px = img.data;
+  const n = img.width * img.height;
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  let dark = 0, darkR = 0, darkG = 0, darkB = 0, rZeroDark = 0;
+  for (let p = 0; p < n * 4; p += 4) {
+    const r = px[p], g = px[p + 1], b = px[p + 2];
+    hist[0][r]++; hist[1][g]++; hist[2][b]++;
+    if (0.2126 * r + 0.7152 * g + 0.0722 * b < 20) {
+      dark++; darkR += r; darkG += g; darkB += b;
+      if (r === 0) rZeroDark++;
+    }
+  }
+  const floor = (h) => { for (let v = 0; v < 256; v++) if (h[v] > n * 0.0005) return v; return 255; };
+  return {
+    // % of the whole frame at a hard channel zero.
+    zeroPct: [0, 1, 2].map((c) => +((100 * hist[c][0]) / n).toFixed(2)),
+    // First code value holding at least 0.05% of the frame — the practical floor.
+    floor: [0, 1, 2].map((c) => floor(hist[c])),
+    darkPx: dark,
+    darkArea: +((100 * dark) / n).toFixed(2),
+    darkMeanRGB: dark ? [darkR / dark, darkG / dark, darkB / dark].map((v) => +v.toFixed(1)) : null,
+    darkROverB: dark && darkB ? +(darkR / darkB).toFixed(3) : null,
+    // Of the pixels under display 20, what fraction has red hard-clipped to 0.
+    darkRedClippedPct: dark ? +((100 * rZeroDark) / dark).toFixed(2) : null,
+  };
+}
+
+/**
  * @param {{width:number,height:number,data:Uint8Array}} img
  * @param {Uint8Array} cls
  */
@@ -323,6 +414,7 @@ function stats(img, cls) {
   const lumas = Array.from({ length: n }, () => []);
   const sat = new Float64Array(n);
   const rb = new Float64Array(n);
+  const chan = Array.from({ length: n }, () => new Float64Array(3));
   const px = img.data;
 
   for (let i = 0, p = 0; i < cls.length; i++, p += 4) {
@@ -332,6 +424,7 @@ function stats(img, cls) {
     const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
     sat[c] += mx > 0 ? (mx - mn) / mx : 0;
     rb[c] += b > 0 ? r / b : 0;
+    chan[c][0] += r; chan[c][1] += g; chan[c][2] += b;
   }
 
   const rows = [];
@@ -359,6 +452,7 @@ function stats(img, cls) {
       above128: +((100 * L.filter((v) => v > 128).length) / L.length).toFixed(1),
       sat: +(sat[c] / L.length).toFixed(3),
       rOverB: +(rb[c] / L.length).toFixed(3),
+      meanRGB: [0, 1, 2].map((k) => +(chan[c][k] / L.length).toFixed(1)),
     });
   }
   return rows;
@@ -459,7 +553,19 @@ async function startServer() {
 
       const tag = v.name === 'base' && variants.length === 1 ? pose : `${pose}_${v.name}`;
       const png = resolve(outDir, `${tag}.png`);
-      await page.screenshot({ path: png, type: 'png', timeout: 180000 });
+      // A pose that blows Playwright's screenshot budget under SwiftShader (the
+      // VFX-heavy ones do) must not discard the poses already measured — the
+      // same defect capture.mjs was fixed for.
+      try {
+        await page.screenshot({ path: png, type: 'png', timeout: 180000 });
+      } catch (err) {
+        console.error(`!! ${tag}: screenshot failed — ${String(err.message || err).split('\n')[0]}`);
+        report.push({ pose, variant: v.name, failed: true });
+        await page.evaluate(() => {
+          try { window.__ACNTR__.debug.releaseCamera().freeze(false).setHudVisible(true).resetState().clearEnemies(); } catch { /* noop */ }
+        });
+        continue;
+      }
       const meta = await page.evaluate(CLASSIFY);
 
       const img = readPng(png);
@@ -469,13 +575,15 @@ async function startServer() {
       }
       const cls = new Uint8Array(Buffer.from(meta.classes, 'base64'));
       const rows = stats(img, cls);
-      const entry = { pose, variant: v.name, png: png.replace(ROOT + '/', ''), bbox: meta.bbox, sunDir: meta.sunDir, exposure: +meta.exposure.toFixed(3), lighting: meta.lighting, rows };
+      const rim = rimStats(img, cls, meta.width, meta.height, 3);
+      const black = blackPoint(img);
+      const entry = { pose, variant: v.name, png: png.replace(ROOT + '/', ''), bbox: meta.bbox, sunDir: meta.sunDir, exposure: +meta.exposure.toFixed(3), lighting: meta.lighting, rows, rim, black };
       report.push(entry);
 
       console.log(`\n=== ${tag}  cam ${meta.camera.join(',')} fov ${meta.fov}  exposure ${entry.exposure} ===`);
       if (meta.lighting) console.log('    lighting ' + JSON.stringify(meta.lighting));
       console.log('    bbox ' + JSON.stringify(meta.bbox));
-      console.log('class         px     area%  mean   sd   p05  p25  med  p75  p95  <24%  >128%  sat   R/B');
+      console.log('class         px     area%  mean   sd   p05  p25  med  p75  p95  <24%  >128%  sat   R/B       R     G     B');
       for (const r of rows) {
         if (!r.px) { console.log(`${r.class.padEnd(12)}  (none)`); continue; }
         console.log(
@@ -483,9 +591,21 @@ async function startServer() {
           `${String(r.mean).padStart(6)} ${String(r.sd).padStart(5)} ${String(r.p05).padStart(4)} ` +
           `${String(r.p25).padStart(4)} ${String(r.median).padStart(4)} ${String(r.p75).padStart(4)} ` +
           `${String(r.p95).padStart(4)} ${String(r.below24).padStart(5)} ${String(r.above128).padStart(6)} ` +
-          `${String(r.sat).padStart(6)} ${String(r.rOverB).padStart(5)}`
+          `${String(r.sat).padStart(6)} ${String(r.rOverB).padStart(5)}` +
+          `   ${r.meanRGB.map((n) => String(n).padStart(5)).join(' ')}`
         );
       }
+      if (rim) {
+        console.log(
+          `silhouette  inner(med/p95) ${rim.innerMed}/${rim.innerP95}   ` +
+          `outer(med/p95) ${rim.outerMed}/${rim.outerP95}   weber ${rim.contrast}`
+        );
+      }
+      console.log(
+        `blackpoint  zero% RGB ${black.zeroPct.join('/')}   floor ${black.floor.join('/')}   ` +
+        `under20 ${black.darkArea}% mean ${black.darkMeanRGB ? black.darkMeanRGB.join('/') : '-'} ` +
+        `R/B ${black.darkROverB}   redClipped ${black.darkRedClippedPct}%`
+      );
 
       await page.evaluate(() => {
         try {
