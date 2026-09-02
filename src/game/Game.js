@@ -151,11 +151,29 @@ export class Game {
     bus.on('engine:resize', () => this._wireVfxDepth());
 
     // The rig can conform the feet to terrain, but only if it is given a height
-    // sampler. Nothing ever handed it one, so the AC has been standing on the
-    // XZ plane its legs assume rather than on the ground it is actually on —
-    // most visible on the slopes and catwalk edges the hero pose favours.
-    if (this.physics?.groundHeight) {
-      this.player?.rig?.setGroundSampler?.((x, z) => this.physics.groundHeight(x, z));
+    // sampler. Nothing ever handed it one, so the AC stood on the flat plane its
+    // legs assume rather than on the ground it is actually on.
+    //
+    // The obvious sampler is WRONG, and was: `Physics.groundHeight(x, z)`
+    // answers with the HIGHEST static surface in that column, which under any
+    // deck, gantry or bridge is a CEILING. The rig then tried to plant its feet
+    // on it — measured on a spawn at y 18.6 where the sampler answered 26.5,
+    // both legs solved to a full crouch and, before MechRig grew its own guard,
+    // folded up over the mech's head. Several review frames were shot under a
+    // catwalk, so this was not a corner case.
+    //
+    // Cast DOWN from just above the mech instead: that finds the surface it is
+    // actually standing on. `groundHeight` remains the fallback for a foot
+    // placed out past the level's collision geometry.
+    if (this.physics?.raycast) {
+      const from = new THREE.Vector3();
+      const down = new THREE.Vector3(0, -1, 0);
+      this.player?.rig?.setGroundSampler?.((x, z) => {
+        from.set(x, this.player.root.position.y + 3.0, z);
+        const hit = this.physics.raycast(from, down, 60);
+        if (hit && hit.hit) return from.y - hit.distance;
+        return this.physics.groundHeight?.(x, z) ?? this.player.root.position.y;
+      });
     }
 
     // Persistent damage smoke. VFX has the whole system and it was never
@@ -170,8 +188,15 @@ export class Game {
     // is disposed rather than leaked when the wave is cleared.
     bus.on('ai:spawned', ({ entity }) => {
       if (!entity) return;
-      if (this.physics?.groundHeight) {
-        entity.rig?.setGroundSampler?.((x, z) => this.physics.groundHeight(x, z));
+      if (this.physics?.raycast && entity.root) {
+        const from = new THREE.Vector3();
+        const down = new THREE.Vector3(0, -1, 0);
+        entity.rig?.setGroundSampler?.((x, z) => {
+          from.set(x, entity.root.position.y + 3.0, z);
+          const hit = this.physics.raycast(from, down, 60);
+          if (hit && hit.hit) return from.y - hit.distance;
+          return this.physics.groundHeight?.(x, z) ?? entity.root.position.y;
+        });
       }
       entity._damageSmoke = this.vfx?.attachDamageSmoke?.(entity) || null;
     });
