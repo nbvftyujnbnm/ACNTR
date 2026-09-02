@@ -1373,3 +1373,18 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   depthTest false and renderOrder 9999) and rasterises zero pixels. `flameVert`
   early-outs to `gl_Position = vec4(0,0,2,1)` — clipped — when `aParams.y`
   reads 0, which fits, but the particle shaders read their attributes fine.
+- 2026-09-01 [tools] THE GLSL LINT HAD A FALSE NEGATIVE AND LET THE BACKTICK BUG
+  LAND A THIRD TIME. The first version only inspected template literals carrying
+  a `/* glsl */` tag, and skipped any file containing no such tag. `Terrain.js`
+  injects its shader through `onBeforeCompile` with plain UNTAGGED literals, so
+  the file was never examined at all: the lint printed "clean (48 files
+  scanned)" while the build was broken by ``(`acFlat`)`` in a GLSL comment.
+  A guard that only checks the cases you remembered to label is not a guard.
+  It now scans every file properly — tracking line comments, block comments,
+  quoted strings and dollar-brace nesting — finds EVERY template literal, and
+  checks the ones whose body looks like GLSL. Verified by reintroducing the
+  exact bug and confirming it is caught, then removing it and confirming clean.
+  Also deliberately NOT added: a second "any backtick in a GLSL-looking comment"
+  sweep. It was tried and flagged three ordinary JavaScript comments in
+  Level.js nowhere near a shader. A lint that cries wolf gets ignored, which is
+  how a guard stops guarding.
