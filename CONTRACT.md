@@ -297,6 +297,30 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
 ## Contract Amendments
 <!-- append: `- YYYY-MM-DD [module] added X because Y` -->
 
+### Read these first — the traps that have each cost more than a day
+
+Ninety-odd amendments follow and they are all worth having, but these are the
+ones that have burned multiple agents, several of them more than once. Search
+the file for the phrase in caps.
+
+| If you are about to… | Read |
+|---|---|
+| write or fix a review pose | **THE HARNESS RENDERS THE CAPTURED FRAME ~1.1 s OF REAL TIME AFTER THE POSE SCRIPT RETURNS** — three separate diagnoses died on this |
+| reposition the player in a pose | **ROOT ROTATION IS NOT THE AIM** — CameraRig owns `aimYaw`, and setting only the root is undone within a second |
+| judge whether something is "in frame" | **BEING INSIDE THE FRUSTUM AND BEING VISIBLE ARE DIFFERENT QUESTIONS** |
+| put a backtick anywhere near GLSL | **THE GLSL LINT HAD A FALSE NEGATIVE** — this bug has broken the build three times |
+| A/B two renders | `debug.setPass` silently no-opped before 2026-09-01, so older A/Bs compared identical frames |
+| conclude the shadows are weak | **THE SHADOWS ARE NOT WEAK** — measured; at a 13.5° sun the cast is a 37 m blade, and the contact cue is AO's job |
+| lighten the mech's paint | the MECH_PALETTES comment: paint owns darkness, lighting owns shadow-side legibility. Two passes were lost oscillating on this |
+| add negative space to the mech | **THE "ONLY ONE TRUE SKY-GAP" DEFECT IS STALE** and **THE LEG'S FLAT PROFILE IS A WIDTH/DEPTH BUDGET PROBLEM** |
+| change a loadout-derived number | **EVERY LOADOUT MULTIPLIER WAS PINNED AT ITS CLAMP FLOOR** — `warnIfSaturated` exists to catch the recurrence |
+| debug the thruster plumes | **THE THRUSTER PLUMES RENDER**, **THE mech.thrusters ANCHORS POINTED THE WRONG WAY**, and **THE INSTANCED PARTICLE PATH WORKS** — a long elimination list, do not redo it |
+| wire a subsystem | **THE NEVER-CALLED-SETTER SWEEP** — it has found seven real bugs |
+
+Two habits the file exists to enforce: **measure before you fix**, and when a
+measurement and an image disagree, believe the image and go fix the metric —
+two of the silhouette metrics were wrong on their first outing.
+
 - 2026-08-26 [player] `Entity.aimYaw` / `Entity.aimPitch` (numbers, radians) — CameraRig writes
   them every late-update; PlayerController reads them at the start of its update and re-applies
   the same frame's raw mouse delta, so movement direction has zero-frame latency while the camera

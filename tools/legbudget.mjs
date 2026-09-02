@@ -36,7 +36,7 @@ function arg(name, def = null) {
 }
 
 const YAWS = String(arg('yaws', '0,45,90,135')).split(',').map(Number).filter(isFinite);
-const PX = parseInt(arg('px', '900'), 10);
+const PX = parseInt(arg('px', '200'), 10); // raster resolution, pixels per metre
 const D = MP.MECH_DIMS;
 
 // Deterministic RNG so two runs of the same source produce the same shape.
@@ -94,12 +94,15 @@ function buildParts(which) {
       collect(parts, MP.buildFoot({ rng: rng32(13), side, legType: 'biped' }), ankM, 'foot');
     }
     if (which.arm) {
-      // Rest arm pose from MechRig._updateArms: hangs from the shoulder with a
-      // small outward roll. Only the inboard face matters here.
-      const roll = side * 0.095;
-      const shM = trs(side * D.shoulderX, D.shoulderY, 0, 0.10, 0, roll);
+      // Rest arm pose, read straight off `MechRig._updateArms` with every weight
+      // (wBoost/wAssault/wStagger/aimPitch) at zero: shoulder rotation
+      // (0, 0, side * 0.14), elbow rotation.x 0.14. The roll is the knob that
+      // sets arm-to-thigh daylight, so a stale copy of it here silently moves
+      // the cap this whole tool exists to report — it was 0.095 for one pass,
+      // which put the wrist 13 cm further inboard than the rig actually holds it.
+      const shM = trs(side * D.shoulderX, D.shoulderY, 0, 0, 0, side * 0.14);
       collect(parts, MP.buildUpperArm({ rng: rng32(3), side }), shM, 'upperArm');
-      const foreM = new THREE.Matrix4().multiplyMatrices(shM, trs(0, -D.elbowDrop, 0, -0.12, 0, 0));
+      const foreM = new THREE.Matrix4().multiplyMatrices(shM, trs(0, -D.elbowDrop, 0, 0.14, 0, 0));
       collect(parts, MP.buildForeArm({ rng: rng32(5), side }), foreM, 'foreArm');
     }
     if (which.pelvis && side < 0) {
@@ -119,7 +122,7 @@ function buildParts(which) {
  * global max on the leg and a global min on the arm and subtracted two numbers
  * measured 1.5 m apart.
  */
-const GRID = { minU: -3.2, maxV: 4.35, minV: -0.45, scale: 200 }; // 5 mm/px
+const GRID = { minU: -3.2, maxV: 4.35, minV: -0.45, scale: PX }; // pixels per metre
 function raster(tris, yawDeg) {
   const th = (yawDeg * Math.PI) / 180;
   const c = Math.cos(th), s = Math.sin(th);
@@ -216,7 +219,6 @@ for (const y of HEIGHTS) {
   const a = rowStats(wR, rowAt(y));
   const b = rowStats(dR, rowAt(y));
   if (!a || !b) continue;
-  const su = rowStats(raster([], 0), 0); void su;
   const s45 = (a.span + b.span) * Math.SQRT1_2;
   console.log(`  ${fmt(y)}  ${fmt(a.span)}  ${fmt(b.span)}  ${fmt(a.span + b.span)}  ${fmt(s45)}`);
 }
