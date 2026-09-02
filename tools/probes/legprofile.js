@@ -50,15 +50,22 @@
     };
   }
 
+  // BONES ARE UNNAMED Object3Ds — `MechFactory` names only the root, so walking
+  // up to the first NAMED ancestor put every mesh on the frame under one key
+  // ('mech') and made `byBone` a single row. Identify the owner by identity
+  // against `rig.bones` instead, which is where the names actually live.
+  const boneOf = new Map();
+  for (const k of Object.keys(bones)) if (bones[k]) boneOf.set(bones[k], k);
+
   const mb = new THREE.Box3();
   root.traverse((o) => {
     if (!(o.isMesh || o.isSkinnedMesh)) return;
     if (!o.geometry) return;
     if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
     mb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
-    // name the owning bone by walking up to the first named ancestor
-    let owner = o, name = o.name || '';
-    while (owner && !name) { owner = owner.parent; name = owner ? (owner.name || '') : 'root'; }
+    let owner = o, name = '';
+    while (owner && !name) { name = boneOf.get(owner) || ''; owner = owner.parent; }
+    if (!name) name = o.name || 'root';
     const rec = {
       name: name || '?',
       visible: o.visible,

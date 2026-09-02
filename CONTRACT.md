@@ -1485,3 +1485,14 @@ two of the silhouette metrics were wrong on their first outing.
   two-line guard at the top of `Physics.raycast` (`if (!(maxDist > 0)) return
   null;`) would close the class. src/world is another agent's file, so it is
   flagged here rather than edited.
+- 2026-09-02 [physics] `Physics.raycast` RETURNS A SHARED MUTABLE SCRATCH
+  OBJECT, and the NEXT raycast invalidates the previous result. Measured: cast
+  down (hits at 5.02 m from a 5 m origin — correct), then cast up (misses,
+  returns null); re-reading the FIRST result afterwards now shows `hit === false`,
+  because the second call reset `this._rayOut` at its top before returning null.
+  Never hold a raycast result across another raycast. Read what you need out of
+  it immediately, or pass your own `out` object as the fourth argument.
+  Confirmed in the same probe that the raycast itself is CORRECT with finite
+  inputs — up misses, down hits at exactly the expected distance, a 120 m
+  forward ray across scored-clear ground misses, a 2 m ray misses. The only
+  defect is the NaN-range path recorded above.
