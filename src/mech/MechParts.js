@@ -1548,17 +1548,17 @@ export function buildShin(o = {}) {
   // what stands furthest aft. It sat at z 0.41 and would be buried 33 cm inside
   // the new mass.
   _q.setFromEuler(_e.set(Math.PI * 0.5 - 0.30, 0, 0));
-  _pv.set(0, BOT + 0.44, cz * 0.74); _sc.set(1, 1, 1);
+  _pv.set(0, BOT + 0.44, cz * 0.58); _sc.set(1, 1, 1);
   _m.compose(_pv, _q, _sc);
   b.addM('mech', MASK.TRIM, nozzle(0.085, 0.15, 0.22, 14), _m);
-  _pv.set(0, BOT + 0.43, cz * 0.86); _m.compose(_pv, _q, _sc);
+  _pv.set(0, BOT + 0.43, cz * 0.70); _m.compose(_pv, _q, _sc);
   b.addM('glow', MASK.BASE, chamferCyl(0.082, 0.076, 0.03, 12, 0.008), _m);
-  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.445, BOT + 0.62, shroudZ * 0.28);
+  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.43, BOT + 0.62, shroudZ * 0.28);
 
   if (d) {
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.46, BOT + 0.54, shroudZ * 0.30, 0.78, 0.80, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.445, BOT + 0.54, shroudZ * 0.30, 0.78, 0.80, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
     greebleFace(b, 'armor', MASK.BASE, rev ? 'pz' : 'nz', 0, BOT + 0.58, shroudZ * 1.16, 0.62, 0.84, rng, { cols: 3, rows: 4, depth: 0.038, accent: 0.04 });
-    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, BOT + 0.92, cz * 0.52, 0.40, 0.34, 4, 0.06);
+    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, BOT + 0.92, cz * 0.47, 0.40, 0.34, 4, 0.06);
     boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.28, -0.28, rev ? 0.24 : -0.24, 0.18, 8, 0.024, 0.016);
   }
   return { b, anchors: { ankle: [0, -L, 0] } };
