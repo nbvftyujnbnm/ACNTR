@@ -1024,7 +1024,36 @@ export class RenderPipeline {
     // cut from 0.85 to 0.34 to remove. At 0.95 a full assault boost reaches
     // 1.29, i.e. 1.8 texels: an unmistakable prismatic edge stretch in the
     // corners that still never separates into three legible fringes.
-    f.uChromatic.value = p.chromatic.amount + d.crit * 3.4 + d.hit * 5.0 + d.speed * 0.95;
+    //
+    // THE CRIT AND HIT COEFFICIENTS WERE NEVER CONVERTED TO PIXELS, and they
+    // are the reason a low-AP frame reads as a cheap filter. The corner offset
+    // is `|cc| * r2 * 4 * uChromatic` texels with |cc| = 0.7071 and r2 = 0.5,
+    // i.e. 1.414 texels per channel — and R and B move in OPPOSITE directions,
+    // so the visible red/blue split is 2.83 * uChromatic pixels. Worked through
+    // the whole ladder at 1600x900:
+    //
+    //   resting          0.34 ->  1.0 px    (sub-pixel, correct)
+    //   assault boost    1.29 ->  3.6 px    (measured and intended, see above)
+    //   30% AP  (old)    1.96 ->  5.5 px
+    //   23% AP  (old)    3.05 ->  8.6 px    <- shots/garage01/hud.png
+    //   0% AP   (old)    3.74 -> 10.6 px
+    //   23% AP + a hit landing + assault boost (old): 7.00 -> 19.8 px
+    //
+    // The 0.85 that this uniform was CUT FROM, as "the single loudest cheap
+    // post filter tell left in the frame", was 2.4 px. Every crit value above
+    // was three to eight times that, on the frames a player spends the most
+    // time looking at. Three separate terms key off `crit` (this, +0.10 of
+    // vignette, and the damage rim) and this is the one that was out by an
+    // order of magnitude, not the rim.
+    //
+    // New coefficients put full crit at 1.59 (4.5 px — a shade past assault
+    // boost, which is right: a failing FCS should read stronger than speed)
+    // and a landed hit at up to 2.28 more, a ~0.2 s transient. The clamp is
+    // the guard the additive form never had: four independent terms summing
+    // means the worst case is not any of their design points, and 3.2 (9.1 px)
+    // is the most this frame can carry before the fringe separates.
+    f.uChromatic.value = Math.min(
+      3.2, p.chromatic.amount + d.crit * 1.25 + d.hit * 1.9 + d.speed * 0.95);
     f.uVignette.value = p.vignette.amount + d.crit * 0.10;
     f.uDamage.value = clamp(d.crit * 0.55 + d.hit * 0.65, 0, 1);
     f.uGrain.value = p.grain.amount * (1 + d.crit * 1.4);

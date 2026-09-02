@@ -1466,3 +1466,22 @@ two of the silhouette metrics were wrong on their first outing.
   To restore it properly the pipeline must COPY depth into a texture the scene
   pass is not writing (or expose the previous frame's), and only then can this
   pass it. Do not "fix" this by passing the obvious texture again.
+- 2026-09-02 [tools/physics] A NaN `maxDist` MAKES `Physics.raycast` REPORT A
+  PHANTOM HIT, and that is what "4 enemies in frustum, 0 visible" was — not the
+  arena scorer, which three iterations were spent on.
+  The mechanism: `raycast` starts with `best = maxDist` and detects a miss with
+  `if (best >= maxDist) return null`. That comparison is FALSE when maxDist is
+  NaN, so the function falls through to `res.hit = true; res.distance = best`
+  and returns a hit at a NaN distance. `JSON.stringify` renders that as `null`,
+  which is how it first showed up as four nulls in a pose note.
+  The NaN came from `debug.visibleCount`: `aim.y += (e.collider?.height ?? 8)`
+  — `??` catches undefined but NOT NaN. One NaN aim point makes the direction
+  NaN, the length NaN, and the range NaN, and then EVERY target reports as
+  occluded no matter where it is.
+  Guarded on the caller side with `Number.isFinite`. WORTH DOING AT SOURCE TOO,
+  and it is not just a harness concern: `TargetingSystem` uses the same raycast
+  for line-of-sight lock breaking, so any caller that ever passes a NaN range
+  would drop the player's lock permanently and look like scenery occlusion. A
+  two-line guard at the top of `Physics.raycast` (`if (!(maxDist > 0)) return
+  null;`) would close the class. src/world is another agent's file, so it is
+  flagged here rather than edited.

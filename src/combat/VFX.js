@@ -32,6 +32,11 @@ const _dir = new THREE.Vector3();
 const _t1 = new THREE.Vector3();
 const _t2 = new THREE.Vector3();
 const _ref = new THREE.Vector3();
+// Ground-wash scratch, kept separate: the wash spawner is called in a loop from
+// _updateGroundWash, which is itself holding _v0.._v3 across the call.
+const _w0 = new THREE.Vector3();
+const _w1 = new THREE.Vector3();
+const _w2 = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _c0 = new THREE.Color();
 const _c1 = new THREE.Color();
@@ -271,6 +276,9 @@ export class VFX {
     this._deferred = [];
     for (let i = 0; i < 64; i++) this._deferred.push(new Deferred());
 
+    // entities whose thrusters kick up ground particulate — see _noteWasher
+    this._washers = [];
+
     // impact de-duplication ring (direct call vs bus event)
     this._dedupe = new Float32Array(8 * 4);
     this._dedupeHead = 0;
@@ -314,10 +322,40 @@ export class VFX {
       if (!p || !this.enabled) return;
       const entity = p.entity || p;
       if (!entity) return;
+      this._forgetWasher(entity);
       resolvePoint(entity, _v0);
       const r = resolveRadius(entity, 3);
       this.explosion(_v0, r * 2.1, { ground: false, shake: 1, hitstop: 0.07, debris: 1.3 });
     });
+
+    // Movement events are also how VFX LEARNS WHICH ENTITIES MOVE. Nothing in
+    // the contract hands the effects system the player, and per-frame ground
+    // particulate needs an entity with a published `moveState` to read. Every
+    // movement event carries `entity`, so latching them here gives the ground
+    // wash a driver without a new wiring point in Game.
+    on(EV.LANDED, (p) => {
+      if (!p || !this.enabled) return;
+      this._noteWasher(p.entity);
+      const pt = p.position || p.point || (p.entity && p.entity.root && p.entity.root.position);
+      if (!pt) return;
+      this.landingDust(pt, p.impactSpeed ?? 12, resolveRadius(p.entity, 2.2));
+    });
+    on(EV.ASSAULT_BOOST, (p) => { if (p) this._noteWasher(p.entity); });
+    on(EV.EN_EMPTY, (p) => { if (p) this._noteWasher(p.entity); });
+  }
+
+  /** Track an entity for per-frame ground particulate. Idempotent, bounded. */
+  _noteWasher(entity) {
+    if (!entity || !entity.root || !entity.moveState) return;
+    for (const w of this._washers) if (w.entity === entity) return;
+    if (this._washers.length >= 6) return;
+    this._washers.push({ entity, accum: 0 });
+  }
+
+  _forgetWasher(entity) {
+    for (let i = this._washers.length - 1; i >= 0; i--) {
+      if (this._washers[i].entity === entity) this._washers.splice(i, 1);
+    }
   }
 
   _impactKind(p) {
@@ -417,6 +455,28 @@ export class VFX {
       hdr(p.color1, cr, cg * 0.55, cb * 0.25, 2);
       p.alpha0 = 1; p.alpha1 = 0;
       p.fadeIn = 0; p.alphaCurve = 1.3;
+      ps.emit();
+    }
+
+    // 3b — the CROSS blade. Two streaks perpendicular to the barrel, on the
+    //      tangents, so the flash is a wide flat bar through a hot point rather
+    //      than a symmetric ball with a lens star pasted on it. This is the
+    //      anisotropy REVIEW asks for: it comes from the muzzle brake venting
+    //      sideways, not from the lens, so it must live in world space and
+    //      rotate with the gun. Two frames — the very first thing to go.
+    for (let i = 0; i < 2; i++) {
+      const tan = i === 0 ? _t1 : _t2;
+      p = ps.begin(BATCH_ADD);
+      p.pos.copy(pos).addScaledVector(_dir, 0.16 * s);
+      p.vel.copy(tan).multiplyScalar(0.9);
+      p.life = 0.038;
+      p.size0 = 0.30 * s; p.size1 = 0.1 * s;
+      p.stretch = (2.6 - i * 1.0) * s;
+      p.tile = TILE.STREAK;
+      hdr(p.color0, lerp(cr, 1, 0.62), lerp(cg, 1, 0.58), lerp(cb, 1, 0.42), 14 - i * 5);
+      hdr(p.color1, cr, cg * 0.5, cb * 0.2, 1.5);
+      p.alpha0 = 1; p.alpha1 = 0;
+      p.fadeIn = 0; p.alphaCurve = 1.5;
       ps.emit();
     }
 
@@ -872,110 +932,155 @@ export class VFX {
     const cr = _c0.r, cg = _c0.g, cb = _c0.b;
 
     // --- 1. white-hot initial flash ----------------------------------------
+    //
+    // BOTH flash sprites used to be enormous AND blown: the flare reached
+    // R * 5.5, which at a mech-kill radius of 13 m is a 71 m sprite, emitting at
+    // 18 linear. AgX makes display value nearly independent of radiance past
+    // ~3 linear, so that one quad painted a third of the frame a single flat
+    // white with no hue and no structure — the "bloom that washes the frame"
+    // automatic failure, and the reason no explosion has ever photographed as an
+    // orange fireball. The flash is now SMALL and BRIEF; the fireball below
+    // carries the size, and it carries it in the band where colour survives.
     let p = ps.begin(BATCH_ADD);
     p.pos.copy(pos);
-    p.life = 0.075;
-    p.size0 = R * 0.55; p.size1 = R * 2.0;
+    p.life = 0.06;
+    p.size0 = R * 0.35; p.size1 = R * 1.05;
     p.tile = TILE.CORE;
-    hdr(p.color0, 1.0, 0.97, 0.9, 42);
-    hdr(p.color1, 1.0, 0.55, 0.2, 6);
-    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.35; p.alphaCurve = 1.5;
+    hdr(p.color0, 1.0, 0.97, 0.9, 34);
+    hdr(p.color1, 1.0, 0.55, 0.2, 4);
+    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.35; p.alphaCurve = 1.6;
     ps.emit();
 
     p = ps.begin(BATCH_ADD);
     p.pos.copy(pos);
-    p.life = 0.13;
-    p.size0 = R * 1.4; p.size1 = R * 5.5;
+    p.life = 0.105;
+    p.size0 = R * 0.8; p.size1 = R * 2.3;
     p.tile = TILE.FLARE;
-    hdr(p.color0, 1.0, 0.86, 0.62, 18);
-    hdr(p.color1, 1.0, 0.35, 0.08, 1.5);
-    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.32;
+    hdr(p.color0, 1.0, 0.84, 0.55, 8.5);
+    hdr(p.color1, 1.0, 0.32, 0.07, 0.9);
+    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.3; p.alphaCurve = 1.7;
     p.rot = Math.random() * TAU; p.spin = randRange(-1.2, 1.2);
     ps.emit();
 
     ps.lights.flash(pos, hdr(_c1, 1.0, 0.72, 0.36, 1), 90 * big * big, R * 9, 0.42, this.time, 3);
 
-    // --- 2. fireball: additive hot puffs -----------------------------------
-    const fire = Math.round(clamp(9 + R * 2.4, 9, 30) * q);
+    // --- 2. fireball -------------------------------------------------------
+    //
+    // The BODY of the fireball is alpha-blended, not additive. Additive puffs
+    // cannot be a fireball on this tone curve: twenty of them at 9 linear stack
+    // into one saturated slab with no interior, no silhouette and no colour.
+    // Alpha puffs occlude each other, so the ball has an edge and a turbulent
+    // interior, and their rgb still runs past 1.0 so the hot side blooms. The
+    // additive pass is kept for the CORE only — a handful of small, short-lived
+    // sprites that give the centre its blown-out heart for the first 0.25 s.
+    const fire = Math.round(clamp(10 + R * 2.2, 10, 28) * q);
     for (let i = 0; i < fire; i++) {
       _v0.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
       if (_v0.lengthSq() < 1e-5) _v0.set(0, 1, 0);
       _v0.normalize();
       const rr = Math.pow(Math.random(), 0.55);
-      p = ps.begin(BATCH_ADD);
-      p.pos.copy(pos).addScaledVector(_v0, rr * R * 0.35);
-      p.vel.copy(_v0).multiplyScalar(randRange(2.5, 9) * big);
-      p.vel.y += 1.2 * big;
-      p.drag = 4.2;
-      p.life = randRange(0.24, 0.55);
-      p.size0 = R * 0.3; p.size1 = R * randRange(0.9, 1.5);
+      // hotter toward the middle of the ball, cooler and sootier at the rim
+      const heat = clamp(1.15 - rr, 0.15, 1);
+      p = ps.begin(BATCH_ALPHA);
+      p.pos.copy(pos).addScaledVector(_v0, rr * R * 0.40);
+      p.vel.copy(_v0).multiplyScalar(randRange(2.5, 8) * big);
+      p.vel.y += 1.6 * big;
+      p.drag = 4.0;
+      p.life = randRange(0.30, 0.62);
+      p.size0 = R * 0.30; p.size1 = R * randRange(0.85, 1.45);
       p.tile = TILE.SMOKE_A + (i % 3);
-      hdr(p.color0, 1.0, lerp(0.82, 0.55, Math.random()), lerp(0.55, 0.16, Math.random()), 9);
-      hdr(p.color1, cr * 0.7, cg * 0.22, cb * 0.05, 0.5);
-      p.alpha0 = 0.95; p.alpha1 = 0;
-      p.fadeIn = 0.03; p.sizeCurve = 0.45; p.alphaCurve = 1.3;
-      p.turb = 0.55 * big; p.turbFreq = 5.5;
+      p.color0.setRGB(2.6 * heat + 0.5, (0.95 * heat + 0.10) * lerp(0.75, 1.05, Math.random()), 0.30 * heat * heat + 0.03);
+      p.color1.setRGB(0.16 * cr, 0.055 * cg, 0.028 * cb);
+      p.alpha0 = 0.92; p.alpha1 = 0;
+      p.fadeIn = 0.03; p.erode = 0.34; p.sizeCurve = 0.45; p.alphaCurve = 1.35;
+      p.turb = 0.6 * big; p.turbFreq = 5.5;
       p.rot = Math.random() * TAU; p.spin = randRange(-3.5, 3.5);
       ps.emit();
     }
 
+    const core = Math.round(clamp(3 + R * 0.6, 3, 9) * q);
+    for (let i = 0; i < core; i++) {
+      _v0.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+      p = ps.begin(BATCH_ADD);
+      p.pos.copy(pos).addScaledVector(_v0, Math.random() * R * 0.22);
+      p.vel.copy(_v0).multiplyScalar(randRange(2, 6) * big);
+      p.drag = 5.5;
+      p.life = randRange(0.13, 0.26);
+      p.size0 = R * 0.22; p.size1 = R * randRange(0.5, 0.8);
+      p.tile = TILE.SMOKE_A + (i % 3);
+      hdr(p.color0, 1.0, lerp(0.80, 0.58, Math.random()), lerp(0.40, 0.14, Math.random()), 7);
+      hdr(p.color1, cr, cg * 0.30, cb * 0.06, 0.7);
+      p.alpha0 = 0.85; p.alpha1 = 0;
+      p.fadeIn = 0.02; p.sizeCurve = 0.4; p.alphaCurve = 1.5;
+      p.rot = Math.random() * TAU; p.spin = randRange(-4, 4);
+      ps.emit();
+    }
+
     // --- 3. rolling smoke over the fireball --------------------------------
-    const smokeN = Math.round(clamp(7 + R * 1.6, 7, 22) * q);
+    const smokeN = Math.round(clamp(8 + R * 1.7, 8, 24) * q);
     for (let i = 0; i < smokeN; i++) {
       _v0.set(Math.random() * 2 - 1, Math.random() * 1.4 - 0.35, Math.random() * 2 - 1).normalize();
       p = ps.begin(BATCH_ALPHA);
-      p.pos.copy(pos).addScaledVector(_v0, Math.random() * R * 0.45);
+      p.pos.copy(pos).addScaledVector(_v0, Math.random() * R * 0.5);
       p.vel.copy(_v0).multiplyScalar(randRange(1.5, 5) * big);
       p.vel.y += randRange(0.8, 2.6) * big;
       p.drag = 1.5;
-      p.life = randRange(1.1, 2.4) * clamp(big, 0.6, 2.2);
-      p.size0 = R * 0.45; p.size1 = R * randRange(1.4, 2.6);
+      p.life = randRange(1.4, 3.0) * clamp(big, 0.6, 2.2);
+      p.size0 = R * 0.45; p.size1 = R * randRange(1.5, 2.8);
       p.tile = TILE.SMOKE_A + (i % 3);
       // fire-lit at birth, cold soot at death — never uniform grey
-      p.color0.setRGB(0.30, 0.17, 0.09);
-      p.color1.setRGB(0.035, 0.032, 0.030);
-      p.alpha0 = 0.72; p.alpha1 = 0;
-      p.fadeIn = 0.09; p.erode = 0.62; p.sizeCurve = 0.55;
+      p.color0.setRGB(0.34, 0.155, 0.065);
+      p.color1.setRGB(0.030, 0.027, 0.026);
+      p.alpha0 = 0.78; p.alpha1 = 0;
+      p.fadeIn = 0.07; p.erode = 0.6; p.sizeCurve = 0.55;
       p.turb = 0.45 * big; p.turbFreq = 1.6;
       p.rot = Math.random() * TAU; p.spin = randRange(-1.4, 1.4);
       ps.emit();
     }
 
     // --- 4. lingering black smoke that rises and dissipates -----------------
+    // REVIEW asks for smoke that lingers FAR longer than the fire. The fire is
+    // gone in ~0.6 s; this column runs 3.5-6.5 s, i.e. six to ten times as long,
+    // and it is the last thing left in frame.
     if (o.smoke !== false) {
-      const linger = Math.round(clamp(4 + R * 0.7, 4, 12) * q);
+      const linger = Math.round(clamp(6 + R * 0.9, 6, 16) * q);
       for (let i = 0; i < linger; i++) {
         _v0.set(Math.random() * 2 - 1, 0, Math.random() * 2 - 1).normalize();
         p = ps.begin(BATCH_ALPHA);
         p.pos.copy(pos).addScaledVector(_v0, Math.random() * R * 0.5);
         p.pos.y += R * 0.25;
         p.vel.copy(_v0).multiplyScalar(randRange(0.4, 1.6));
-        p.vel.y = randRange(1.6, 3.6);
+        p.vel.y = randRange(1.8, 4.2);
         p.drag = 0.55;
-        p.life = randRange(2.4, 4.2);
-        p.size0 = R * 0.7; p.size1 = R * randRange(2.2, 3.6);
+        p.life = randRange(3.5, 6.5);
+        p.size0 = R * 0.7; p.size1 = R * randRange(2.4, 4.0);
         p.tile = TILE.SMOKE_A + (i % 3);
-        p.color0.setRGB(0.075, 0.070, 0.066);
-        p.color1.setRGB(0.022, 0.021, 0.020);
-        p.alpha0 = 0.5; p.alpha1 = 0;
-        p.fadeIn = 0.16; p.erode = 0.72; p.sizeCurve = 0.6;
-        p.turb = 0.5; p.turbFreq = 0.8;
+        p.color0.setRGB(0.062, 0.057, 0.054);
+        p.color1.setRGB(0.020, 0.019, 0.018);
+        p.alpha0 = 0.62; p.alpha1 = 0;
+        p.fadeIn = 0.12; p.erode = 0.70; p.sizeCurve = 0.6;
+        p.turb = 0.55; p.turbFreq = 0.7;
         p.rot = Math.random() * TAU; p.spin = randRange(-0.7, 0.7);
         ps.emit();
       }
     }
 
     // --- 5. shockwave ------------------------------------------------------
+    // The mode-1 dome has only drawn since the smoothstep fix, so these numbers
+    // had never been seen. r1 was R * 3.1: a 40 m rim-lit bubble around a
+    // mech-kill blast, expanding faster than the fireball it is supposed to be
+    // driven by. A real detonation front outruns the ball by a little, not by
+    // three times. Sized to the blast, and kept short.
     ps.ring({
       pos, normal: _up,
-      r0: R * 0.25, r1: R * 3.1, thickness: 0.1, life: 0.3,
-      color: hdr(_c1, 1.0, 0.86, 0.66, 3.0), alpha: 0.9,
-      growth: 2.8, mode: 1, dome: 0.55,
+      r0: R * 0.3, r1: R * 1.55, thickness: 0.1, life: 0.22,
+      color: hdr(_c1, 1.0, 0.84, 0.62, 2.1), alpha: 0.85,
+      growth: 2.6, mode: 1, dome: 0.82,
     });
     ps.ring({
       pos, normal: _up,
-      r0: R * 0.2, r1: R * 3.4, thickness: 0.07, life: 0.26,
-      color: hdr(_c1, 1.0, 0.9, 0.8, 2.2), alpha: 0.8,
+      r0: R * 0.2, r1: R * 2.4, thickness: 0.06, life: 0.26,
+      color: hdr(_c1, 1.0, 0.9, 0.8, 2.0), alpha: 0.75,
       growth: 3.0, mode: 0, distort: true,
     });
 
@@ -1651,6 +1756,171 @@ export class VFX {
       hdr(_c1, 0.55, 0.75, 1.0, 1), 22 * s, 12 * s, 0.14, this.time, 0);
   }
 
+  // =========================================================================
+  // Ground particulate
+  // =========================================================================
+
+  /**
+   * Dust thrown off a surface by thrust or by a mech moving across it.
+   * @param {THREE.Vector3} pos contact point (on the ground)
+   * @param {THREE.Vector3} flow direction the wash travels along the surface
+   * @param {number} strength 0..1.5 — rate and reach
+   * @param {number} [scale] mech-sized by default
+   */
+  groundWash(pos, flow, strength = 1, scale = 1) {
+    if (!this.enabled || !pos) return;
+    const ps = this.ps;
+    const st = clamp(strength, 0, 1.6);
+    const s = clamp(scale, 0.4, 3);
+    _w1.copy(flow || _up);
+    _w1.y = 0;
+    if (_w1.lengthSq() < 1e-6) _w1.set(1, 0, 0);
+    _w1.normalize();
+
+    const p = ps.begin(BATCH_ALPHA);
+    // Splayed outward from the flow line, not along it — a downwash spreads.
+    const spread = randRange(-1, 1);
+    _w2.set(-_w1.z, 0, _w1.x).multiplyScalar(spread);
+    p.pos.copy(pos).addScaledVector(_w2, randRange(0.4, 2.2) * s);
+    p.pos.y += randRange(0, 0.35) * s;
+    p.vel.copy(_w1).multiplyScalar(randRange(3, 10) * st * s)
+      .addScaledVector(_w2, randRange(2, 7) * s);
+    p.vel.y = randRange(1.4, 4.4) * (0.5 + st);
+    p.drag = 1.9;
+    p.gravity = 1.2;
+    p.life = randRange(0.7, 1.6);
+    p.size0 = 0.5 * s; p.size1 = randRange(2.6, 5.2) * s;
+    p.tile = Math.random() < 0.6 ? TILE.DUST : TILE.SMOKE_B + (Math.random() < 0.5 ? 0 : 1);
+    p.color0.setRGB(0.38, 0.315, 0.235);
+    p.color1.setRGB(0.115, 0.100, 0.086);
+    p.alpha0 = randRange(0.20, 0.36) * (0.45 + st * 0.55); p.alpha1 = 0;
+    p.fadeIn = 0.11; p.erode = 0.66; p.sizeCurve = 0.5;
+    p.turb = 0.35; p.turbFreq = 1.7;
+    p.rot = Math.random() * TAU; p.spin = randRange(-1.5, 1.5);
+    ps.emit();
+  }
+
+  /**
+   * The dust slam when a mech puts 60 tonnes back on the deck.
+   * @param {THREE.Vector3} pos foot position
+   * @param {number} impactSpeed m/s of downward velocity absorbed
+   * @param {number} [scale]
+   */
+  landingDust(pos, impactSpeed = 12, scale = 2.2) {
+    if (!this.enabled || !pos) return;
+    const ps = this.ps;
+    const q = this.quality;
+    const hard = clamp(impactSpeed / 26, 0.18, 1.4);
+    const s = clamp(scale, 0.5, 4);
+
+    basisFrom(_up, _t1, _t2);
+    const n = Math.round(clamp(7 + 12 * hard, 7, 20) * q);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + Math.random() * 0.5;
+      radialDir(_v0, _t1, _t2, a);
+      const p = ps.begin(BATCH_ALPHA);
+      p.pos.copy(pos).addScaledVector(_v0, randRange(0.3, 1.1) * s);
+      p.pos.y += 0.1;
+      p.vel.copy(_v0).multiplyScalar(randRange(5, 14) * hard * s);
+      p.vel.y = randRange(0.6, 3.0) * hard;
+      p.drag = 2.6;
+      p.life = randRange(0.85, 1.9);
+      p.size0 = 0.45 * s; p.size1 = randRange(2.2, 4.4) * s;
+      p.tile = i % 3 === 0 ? TILE.SMOKE_B : TILE.DUST;
+      p.color0.setRGB(0.44, 0.365, 0.27);
+      p.color1.setRGB(0.125, 0.110, 0.095);
+      p.alpha0 = 0.34 * (0.5 + hard * 0.5); p.alpha1 = 0;
+      p.fadeIn = 0.07; p.erode = 0.64; p.sizeCurve = 0.5;
+      p.turb = 0.4; p.turbFreq = 1.8;
+      p.rot = Math.random() * TAU; p.spin = randRange(-1.8, 1.8);
+      ps.emit();
+    }
+
+    // grit kicked up and thrown clear — the fast, sharp half of the effect
+    const grit = Math.round(6 * q * hard);
+    for (let i = 0; i < grit; i++) {
+      coneDir(_v0, _up, _t1, _t2, 1.25);
+      const p = ps.begin(BATCH_ALPHA);
+      p.pos.copy(pos);
+      p.vel.copy(_v0).multiplyScalar(randRange(5, 16) * hard * s);
+      p.drag = 0.35; p.gravity = 24;
+      p.life = randRange(0.5, 1.0);
+      p.size0 = randRange(0.06, 0.16) * s; p.size1 = p.size0 * 0.85;
+      p.tile = TILE.DEBRIS;
+      p.color0.setRGB(0.30, 0.255, 0.19);
+      p.color1.setRGB(0.14, 0.125, 0.105);
+      p.alpha0 = 1; p.alpha1 = 0.85; p.alphaCurve = 2.2; p.fadeIn = 0;
+      p.rot = Math.random() * TAU; p.spin = randRange(-12, 12);
+      ps.emit();
+    }
+
+    if (hard > 0.55) {
+      ps.ring({
+        pos: _v1.copy(pos).setY(pos.y + 0.14), normal: _up,
+        r0: s * 0.5, r1: s * (2.4 + hard * 1.6), thickness: 0.16,
+        life: 0.4, color: hdr(_c1, 0.70, 0.60, 0.46, 0.9),
+        alpha: 0.32 * hard, growth: 2.6, mode: 0,
+      });
+    }
+  }
+
+  /**
+   * Register an entity for per-frame ground particulate. Optional — VFX also
+   * latches entities off the movement events it already listens to, so this is
+   * only needed to start the effect before an entity has landed or boosted.
+   * @param {object} entity anything with `.root` and a published `.moveState`
+   */
+  addGroundWashTarget(entity) { this._noteWasher(entity); }
+
+  /**
+   * Dust under anything moving fast near the deck.
+   *
+   * `moveState.heightAboveGround` is the only ground sampler VFX has — it does
+   * not own the physics — so this runs for entities that publish one. Below
+   * WASH_H a hovering mech's thrusters blast the deck even standing still;
+   * above it, only forward speed raises anything.
+   */
+  _updateGroundWash(dt) {
+    if (!this.enabled || dt <= 0) return;
+    const WASH_H = 4.2;
+    for (let i = this._washers.length - 1; i >= 0; i--) {
+      const w = this._washers[i];
+      const e = w.entity;
+      const m = e && e.moveState;
+      if (!m || !e.root || e.alive === false) { this._washers.splice(i, 1); continue; }
+
+      const h = m.heightAboveGround;
+      if (!Number.isFinite(h) || h > WASH_H) { w.accum = 0; continue; }
+
+      const near = 1 - clamp(h / WASH_H, 0, 1);          // 1 on the deck, 0 at WASH_H
+      const speed = m.speed || 0;
+      const run = clamp(speed / 60, 0, 1.35);
+      const downwash = m.grounded ? 0 : near * 0.75;
+      const strength = clamp(run * (0.55 + near * 0.75) + downwash, 0, 1.5);
+      if (strength < 0.16) { w.accum = 0; continue; }
+
+      w.accum += dt * (10 + 46 * strength) * this.quality;
+      let count = w.accum | 0;
+      if (count > 5) count = 5;                            // never a frame-rate spike
+      w.accum -= count;
+      if (!count || !this.ps.canSpawn(count)) continue;
+
+      // Contact point is under the mech's origin, which the contract puts at the
+      // feet; the wash trails BEHIND it, opposite the direction of travel.
+      _v1.copy(e.root.position);
+      _v1.y -= h;
+      const vel = e.velocity;
+      if (vel && (vel.x * vel.x + vel.z * vel.z) > 1) _v3.set(-vel.x, 0, -vel.z).normalize();
+      else _v3.set(Math.random() * 2 - 1, 0, Math.random() * 2 - 1).normalize();
+
+      const reach = clamp(resolveRadius(e, 2.2), 1.2, 4);
+      for (let k = 0; k < count; k++) {
+        _w0.copy(_v1).addScaledVector(_v3, randRange(0.2, 2.6) * reach * (0.4 + run));
+        this.groundWash(_w0, _v3, strength, reach * 0.55);
+      }
+    }
+  }
+
   /**
    * Targeting / lock-on sweep.
    * @param {object|THREE.Object3D|THREE.Vector3} target
@@ -1810,6 +2080,7 @@ export class VFX {
     this.time = elapsed;
     this._updateDeferred();
     this._updateFlames(dt);
+    this._updateGroundWash(dt);
     this._updateTrails(dt);
     this._updateArcs(dt);
     this._updateDamageSmoke(dt);
@@ -1849,6 +2120,7 @@ export class VFX {
     this._damage.length = 0;
     for (const a of this._arcs) { a.active = false; a.entity = null; }
     for (const d of this._deferred) d.active = false;
+    this._washers.length = 0;
     for (const f of this._flames) { f.intensity = 0; f.target = 0; }
     this.ps.setFlameInstances(0);
   }
@@ -1859,6 +2131,7 @@ export class VFX {
     this._flames.length = 0;
     this._trails.length = 0;
     this._damage.length = 0;
+    this._washers.length = 0;
     this.ps.dispose();
   }
 }

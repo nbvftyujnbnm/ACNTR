@@ -437,15 +437,28 @@ export class Debug {
       // which reported every enemy as occluded in an arena where they were
       // plainly standing in the open.
       aim.copy(e.root.position);
-      aim.y += (e.collider?.height ?? 8) * 0.5;
+      // `??` catches undefined but NOT NaN, and a NaN here is fatal in a way
+      // that looks like scenery: it makes `d` NaN, which makes `maxDist` NaN,
+      // and `Physics.raycast` starts with `best = maxDist` and misses via
+      // `if (best >= maxDist) return null` — a comparison that is FALSE for
+      // NaN. So the ray falls through to `res.hit = true` with a NaN distance
+      // and every target reports as occluded. That is exactly what "4 enemies
+      // in frustum, 0 visible, blocked at hit(no distance)" was, and it sent
+      // three iterations after the arena scorer.
+      const h = e.collider?.height;
+      aim.y += (Number.isFinite(h) ? h : 8) * 0.5;
+      if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y) || !Number.isFinite(aim.z)) continue;
       if (!frustum.containsPoint(aim)) continue;
       inFrustum++;
       if (!ph?.raycast) { visible++; continue; }
       dir.subVectors(aim, cam.position);
       const d = dir.length();
-      dir.divideScalar(d || 1);
+      // A target closer than the 3 m skin would ask for a negative range, which
+      // is the same NaN-shaped trap from the other end: call it visible.
+      if (!Number.isFinite(d) || d <= 4) { visible++; continue; }
+      dir.divideScalar(d);
       const hit = ph.raycast(cam.position, dir, d - 3);
-      if (!hit || !hit.hit) visible++;
+      if (!hit || !hit.hit || !Number.isFinite(hit.distance)) visible++;
       // `Physics.raycast` returns a SHARED scratch object and does not always
       // carry a finite distance on a hit; the first run of this reported four
       // nulls, which is a NaN surviving JSON. Report it honestly rather than

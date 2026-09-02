@@ -594,30 +594,36 @@ ${COMMON}
 
 attribute vec4 aOrigin; // xyz nozzle position, w seed
 attribute vec4 aAxis;   // xyz plume direction (unit), w length in metres
-attribute vec4 aParams; // x radius, y intensity 0..1+, z colour temperature, w flicker phase
+attribute vec4 aParams; // x radius, y intensity 0..1.6, z colour temperature, w flicker phase
 
 uniform float uTime;
 uniform float uLength;  // per-layer length multiplier
 uniform float uRadius;  // per-layer radius multiplier
 uniform float uBulge;   // where along the plume the widest point sits
+uniform float uWaver;   // lateral snake, in throat radii, at the tip
+uniform float uTaper;   // tip taper exponent — low is a long thin needle
 
 varying float vV;
-varying float vFres;
+varying vec3 vNrmW;
+varying vec3 vViewW;
 varying vec3 vSeedInt;
 varying vec4 vScreen;
 varying float vViewZ;
+varying float vAng;
 
 void main() {
   float intensity = aParams.y;
   if (intensity <= 0.001) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-    vV = 0.0; vFres = 0.0; vSeedInt = vec3(0.0); vScreen = vec4(0.0, 0.0, 0.0, 1.0); vViewZ = 1.0;
+    vV = 0.0; vNrmW = vec3(0.0, 0.0, 1.0); vViewW = vec3(0.0, 0.0, 1.0);
+    vSeedInt = vec3(0.0); vScreen = vec4(0.0, 0.0, 0.0, 1.0); vViewZ = 1.0; vAng = 0.0;
     return;
   }
 
   float seed = aOrigin.w;
   float v = position.z;              // 0 at nozzle, 1 at tip
   vec2 ring = position.xy;           // unit circle
+  float ang = atan(ring.y, ring.x);
 
   vec3 z = normalize(aAxis.xyz);
   vec3 ref = abs(z.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
@@ -626,34 +632,47 @@ void main() {
 
   // Turbulent flicker — two incommensurate rates so it never looks periodic.
   float ph = uTime * 41.0 + aParams.w;
-  float flick = 0.86
-    + 0.09 * sin(ph + seed * 6.28)
+  float flick = 0.88
+    + 0.08 * sin(ph + seed * 6.28)
     + 0.06 * sin(ph * 1.77 + seed * 11.3)
     + 0.05 * sin(ph * 3.11 + seed * 3.7);
 
-  float len = aAxis.w * uLength * mix(0.55, 1.0, clamp(intensity, 0.0, 1.4)) * flick;
+  // Length is superlinear in intensity: an idle pilot flame is a stub, an
+  // assault-boost plume is a streak several times the mech's own height. A
+  // linear ramp made 0.07 and 1.4 differ by less than 2x, which is why idle
+  // and full burn used to photograph nearly the same.
+  float ic = clamp(intensity, 0.0, 1.6);
+  float len = aAxis.w * uLength * (0.18 + 0.95 * ic * ic / (0.50 + ic)) * flick;
 
   // Profile: pinched at the throat, bulges just past it, tapers to the tip.
-  float bulge = uBulge;
-  float prof = smoothstep(0.0, bulge, v) * 0.55 + 0.45;
-  prof *= pow(clamp(1.0 - v, 0.0, 1.0), 0.62);
-  prof = max(prof, 0.02);
-  // Fluted wobble on the outer sheath.
-  prof *= 1.0 + 0.08 * sin(atan(ring.y, ring.x) * 5.0 + uTime * 22.0 + seed * 9.0) * v;
+  float bulge = max(uBulge, 0.02);
+  float prof = smoothstep(0.0, bulge, v) * 0.62 + 0.38;
+  prof *= pow(clamp(1.0 - v, 0.0, 1.0), uTaper);
+  prof = max(prof, 0.015);
+  // Fluted wobble on the sheath — two orders so the rim is never a clean circle.
+  prof *= 1.0
+    + 0.09 * sin(ang * 5.0 + uTime * 22.0 + seed * 9.0) * v
+    + 0.05 * sin(ang * 9.0 - uTime * 31.0 + seed * 4.3) * v;
 
-  float radius = aParams.x * uRadius * prof * mix(0.7, 1.15, clamp(intensity, 0.0, 1.3));
+  float radius = aParams.x * uRadius * prof * mix(0.72, 1.20, clamp(intensity, 0.0, 1.3));
 
   vec3 wp = aOrigin.xyz + x * (ring.x * radius) + y * (ring.y * radius) + z * (v * len);
 
-  vec3 nrm = normalize(x * ring.x + y * ring.y + z * 0.42);
-  vec3 viewDir = normalize(cameraPosition - wp);
-  vFres = 1.0 - abs(dot(nrm, viewDir));
+  // Lateral snake, anchored at the throat (v*v) so the nozzle stays put while
+  // the tail whips. This is what separates exhaust from a solid cone.
+  float sway = uWaver * aParams.x * uRadius * v * v;
+  wp += x * (sin(uTime * 12.7 + seed * 7.1 + v * 2.6) * sway)
+      + y * (sin(uTime * 9.3 + seed * 3.7 + v * 3.3) * sway);
+
+  vNrmW = x * ring.x + y * ring.y + z * 0.42;
+  vViewW = cameraPosition - wp;
 
   vec4 mv = viewMatrix * vec4(wp, 1.0);
   vViewZ = -mv.z;
   gl_Position = projectionMatrix * mv;
   vScreen = gl_Position;
   vV = v;
+  vAng = ang;
   vSeedInt = vec3(seed, intensity, aParams.z);
 }
 `;
@@ -665,15 +684,21 @@ ${SOFT_DEPTH}
 uniform float uTime;
 uniform vec3 uCoolColor;   // low-intensity tint (deep blue)
 uniform vec3 uHotColor;    // high-intensity tint (white-blue)
-uniform vec3 uEdgeColor;   // sheath tint (cyan / orange)
+uniform vec3 uEdgeColor;   // rim tint seen at grazing angles
+uniform vec3 uTipColor;    // tint at the far end — the plume cools as it goes
 uniform float uDiamonds;   // shock-diamond strength
 uniform float uGain;
+uniform float uRimPow;     // fresnel exponent: high = a thin bright rim only
+uniform float uTipFade;    // v at which the tip starts fading out
+uniform float uFibre;      // longitudinal streak contrast
 
 varying float vV;
-varying float vFres;
+varying vec3 vNrmW;
+varying vec3 vViewW;
 varying vec3 vSeedInt;
 varying vec4 vScreen;
 varying float vViewZ;
+varying float vAng;
 
 void main() {
   float v = vV;
@@ -681,24 +706,37 @@ void main() {
   float intensity = vSeedInt.y;
   float temp = vSeedInt.z;
 
-  // Additive shells read as volume when the rim is hottest.
-  float fres = pow(clamp(vFres, 0.0, 1.0), 1.7);
+  // Fresnel resolved per FRAGMENT, not per vertex. Interpolating the finished
+  // scalar across a 20-gon quantised the rim into visible facets, which is the
+  // "hard polygon silhouette on something meant to be curved" automatic fail.
+  vec3 nrm = normalize(vNrmW);
+  vec3 vw = normalize(vViewW);
+  float fres = pow(clamp(1.0 - abs(dot(nrm, vw)), 0.0, 1.0), uRimPow);
 
   // Shock diamonds: standing wave nodes scrolling slowly down the plume.
   float dia = 0.0;
   if (uDiamonds > 0.0) {
     float band = sin(v * VFX_PI * (4.0 + intensity * 3.0) - uTime * 7.0 + seed * 6.0);
-    dia = pow(abs(band), 8.0) * uDiamonds * (1.0 - smoothstep(0.15, 0.72, v));
+    dia = pow(abs(band), 8.0) * uDiamonds * (1.0 - smoothstep(0.12, 0.66, v));
   }
 
-  float core = pow(clamp(1.0 - v, 0.0, 1.0), 1.5);
+  float core = pow(clamp(1.0 - v, 0.0, 1.0), 1.35);
   float body = core * 0.85 + dia * 0.9;
 
-  vec3 col = mix(uCoolColor, uHotColor, clamp(temp, 0.0, 1.0));
-  col = mix(col, uEdgeColor, fres * 0.6);
-  col += vec3(1.0, 0.92, 0.85) * dia * 1.4;
+  // Fibrous longitudinal streaking. A plume that is a smooth gradient reads as
+  // a plastic cone; real exhaust is combed into filaments along its own flow.
+  float fib = 1.0;
+  if (uFibre > 0.0) {
+    float n = fbm2(vec2(vAng * 2.6 + seed * 31.0, v * 3.2 - uTime * 3.4));
+    fib = mix(1.0, 0.42 + 1.24 * n, uFibre);
+  }
 
-  float a = (body * 0.55 + fres * 0.75) * intensity * uGain;
+  vec3 col = mix(uCoolColor, uHotColor, clamp(temp, 0.0, 1.0));
+  col = mix(col, uTipColor, smoothstep(0.10, 0.92, v));
+  col = mix(col, uEdgeColor, fres * 0.62);
+  col += vec3(1.0, 0.94, 0.88) * dia * 1.6;
+
+  float a = (body * 0.6 + fres * 0.8) * fib * intensity * uGain;
   // NEVER write smoothstep(hi, lo, x) to get a falling edge. GLSL ES leaves
   // edge0 >= edge1 UNDEFINED, and the usual driver implementation short-circuits
   // with "if x is below edge0, return 0" — which for smoothstep(1.0, 0.55, v)
@@ -707,12 +745,12 @@ void main() {
   // submitted, the vertex stage was correct, and then every fragment hit the
   // discard below. Write 1.0 - smoothstep(lo, hi, x) instead; it is the same
   // curve and it is defined.
-  a *= 1.0 - smoothstep(0.55, 1.0, v);    // fade the tip out, never a cut edge
-  a *= smoothstep(0.0, 0.06, v);          // hide the open throat inside the nozzle
+  a *= 1.0 - smoothstep(uTipFade, 1.0, v);  // fade the tip out, never a cut edge
+  a *= smoothstep(0.0, 0.05, v);            // hide the open throat inside the nozzle
   a *= softDepthFade(vScreen, vViewZ, 0.35);
   if (a <= 0.003) discard;
 
-  gl_FragColor = vec4(col * (0.6 + intensity * 1.9), a);
+  gl_FragColor = vec4(col * (0.55 + intensity * 1.7), a);
 
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

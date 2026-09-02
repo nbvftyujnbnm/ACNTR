@@ -894,11 +894,21 @@ function buildDiscGeometry(segments = 64, rings = 4) {
   return g;
 }
 
-function buildPlumeGeometry(radial = 10, axial = 8) {
+/**
+ * Open cone shell in "plume space": xy on the unit circle, z the 0..1 parameter
+ * the vertex shader turns into length. `bias` above 1 packs rings toward the
+ * throat, where the profile curves hardest; the tip only needs enough rings to
+ * keep its taper smooth.
+ *
+ * `radial` is a silhouette budget, not a fill budget — at 10 the plume showed a
+ * decagon rim at 13 m, which REVIEW scores as an automatic failure. Only a
+ * handful of instances ever draw (four on the player), so segments are cheap.
+ */
+function buildPlumeGeometry(radial = 10, axial = 8, bias = 1.0) {
   const pos = [];
   const idx = [];
   for (let j = 0; j <= axial; j++) {
-    const v = j / axial;
+    const v = Math.pow(j / axial, bias);
     for (let i = 0; i < radial; i++) {
       const a = (i / radial) * TAU;
       pos.push(Math.cos(a), Math.sin(a), v);
@@ -1216,7 +1226,7 @@ export class ParticleSystem {
     this.group.add(this.distortRings.mesh);
 
     // --- thruster plumes ----------------------------------------------------
-    this._plumeGeo = buildPlumeGeometry(10, 9);
+    this._plumeGeo = buildPlumeGeometry(24, 20, 1.25);
     this.flameCapacity = opts.flameCapacity ?? 64;
     this.flameData = new Float32Array(this.flameCapacity * 12);
     this.flameBuffer = new THREE.InstancedInterleavedBuffer(this.flameData, 12);
@@ -1240,11 +1250,17 @@ export class ParticleSystem {
           uLength: { value: opt.length },
           uRadius: { value: opt.radius },
           uBulge: { value: opt.bulge },
+          uWaver: { value: opt.waver ?? 0 },
+          uTaper: { value: opt.taper ?? 0.6 },
           uCoolColor: { value: new THREE.Color().setRGB(...opt.cool) },
           uHotColor: { value: new THREE.Color().setRGB(...opt.hot) },
           uEdgeColor: { value: new THREE.Color().setRGB(...opt.edge) },
+          uTipColor: { value: new THREE.Color().setRGB(...opt.tip) },
           uDiamonds: { value: opt.diamonds },
           uGain: { value: opt.gain },
+          uRimPow: { value: opt.rimPow ?? 1.7 },
+          uTipFade: { value: opt.tipFade ?? 0.55 },
+          uFibre: { value: opt.fibre ?? 0 },
           uDepthTex: this.depthUniform,
           uSoftParams: this.softUniform,
         },
@@ -1261,17 +1277,43 @@ export class ParticleSystem {
       return mesh;
     };
 
-    // Inner core: short, tight, near-white with hard shock diamonds.
-    this.flameInner = flameLayer({
-      length: 0.52, radius: 0.5, bulge: 0.1, diamonds: 1.0, gain: 1.55, order: 24,
-      cool: [0.35, 0.62, 1.0], hot: [3.2, 3.6, 4.4], edge: [0.9, 1.9, 3.4],
+    // THREE layers, and the reason there are three is the tone curve. AgX makes
+    // display value almost independent of radiance above ~3 linear, so a plume
+    // built as one bright shell renders as a flat white cone with no hue and no
+    // structure — which is exactly what the first frame after the smoothstep fix
+    // showed. Splitting it lets each layer live in the band where it can be seen
+    // for what it is: the CORE is deliberately blown (that is the hot core the
+    // bloom needs), the SHEATH stays under ~3 linear so it keeps its blue, and
+    // the STREAK is long, thin and faint so bloom turns it into the wide soft
+    // halo rather than more white.
+
+    // Core: short, tight, blown white, hard shock diamonds.
+    this.flameCore = flameLayer({
+      length: 0.60, radius: 0.44, bulge: 0.08, diamonds: 1.25, gain: 2.4, order: 26,
+      taper: 0.52, tipFade: 0.42, rimPow: 1.15, waver: 0.10, fibre: 0.25,
+      cool: [0.55, 0.85, 1.25], hot: [5.0, 5.6, 6.6], edge: [1.6, 3.0, 5.2],
+      tip: [1.2, 2.2, 3.6],
     });
-    // Outer sheath: long, wide, translucent, cooler at the rim.
-    this.flameOuter = flameLayer({
-      length: 1.0, radius: 1.0, bulge: 0.26, diamonds: 0.18, gain: 0.55, order: 23,
-      cool: [0.12, 0.26, 0.62], hot: [1.05, 1.5, 2.6], edge: [0.55, 1.05, 2.2],
+    // Sheath: the part that carries the colour. Kept in the tonemappable band.
+    this.flameSheath = flameLayer({
+      length: 1.55, radius: 1.05, bulge: 0.20, diamonds: 0.30, gain: 0.85, order: 25,
+      taper: 0.60, tipFade: 0.50, rimPow: 1.9, waver: 0.28, fibre: 0.55,
+      cool: [0.10, 0.30, 0.85], hot: [0.70, 1.55, 2.85], edge: [0.30, 1.05, 2.60],
+      tip: [0.16, 0.52, 1.35],
     });
-    this.group.add(this.flameOuter, this.flameInner);
+    // Streak: the long anisotropic tail. Narrow, faint, and by far the longest —
+    // this is what makes an assault-boost plume read at 95 m/s.
+    this.flameStreak = flameLayer({
+      length: 3.40, radius: 0.62, bulge: 0.32, diamonds: 0.0, gain: 0.30, order: 24,
+      taper: 0.34, tipFade: 0.30, rimPow: 2.6, waver: 0.75, fibre: 0.70,
+      cool: [0.06, 0.18, 0.55], hot: [0.30, 0.85, 1.90], edge: [0.16, 0.62, 1.75],
+      tip: [0.09, 0.26, 0.80],
+    });
+    this.group.add(this.flameStreak, this.flameSheath, this.flameCore);
+    // Kept as aliases: older code and probes reach for these two names.
+    this.flameInner = this.flameCore;
+    this.flameOuter = this.flameSheath;
+    this._flameLayers = [this.flameCore, this.flameSheath, this.flameStreak];
 
     // --- scan shells --------------------------------------------------------
     this._shellGeo = buildShellGeometry();
@@ -1499,8 +1541,7 @@ export class ParticleSystem {
     this._flameGeo.instanceCount = Math.min(count, this.flameCapacity);
     this.flameBuffer.needsUpdate = true;
     const on = count > 0;
-    this.flameInner.visible = on;
-    this.flameOuter.visible = on;
+    for (const m of this._flameLayers) m.visible = on;
   }
 
   reset() {
@@ -1532,8 +1573,7 @@ export class ParticleSystem {
     this._plumeGeo.dispose();
     this._discGeo.dispose();
     this._shellGeo.dispose();
-    this.flameInner.material.dispose();
-    this.flameOuter.material.dispose();
+    for (const m of this._flameLayers) m.material.dispose();
     this.lights.dispose(this.scene);
     this.atlas.dispose();
     this.trailSmokeTex.dispose();

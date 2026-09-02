@@ -2,7 +2,7 @@
 /**
  * Leg width/depth budget — an OFFLINE silhouette of the lower body.
  *
- *   node tools/legbudget.mjs [--yaws 45,90,135] [--px 900]
+ *   node tools/legbudget.mjs [--yaws 45,90,135] [--px 900] [--straight]
  *
  * `tools/silhouette.mjs` is the arbiter, but it costs a vite build, a browser
  * and four minutes, which is far too slow a loop for the thing it is measuring
@@ -24,6 +24,16 @@
  * Orthographic rather than perspective on purpose: the audit's camera is 14 m
  * from a 9 m subject, so perspective spread is a couple of per cent and is the
  * same on both legs. Trends carry; absolute numbers are the audit tool's job.
+ *
+ * TWO STALE COPIES WERE FOUND IN HERE AND BOTH MOVED THE BUDGET IT REPORTS.
+ * The arm hung off `MECH_DIMS.shoulderX`, but `MechFactory` places it off
+ * `buildCore`'s `shoulderL/R` anchor at `shoulderX + 0.10` — 10 cm of pure
+ * error, in the direction that makes the thigh look like it is already inside
+ * the forearm. And the chain was built straight and vertical, while the rig
+ * splays it 4.9 degrees outboard, which is worth +4 cm of X at the top of the
+ * thigh and +22 cm at the calf. Anchors are now READ, and the standing solve is
+ * derived from MECH_DIMS instead of assumed away. `--straight` restores the old
+ * vertical chain if you want to separate the leg's own shape from its stance.
  */
 import * as THREE from 'three';
 import * as MP from '../src/mech/MechParts.js';
@@ -37,7 +47,27 @@ function arg(name, def = null) {
 
 const YAWS = String(arg('yaws', '0,45,90,135')).split(',').map(Number).filter(isFinite);
 const PX = parseInt(arg('px', '200'), 10); // raster resolution, pixels per metre
+const STRAIGHT = !!arg('straight', false); // opt out of the rig's standing solve
 const D = MP.MECH_DIMS;
+
+// THE ARM PIVOT IS NOT `MECH_DIMS.shoulderX`, AND ASSUMING IT WAS COST THIS TOOL
+// 10 CM OF THE ONE BUDGET IT EXISTS TO REPORT. `buildCore` publishes the shoulder
+// bone position as `anchors.shoulderL/R` at `shoulderX + 0.10` (the yoke's own
+// armour reaches outboard of the pivot, so the bone sits proud of the nominal
+// half-width), and `MechFactory` places the arm off that anchor, not off
+// MECH_DIMS. Hard-coding `D.shoulderX` here put the whole arm 10 cm inboard and
+// made the tool report the thigh already INSIDE the forearm (-0.025 m at yaw 0)
+// when the real rest-pose clearance is +0.075 m. Read the anchor instead of
+// copying it: `GeoBuilder` accumulates lazily, so this costs nothing but the
+// anchor arithmetic.
+const SHOULDER = MP.buildCore({ rng: rng32(23) }).anchors.shoulderR; // [x, y-in-torso, z]
+const SHOULDER_X = SHOULDER[0];
+const SHOULDER_Y = D.waistY + SHOULDER[1];
+// Same argument for the hip: `buildPelvis` publishes `anchors.hipL/R` and
+// `MechFactory` places the thigh off that, not off `MECH_DIMS.hipX`.
+const HIP = MP.buildPelvis({ rng: rng32(17) }).anchors.hipR;
+const HIP_X = HIP[0];
+const HIP_Y = D.pelvisY + HIP[1];
 
 // Deterministic RNG so two runs of the same source produce the same shape.
 function rng32(seed) {
@@ -76,21 +106,66 @@ const _p = new THREE.Vector3();
 const trs = (x, y, z, rx = 0, ry = 0, rz = 0) =>
   new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s);
 
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+
 /**
- * Rest-pose lower body. The rig's standing solve is a 11-degree knee bend and a
- * ~5-degree outward splay off a straight leg (hip 0.80 -> foot 1.14 with the IK
- * target out of reach), which moves nothing this measurement cares about, so
- * the chain is built straight and vertical.
+ * The rig's STANDING SOLVE, not a straight vertical leg.
+ *
+ * This used to build the chain straight and vertical, on the stated grounds that
+ * the standing solve "moves nothing this measurement cares about". That is false
+ * on the axis the whole tool is about. The rig plants each foot at `footX` 1.14
+ * against a hip at 0.80, so `_solveLeg` splays the limb 4.9 degrees OUTBOARD —
+ * and a splay is a lever: it is worth +4 cm of X at the top of the thigh block
+ * and +22 cm at the calf. A vertical chain therefore reports the thigh with 4 cm
+ * more arm clearance than it has, and the calf a full 22 cm per side narrower
+ * than the frame actually stands, which is most of the reason the lower bands of
+ * the silhouette's width profile are wider than the thigh bands.
+ *
+ * It is `MechRig._solveLeg` re-derived rather than re-typed by eye: same target,
+ * same clamps, same basis construction, so a change to the leg lengths or the
+ * stance follows automatically. `tools/probes/legprofile.js` is the live-rig
+ * arbiter if the two ever disagree.
  */
+function standingSolve(side) {
+  if (STRAIGHT) return { thigh: new THREE.Quaternion(), shin: new THREE.Quaternion() };
+  const L1 = D.thigh, L2 = D.shin;
+  const bendZ = -1;                                   // biped: knee juts forward
+  // Target is `leg.restLocal` = (side * footX, 0, 0) in root space; the hip is
+  // `hipLocal` in pelvis space. Both reduce to the same frame here.
+  const dir = new THREE.Vector3(side * (D.footX - HIP_X), -HIP_Y, 0);
+  let dist = dir.length();
+  dir.normalize();
+  dist = Math.min(dist, (L1 + L2) * 0.995);           // target out of reach: leg straightens
+  const A = Math.acos(Math.max(-1, Math.min(1,
+    (L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist))));
+  const K = Math.acos(Math.max(-1, Math.min(1,
+    (L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2))));
+  const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, bendZ)).normalize();
+  const up = dir.clone().multiplyScalar(-1);
+  const fwd = new THREE.Vector3().crossVectors(right, up);
+  const qA = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
+  const thigh = qA.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, A));
+  const shin = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -(Math.PI - K));
+  return { thigh, shin };
+}
+
+const rot = (q) => new THREE.Matrix4().makeRotationFromQuaternion(q);
+const mul = (...ms) => ms.reduce((a, b) => new THREE.Matrix4().multiplyMatrices(a, b));
+
+/** Rest-pose lower body, in the pose the rig actually holds when standing. */
 function buildParts(which) {
   const parts = [];
   for (const side of which.sides ?? [-1, 1]) {
-    const hipM = trs(side * D.hipX, D.pelvisY - 0.10, 0);
     if (which.leg) {
+      const q = standingSolve(side);
+      const hipM = mul(trs(side * HIP_X, HIP_Y, 0), rot(q.thigh));
       collect(parts, MP.buildThigh({ rng: rng32(7), side, legType: 'biped' }), hipM, 'thigh');
-      const kneeM = trs(side * D.hipX, D.pelvisY - 0.10 - D.thigh, 0);
+      const kneeM = mul(hipM, trs(0, -D.thigh, 0), rot(q.shin));
       collect(parts, MP.buildShin({ rng: rng32(11), side, legType: 'biped' }), kneeM, 'shin');
-      const ankM = trs(side * D.hipX, D.pelvisY - 0.10 - D.thigh - D.shin, 0);
+      // The rig cancels the accumulated chain at the ankle so the foot lands in
+      // the orientation it was asked for — flat and forward, at rest.
+      const qFoot = q.thigh.clone().multiply(q.shin).invert();
+      const ankM = mul(kneeM, trs(0, -D.shin, 0), rot(qFoot));
       collect(parts, MP.buildFoot({ rng: rng32(13), side, legType: 'biped' }), ankM, 'foot');
     }
     if (which.arm) {
@@ -100,7 +175,7 @@ function buildParts(which) {
       // sets arm-to-thigh daylight, so a stale copy of it here silently moves
       // the cap this whole tool exists to report — it was 0.095 for one pass,
       // which put the wrist 13 cm further inboard than the rig actually holds it.
-      const shM = trs(side * D.shoulderX, D.shoulderY, 0, 0, 0, side * 0.14);
+      const shM = trs(side * SHOULDER_X, SHOULDER_Y, SHOULDER[2], 0, 0, side * 0.14);
       collect(parts, MP.buildUpperArm({ rng: rng32(3), side }), shM, 'upperArm');
       const foreM = new THREE.Matrix4().multiplyMatrices(shM, trs(0, -D.elbowDrop, 0, 0.14, 0, 0));
       collect(parts, MP.buildForeArm({ rng: rng32(5), side }), foreM, 'foreArm');

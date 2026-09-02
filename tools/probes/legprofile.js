@@ -77,6 +77,39 @@
     const b = out.byBone[k];
     for (const f of ['minY', 'maxY', 'minX', 'maxX', 'minZ', 'maxZ']) b[f] = +b[f].toFixed(2);
   }
+
+  // --- ARM / THIGH CLEARANCE, FROM THE LIVE RIG -----------------------------
+  // `tools/legbudget.mjs` reports this off an offline copy of the standing solve,
+  // and an offline copy is exactly the thing that goes stale: it had the shoulder
+  // pivot 10 cm inboard and the leg built vertical instead of splayed, which
+  // between them moved the number by 14 cm. This is the arbiter for it. Both
+  // sides of the comparison are sliced AT THE SAME HEIGHT — taking a global max
+  // on the leg and a global min on the arm subtracts two numbers measured a
+  // metre and a half apart, which is how the old check reported daylight that
+  // was not there.
+  //
+  // Slicing is by mesh AABB, so a mesh counts at every height it spans. That
+  // over-reaches for a tilted part and therefore reports LESS clearance than
+  // exists — the safe direction for a budget nobody is allowed to overspend.
+  const isLeg = (n) => /Thigh|Shin|Foot|Leg/i.test(n);
+  const isArm = (n) => /Arm/i.test(n) && !/Shoulder/i.test(n);
+  const slices = [];
+  for (let y = 2.4; y <= 4.2; y += 0.1) {
+    let legHi = -1e9, armLo = 1e9;
+    for (const m of out.meshes) {
+      if (m.min[1] > y || m.max[1] < y) continue;
+      if (m.max[0] <= 0) continue;                 // right-hand side only
+      if (isLeg(m.name)) legHi = Math.max(legHi, m.max[0]);
+      else if (isArm(m.name)) armLo = Math.min(armLo, m.min[0]);
+    }
+    if (legHi < -1e8 || armLo > 1e8) continue;
+    slices.push({ y: +y.toFixed(2), legX: +legHi.toFixed(3), armX: +armLo.toFixed(3), gap: +(armLo - legHi).toFixed(3) });
+  }
+  out.armLegClearance = {
+    slices,
+    worst: slices.reduce((a, b) => (b.gap < a.gap ? b : a), { gap: 1e9 }),
+  };
+
   out.meshCount = out.meshes.length;
   delete out.meshes;
   return out;

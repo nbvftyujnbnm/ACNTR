@@ -27,7 +27,7 @@
  * currency every measurement in CONTRACT.md is quoted in. Luma is Rec.709.
  */
 import { launch } from './browser.mjs';
-import { spawn } from 'node:child_process';
+import { buildAndPreview, killTree } from './server.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -462,44 +462,24 @@ function stats(img, cls) {
  * Runner
  * ---------------------------------------------------------------------- */
 
-async function waitForServer(url, timeoutMs = 90000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok || r.status === 304) return true;
-    } catch { /* not up */ }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return false;
-}
-
-function run(cmd, args) {
-  return new Promise((res) => {
-    const p = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
-    p.on('close', (code) => res({ code, out }));
-  });
-}
-
+// Server ownership belongs to tools/server.mjs, and this file was the last
+// holdout. It spawned `npx vite preview` itself and killed only the npx
+// wrapper, so every run left a live server behind — the exact leak the
+// 2026-09-01 amendment fixed for capture/probe/silhouette, and it was still
+// here: two orphans from earlier runs were holding ports and CPU while this
+// tool's own measurement waited on SwiftShader. Worse for a MEASUREMENT tool
+// specifically, it also built into the shared `dist/`, so a second agent
+// starting any capture mid-run cleared the directory this run was being served
+// from. `buildAndPreview` builds into a per-run outDir and reaps the process
+// group on exit, which is what makes a single-build A/B trustworthy while
+// other agents are working.
 let server = null;
 async function startServer() {
-  const lint = await run('node', ['tools/lint-glsl.mjs']);
-  if (lint.code !== 0) { console.error(lint.out); process.exit(3); }
-  const b = await run('npx', ['vite', 'build']);
-  if (b.code !== 0) { console.error('=== BUILD FAILED ===\n' + b.out.slice(-3000)); process.exit(3); }
   const port = 5300 + Math.floor(Math.random() * 400);
-  server = spawn('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
-  });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d));
-  server.stderr.on('data', (d) => (log += d));
-  const url = `http://127.0.0.1:${port}/`;
-  if (!(await waitForServer(url))) { console.error('preview failed:\n' + log); process.exit(3); }
-  return url;
+  const r = await buildAndPreview(ROOT, port);
+  if (r.error) { console.error(r.error); process.exit(3); }
+  server = r.server;
+  return r.url;
 }
 
 (async () => {
@@ -530,7 +510,7 @@ async function startServer() {
     await page.waitForFunction('window.__ACNTR_READY__ === true', { timeout: 180000 });
   } catch {
     console.error('BOOT FAILED\n' + (await page.evaluate(() => window.__ACNTR_ERROR__ || '')));
-    await browser.close(); server?.kill(); process.exit(2);
+    await browser.close(); killTree(server); process.exit(2);
   }
   await page.evaluate(() => {
     const e = window.__ACNTR__?.engine;
@@ -618,6 +598,6 @@ async function startServer() {
   writeFileSync(resolve(outDir, 'measure.json'), JSON.stringify(report, null, 2));
   if (errors.length) console.error('\nconsole errors:\n' + [...new Set(errors)].slice(0, 10).join('\n'));
   await browser.close();
-  server?.kill();
+  killTree(server);
   process.exit(0);
 })();
