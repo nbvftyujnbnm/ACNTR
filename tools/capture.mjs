@@ -223,13 +223,19 @@ async function startServer() {
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
       try {
-        window.__ACNTR__.debug
-          .silhouette({ on: false })
+        const d = window.__ACNTR__.debug;
+        d.silhouette({ on: false })
           .releaseCamera()
           .freeze(false)
           .setHudVisible(true)
           .resetState()
-          .clearEnemies();
+          .clearEnemies()
+          .releaseKeys();
+        // Poses share ONE browser session, so a pass a pose switched off has to
+        // come back on even if that pose's own restore never fired. This is the
+        // same class of leak that once carried a low-AP red vignette out of the
+        // HUD pose and into the VFX frame after it.
+        for (const p of ['taa', 'ssao', 'motionBlur', 'dof']) d.setPass(p, true);
         window.__ACNTR__.game?.closeGarage?.();
       } catch { /* noop */ }
     }).catch(() => {});

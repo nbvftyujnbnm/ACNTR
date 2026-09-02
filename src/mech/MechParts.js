@@ -1388,46 +1388,50 @@ export function buildThigh(o = {}) {
   piston(b, s * 0.29, 0.02, -0.30, s * 0.23, TOP - 0.16, -0.42, 0.052);
   piston(b, s * 0.29, 0.02, 0.32, s * 0.23, TOP - 0.16, 0.44, 0.052);
 
-  // --- MAIN THIGH BLOCK --------------------------------------------------
-  // The widest part of the whole leg, and it is meant to be: an AC's upper leg
-  // is a slab, not a rod. It was 0.90 m across against a 1.22 m shin, i.e. the
-  // limb tapered the wrong way and read as a spindly toy. It is 1.00 m across
-  // at the hip now, wider than the 1.06 m shin is deep and 6 cm wider than the
-  // shin, and the taper runs the right way (wide at the hip, narrow at the
-  // knee).
+  // --- MAIN THIGH BLOCK ---------------------------------------------------
+  // THE TAPER RUNS BOTH WAYS AND THEY POINT IN OPPOSITE DIRECTIONS. This block
+  // used to be 1.00 x 0.96 at the hip and 0.94 x 1.20 at the knee, i.e. it got
+  // DEEPER as it descended — which is why the leg measured 1.16 / 1.20 / 1.22 /
+  // 1.24 m deep from hip to knee, a constant-section slab, and why a side-on
+  // silhouette had nothing in it. It is 1.01 x 1.30 at the hip and 0.84 x 0.94
+  // at the knee now: 38% of its depth and 17% of its width come off over
+  // 1.22 m, so the knee is a genuine pinch rather than the widest point of the
+  // thigh.
+  //
+  // The exchange rate that makes this affordable is that depth costs SCREEN
+  // WIDTH at sin(azimuth) and width costs it at cos(azimuth) — at the graded
+  // 45 degree yaws those are equal, so a centimetre into Z has to come out of
+  // X one for one. Both tapers were flipped together for exactly that reason;
+  // the sum w + d at the hip is 2.31 against the old 2.15, and the knee end
+  // pays for it at 1.78 against the old 2.14.
   //
   // The OUTBOARD budget is set by the hanging forearm, not by taste. With the
   // hip pivot at 0.80 the block's outer face is 1.30 in torso space, and the
-  // forearm's inner face at the same height is 1.37 (rest roll 0.13). That
-  // 7 cm is not slack — it is a deliberate sky gap between arm and thigh, and
-  // it is the second hole this silhouette gained. Re-run the arm/leg clearance
-  // check in any tool that measures it before widening this further.
-  b.box('armor', MASK.BASE, 0.94, 1.22, 1.20, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.06, 0, 0, 0,
-    { taperX: 1.06, taperZ: rev ? 0.92 : 0.80 });
-  // front / rear armour plate over the block
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.66, 1.00, { tl: 0.22, tr: 0.22, bl: 0.14, br: 0.14 }), 0.12, 0.03),
-    _m.compose(_pv.set(0, TOP - 0.60, (rev ? 0.66 : -0.54)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+  // forearm's inner face at the same height is ~1.32 (rest roll 0.14). That is
+  // essentially touching, so the block MUST NOT grow in X — check
+  // `node tools/legbudget.mjs`, which reports the clearance at a matched
+  // height, before changing any number on this line.
+  b.box('armor', MASK.BASE, 0.84, 1.22, 0.94, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.04, 0, 0, 0,
+    { taperX: 1.20, taperZ: rev ? 1.24 : 1.38 });
+  // QUADRICEPS FACE. The old version of this plate was 1.00 m tall and ran the
+  // full height of the block at a fixed Z, which is what pinned the front face
+  // vertical and cancelled the taper it is bolted to. It is 0.62 m tall now and
+  // sits over the top third only, standing 6 cm proud of the block's widest
+  // point, so the front of the thigh steps out at the hip and falls away to the
+  // knee instead of dropping as one plane.
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.70, 0.62, { tl: 0.24, tr: 0.24, bl: 0.30, br: 0.30 }), 0.12, 0.03),
+    _m.compose(_pv.set(0, TOP - 0.30, (rev ? 0.74 : -0.66)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+  // HAMSTRING HOUSING — the rear half of the hip's depth, and the reason the
+  // thigh reads as two masses in profile rather than one wedge. It is inboard
+  // of the block's own outer face, so it is free in X.
+  b.box('armor', MASK.BASE, 0.62, 0.66, 0.46, 0.05, 0, TOP - 0.34, (rev ? -0.46 : 0.54), 0, 0, 0,
+    { taperZ: 1.18 });
   // Outboard cheek, stepped off the block face so the widest plane on the leg
   // is broken by a shadow line rather than presenting one flat slab to the key.
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.56, 0.86, { tl: 0.20, bl: 0.20, tr: 0.12, br: 0.12 }), 0.06, 0.026),
-    _m.compose(_pv.set(s * 0.47, TOP - 0.56, 0.04), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
-
-  // THE LEG IS FLAT IN PROFILE, AND ADDING DEPTH IS NOT THE FIX. Measured with
-  // tools/silhouette.mjs: side-on, the width bands from thigh to shin read
-  // 0.373 / 0.363 / 0.368 / 0.402 — no thigh mass, no knee pinch, no calf. All
-  // the negative space on this leg is slots cut in Y, which survive a yaw
-  // change but say nothing about fore-and-aft shape.
-  //
-  // A quadriceps wedge and a calf block were tried here and REVERTED. They did
-  // give the profile a visible step, but they cost the thing that matters more:
-  // openRows at the graded 3/4 yaws fell from 0.474 to 0.362 (45 deg) and from
-  // 0.488 to 0.443 (135 deg). The reason is written a few lines up — depth
-  // contributes sin(azimuth) of itself to SCREEN width, so ~24 cm of extra calf
-  // ate ~17 cm of the gap between the legs at a 3/4 camera. There is no spare
-  // screen width to spend; the mass has to come OUT of X as it goes into Z, and
-  // rebalancing width against depth along the whole limb is a job for whoever
-  // owns these proportions, with the arm/thigh clearance check in hand. Do not
-  // just add another block here.
+  // Kept high and short: it is what holds the hip at its 1.01 m width while the
+  // block below it narrows, so the widest point of the leg is the hip.
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.52, 0.74, { tl: 0.20, bl: 0.24, tr: 0.12, br: 0.16 }), 0.06, 0.026),
+    _m.compose(_pv.set(s * 0.47, TOP - 0.46, 0.02), _q.setFromEuler(_e.set(0, s * Math.PI * 0.5, 0)), _sc.set(1, 1, 1)));
 
 
   // --- KNEE ---------------------------------------------------------------
