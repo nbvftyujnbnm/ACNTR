@@ -1411,8 +1411,8 @@ export function buildThigh(o = {}) {
   // essentially touching, so the block MUST NOT grow in X — check
   // `node tools/legbudget.mjs`, which reports the clearance at a matched
   // height, before changing any number on this line.
-  b.box('armor', MASK.BASE, 0.84, 1.22, 0.94, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.04, 0, 0, 0,
-    { taperX: 1.20, taperZ: rev ? 1.24 : 1.38 });
+  b.box('armor', MASK.BASE, 0.84, 1.22, 0.90, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.04, 0, 0, 0,
+    { taperX: 1.20, taperZ: rev ? 1.18 : 1.28 });
   // QUADRICEPS FACE. The old version of this plate was 1.00 m tall and ran the
   // full height of the block at a fixed Z, which is what pinned the front face
   // vertical and cancelled the taper it is bolted to. It is 0.62 m tall now and
@@ -1420,12 +1420,12 @@ export function buildThigh(o = {}) {
   // point, so the front of the thigh steps out at the hip and falls away to the
   // knee instead of dropping as one plane.
   b.addM('armor', MASK.BASE, plate(beveledRectShape(0.70, 0.62, { tl: 0.24, tr: 0.24, bl: 0.30, br: 0.30 }), 0.12, 0.03),
-    _m.compose(_pv.set(0, TOP - 0.30, (rev ? 0.74 : -0.66)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+    _m.compose(_pv.set(0, TOP - 0.30, (rev ? 0.66 : -0.58)), _q.setFromEuler(_e.set(0, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
   // HAMSTRING HOUSING — the rear half of the hip's depth, and the reason the
   // thigh reads as two masses in profile rather than one wedge. It is inboard
   // of the block's own outer face, so it is free in X.
-  b.box('armor', MASK.BASE, 0.62, 0.66, 0.46, 0.05, 0, TOP - 0.34, (rev ? -0.46 : 0.54), 0, 0, 0,
-    { taperZ: 1.18 });
+  b.box('armor', MASK.BASE, 0.62, 0.66, 0.30, 0.05, 0, TOP - 0.34, (rev ? -0.48 : 0.56), 0, 0, 0,
+    { taperZ: 1.10 });
   // Outboard cheek, stepped off the block face so the widest plane on the leg
   // is broken by a shadow line rather than presenting one flat slab to the key.
   // Kept high and short: it is what holds the hip at its 1.01 m width while the
