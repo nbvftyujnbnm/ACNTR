@@ -202,6 +202,8 @@ export class MechRig {
         footPitch: 0,
       });
     }
+    /** How far above its own origin a foot may plant — see `_sampleGround`. */
+    this._maxStepUp = (L1 + L2) * 0.55 * this.scale;
     // seed foot world positions under the mech
     this.root.updateWorldMatrix(true, false);
     for (const leg of this.legs) {
@@ -515,6 +517,18 @@ export class MechRig {
   /** Two-bone analytic IK. Bend plane is chosen so reverse joints fold backwards. */
   _solveLeg(leg, targetWorld, footPitch, footYaw) {
     _v1.copy(targetWorld).applyMatrix4(_mPelvisInv);
+    // A FOOT MUST NEVER BE ASKED FOR ABOVE ITS OWN HIP. `leg.world.y` tracks
+    // `_sampleGround`, and a ground query that answers with a surface the mech
+    // is standing INSIDE (spawning under a deck, clipping a ledge) hands this
+    // solver a target metres above the pelvis. Nothing downstream rejects it:
+    // `_up = -_dir` then points DOWN, `makeBasis` produces a 180-degree flip,
+    // and the whole leg swings up over the torso — measured on a level spawn
+    // whose ground sample came back 8 m above the mech's soles, where both
+    // knees ended up 2 m above the hip and both feet level with the head.
+    // Clamping the target keeps a bad sample to a straightened leg, which is
+    // wrong by centimetres instead of by a somersault.
+    const drop = (leg.L1 + leg.L2) * 0.30;
+    if (_v1.y > leg.hipLocal.y - drop) _v1.y = leg.hipLocal.y - drop;
     _dir.subVectors(_v1, leg.hipLocal);
     let dist = _dir.length();
     const L1 = leg.L1, L2 = leg.L2;
@@ -606,10 +620,24 @@ export class MechRig {
     if (b.rShoulderMount) b.rShoulderMount.rotation.x = -this.sRecoil.rShoulder.x * 0.030;
   }
 
+  /**
+   * Ground height for a foot plant. The sampler `Game` installs is
+   * `Physics.groundHeight`, which answers with the HIGHEST static surface in
+   * the column — not the one the mech is standing on. Under any deck, gantry
+   * or bridge that is a ceiling, and the gait then tries to plant its feet on
+   * it: measured on a level spawn at y 18.6 the sampler answered 26.5 and both
+   * legs solved to a full crouch (and, before `_solveLeg` was given its own
+   * guard, folded over the mech's head).
+   * A foot can legitimately be a step above the mech's own origin — walking up
+   * a slope, or onto a ledge — but never by more than the leg can lift, so the
+   * sample is capped there and anything past it is treated as a ceiling.
+   */
   _sampleGround(x, z) {
     if (this.groundAt) {
       const y = this.groundAt(x, z);
-      if (typeof y === 'number' && isFinite(y)) return y;
+      if (typeof y === 'number' && isFinite(y)) {
+        return Math.min(y, this.root.position.y + this._maxStepUp);
+      }
     }
     return this.root.position.y;
   }

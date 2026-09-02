@@ -76,6 +76,50 @@ function ridged(x, y, s, oct = 4, gain = 0.5, lac = 2.11) {
 
 const _v2 = new THREE.Vector2();
 
+/**
+ * Mean LINEAR luminance of a canvas-backed sRGB texture, equal-weighted across
+ * the three channels so it is directly comparable with the `dot(rgb, 1/3)` the
+ * detail taps take on the GPU.
+ *
+ * This exists so the near-field detail layer can be expressed as a RATIO to the
+ * map's own mean and therefore average to a gain of exactly 1. The mech shader
+ * learned the same lesson the expensive way (see the `uTexMean` amendment): a
+ * hard-coded guess at a procedural map's mean was off by a factor of thirty and
+ * silently rescaled every surface that used it. The forge's maps are all drawn
+ * into a canvas we still hold, so there is no need to guess.
+ *
+ * @param {THREE.Texture} tex canvas-backed, sRGB-tagged
+ * @returns {number} mean of (lin(r)+lin(g)+lin(b))/3 over every texel
+ */
+function textureMeanLuma(tex) {
+  const img = tex && tex.image;
+  if (!img || !img.width || !img.getContext) return 0.5;
+  let ctx;
+  try {
+    ctx = img.getContext('2d', { willReadFrequently: true });
+  } catch (e) {
+    return 0.5;
+  }
+  if (!ctx) return 0.5;
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, img.width, img.height).data;
+  } catch (e) {
+    return 0.5;
+  }
+  const lin = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const c = i / 255;
+    lin[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  let sum = 0;
+  const n = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += (lin[data[i]] + lin[data[i + 1]] + lin[data[i + 2]]) / 3;
+  }
+  return n > 0 ? sum / n : 0.5;
+}
+
 export class Terrain {
   /**
    * @param {object} opts
@@ -458,7 +502,36 @@ export class Terrain {
       // x: dust 1/m, y: pad 1/m, z: gravel 1/m, w: macro 1/m
       uScales: { value: new THREE.Vector4(1 / 13.0, 1 / 6.5, 1 / 3.6, 1 / 190.0) },
       uNrmStrength: { value: opts.normalStrength ?? 1.25 },
+      /*
+       * Near-field detail. x/y are MULTIPLIERS on the dust scale, z is the
+       * albedo contrast and w the relief strength.
+       *
+       * The dust map's coarsest feature is its 6-cell macro noise and its
+       * aggregate is a 46-point worley — at the 13 m base tile those land at
+       * 2.2 m and 1.9 m, and its `fine` layer is 200 cells across 384 texels,
+       * i.e. under two texels, which is gone by the first mip. So between the
+       * 2 m mottle and nothing at all the ground carries NOTHING, and 5-15 m is
+       * exactly the band a third-person gameplay frame spends most of its
+       * pixels on. Measured on `shots/lvl_b0/gameplay.png`, a 380x90 patch of
+       * sunlit foreground dune had a standard deviation of 14.7 code values,
+       * essentially all of it one blobby ~15 px mottle with no structure inside
+       * it — REVIEW's "no aggregate, no rock, no detail texture".
+       *
+       * 5.7 and 21.3 put the same map's macro blob at 38 cm and 10 cm and its
+       * worley cells at 33 cm and 9 cm: pebble clusters and grit. They are
+       * incommensurate with each other (3.74) and with the base tile, so the
+       * three scales cannot beat into a rhythm — the same argument `cliffBreakup`
+       * uses on the cliffs.
+       *
+       * These are TEXTURE taps, not a procedural field, which is what makes
+       * them safe at range: the GPU mips them down to the map mean, the ratio
+       * goes to 1 and the layer fades out on its own. A closed-form noise term
+       * at 10 cm would alias into crawling speckle at 200 m instead.
+       */
+      uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.62) },
+      uGroundMean: { value: 0.5 },
     };
+    u.uGroundMean.value = textureMeanLuma(ground.map);
     mat.userData.uniforms = u;
 
     mat.onBeforeCompile = (shader) => {
@@ -495,6 +568,8 @@ export class Terrain {
            uniform vec3 uGravelTint;
            uniform vec3 uPadTint;
            uniform vec4 uScales;
+           uniform vec4 uDetail;
+           uniform float uGroundMean;
            uniform float uNrmStrength;
            varying vec3 vWPos;
            varying vec3 vWNrm;
@@ -545,13 +620,38 @@ export class Terrain {
            acAlb *= 0.74 + 0.54 * acMacro;
            acAlb *= mix( 1.0, 0.60, clamp( acSlope * 1.5, 0.0, 1.0 ) );
            acAlb *= mix( 0.46, 1.0, vSplat.z );
+
+           // --- near-field aggregate ---------------------------------------
+           // Two more taps of the dust map at 2.3 m and 0.61 m. Planar in XZ
+           // rather than triplanar: three taps a scale would be nine extra
+           // fetches, and this layer is about the ground the mech walks on, so
+           // it is faded out on anything steep enough to smear (see acFlat)
+           // instead of being blended round the corner.
+           vec2 acDUV = acWP.xz;
+           vec2 acDUV2 = vec2( acWP.z, -acWP.x );   // 90 deg, so the two cannot correlate
+           float acD1 = dot( texture2D( tGroundMap, acDUV * ( acSD * uDetail.x ) ).rgb, vec3( 0.3333 ) );
+           float acD2 = dot( texture2D( tGroundMap, acDUV2 * ( acSD * uDetail.y ) ).rgb, vec3( 0.3333 ) );
+           float acFlat = smoothstep( 0.52, 0.86, acGN.y );
+           float acInv = 1.0 / max( uGroundMean, 1e-3 );
+           // Ratios to the map's own mean, so the layer averages to a gain of
+           // exactly 1 and cannot shift the terrain's overall value.
+           float acDet = ( ( acD1 * acInv - 1.0 ) * 0.62 + ( acD2 * acInv - 1.0 ) * 0.38 ) * acFlat;
+           // Asymmetric clamp, same reasoning as the mech's detail layer: grit
+           // may darken freely into its own shadow but must not brighten past
+           // the point where a lit dune starts throwing white specks.
+           acAlb *= clamp( 1.0 + acDet * uDetail.z, 0.58, 1.32 );
+
            diffuseColor.rgb *= acAlb;
 
            // roughness: dry dust is very rough, wet-stained concrete less so
            float acRough = texture2D( tGroundOrm, acWP.xz * acSD ).g;
            acRough = mix( acRough, texture2D( tPadOrm, acWP.xz * acSP ).g, acWPad );
            acRough = mix( acRough, 0.84, acWGrv );
-           float acRoughOut = clamp( acRough * ( 0.90 + 0.20 * acMacro ), 0.34, 1.0 );
+           // A proud pebble is polished and the dust between them is not, so the
+           // detail layer drives roughness the other way round from albedo.
+           // Without this the aggregate reads as a printed decal rather than as
+           // surface — the exact failure the mech's detail layer documents.
+           float acRoughOut = clamp( acRough * ( 0.90 + 0.20 * acMacro ) * ( 1.0 - acDet * 0.30 ), 0.34, 1.0 );
 
            // triplanar UDN normal blend for dust
            vec3 acTNX = texture2D( tGroundNrm, acWP.zy * acSD ).xyz * 2.0 - 1.0;
@@ -566,7 +666,23 @@ export class Terrain {
            vec2 acPN = texture2D( tPadNrm, acWP.xz * acSP ).xy * 2.0 - 1.0;
            vec3 acNPad = normalize( vec3( acGN.x + acPN.x * 0.85, acGN.y, acGN.z + acPN.y * 0.85 ) );
 
-           vec3 acWorldN = normalize( mix( acNDust, acNPad, acWPad ) );`
+           vec3 acWorldN = normalize( mix( acNDust, acNPad, acWPad ) );
+
+           // --- near-field RELIEF -------------------------------------------
+           // The albedo half of a detail layer dies in the highlights: through
+           // AgX a +/-25% albedo swing arrives as about +/-10% of display, and
+           // on sunlit ground that is a couple of code values. Relief moves N.L
+           // instead, which is the only term with real authority at high light
+           // levels — and it is also what breaks the SHADING TERMINATOR off the
+           // 5 m mesh quads, which is what makes a foreground berm read as a
+           // hard-edged faceted ramp rather than as a dune.
+           // The mapping is planar (normal-map x -> world x, y -> world z), so
+           // this is only valid where the surface is roughly up-facing; acFlat
+           // is the same gate the albedo half uses.
+           vec2 acDN1 = texture2D( tGroundNrm, acDUV * ( acSD * uDetail.x ) ).xy * 2.0 - 1.0;
+           vec2 acDN2 = texture2D( tGroundNrm, acDUV2 * ( acSD * uDetail.y ) ).xy * 2.0 - 1.0;
+           vec2 acDN = ( acDN1 * 0.70 + acDN2 * 0.52 ) * ( uDetail.w * acFlat );
+           acWorldN = normalize( acWorldN + vec3( acDN.x, 0.0, acDN.y ) );`
         )
         .replace(
           '#include <roughnessmap_fragment>',
