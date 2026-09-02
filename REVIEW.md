@@ -10,6 +10,18 @@ images is the hobby project.
 node tools/capture.mjs --out shots/iterNN
 ```
 
+That shoots the nine REVIEW poses. Everything else in `tools/poses/` is a
+DIAGNOSTIC and must be asked for by name — they deliberately lie about the
+game's state (`plume_forced` detaches the thruster driver and forces intensity
+to 6; `plume_nosoft` disables the soft-particle depth fade; `particles` fires a
+point-blank explosion at a fixed camera). Do not grade those frames.
+
+Read `report.json` for each pose's `note` as well as its stats: a pose reports
+what it actually managed to set up, and a `warning` there means the frame
+cannot support the judgement it was shot for — a "gameplay" frame with no
+enemies visible, or a "boost" frame at 12 m/s, is worse than a missing one
+because it looks fine and gets graded anyway.
+
 Then `Read` each PNG in `shots/iterNN/` **as an image** and grade it. Read
 `shots/iterNN/report.json` for draw calls / triangles / fps / console errors.
 

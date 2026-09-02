@@ -34,11 +34,35 @@ const SETTLE = parseInt(arg('settle', '1100'), 10);
 const SHOT_TIMEOUT = parseInt(arg('shotTimeout', '180000'), 10);
 
 const POSE_DIR = resolve(ROOT, 'tools/poses');
-const allPoses = readdirSync(POSE_DIR)
-  .filter((f) => f.endsWith('.js'))
-  .map((f) => basename(f, '.js'));
+
+/**
+ * The REVIEW set — what a bare `node tools/capture.mjs` shoots, and what
+ * REVIEW.md grades. Everything else in tools/poses/ is a diagnostic and has to
+ * be asked for by name.
+ *
+ * The distinction matters because diagnostics deliberately lie: plume_forced
+ * detaches the thruster driver and forces intensity to 6, plume_nosoft disables
+ * the soft-particle depth fade, particles fires a point-blank explosion at a
+ * fixed camera. Handing a critic those frames alongside the real ones invites a
+ * grade on a state the game never actually produces.
+ */
+const REVIEW_POSES = [
+  'hero', 'mech_detail', 'vista', 'gameplay', 'hud', 'combat_vfx', 'boost', 'garage', 'plume',
+];
+
+const known = new Set(
+  readdirSync(POSE_DIR).filter((f) => f.endsWith('.js')).map((f) => basename(f, '.js')),
+);
 const requested = arg('poses', null);
-const poses = requested && requested !== true ? String(requested).split(',').map((s) => s.trim()) : allPoses;
+const poses = requested && requested !== true
+  ? String(requested).split(',').map((s) => s.trim())
+  : REVIEW_POSES.filter((p) => known.has(p));
+
+const missing = poses.filter((p) => !known.has(p));
+if (missing.length) {
+  console.error(`unknown pose(s): ${missing.join(', ')}\navailable: ${[...known].sort().join(', ')}`);
+  process.exit(3);
+}
 
 let server = null;
 /**

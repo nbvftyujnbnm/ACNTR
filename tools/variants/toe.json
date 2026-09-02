@@ -1,0 +1,17 @@
+[
+  {
+    "name": "base",
+    "poses": "hero,boost,combat_vfx,vista",
+    "apply": "(() => { const m = window.__ACNTR__.game.pipeline.mFinal; window.__FINAL_SRC__ = window.__FINAL_SRC__ || m.fragmentShader; m.fragmentShader = window.__FINAL_SRC__; m.needsUpdate = true; return 'base'; })()"
+  },
+  {
+    "name": "eotf",
+    "poses": "hero,boost,combat_vfx,vista",
+    "apply": "(() => { const m = window.__ACNTR__.game.pipeline.mFinal; const src = window.__FINAL_SRC__ = window.__FINAL_SRC__ || m.fragmentShader; const from = 'return pow( max( displayColor, vec3( 0.0 ) ), vec3( 2.2 ) );'; if (src.indexOf(from) === -1) throw new Error('eotf anchor missing'); m.fragmentShader = src.replace(from, 'vec3 c = max( displayColor, vec3( 0.0 ) ); return mix( c / 12.92, pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ), step( vec3( 0.04045 ), c ) );'); m.needsUpdate = true; return 'eotf'; })()"
+  },
+  {
+    "name": "eotf_liftlast",
+    "poses": "hero,boost,combat_vfx",
+    "apply": "(() => { const m = window.__ACNTR__.game.pipeline.mFinal; const src = window.__FINAL_SRC__ = window.__FINAL_SRC__ || m.fragmentShader; const from = 'return pow( max( displayColor, vec3( 0.0 ) ), vec3( 2.2 ) );'; const liftFrom = 'disp = uLift + ( vec3( 1.0 ) - uLift ) * clamp( disp, 0.0, 1.0 );'; const splitAnchor = 'disp += uSplitHighlight * smoothstep( bal, 1.0, lum );'; if (src.indexOf(from) === -1 || src.indexOf(liftFrom) === -1 || src.indexOf(splitAnchor) === -1) throw new Error('liftlast anchor missing'); let s = src.replace(from, 'vec3 c = max( displayColor, vec3( 0.0 ) ); return mix( c / 12.92, pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ), step( vec3( 0.04045 ), c ) );'); s = s.replace(liftFrom, 'disp = clamp( disp, 0.0, 1.0 );'); s = s.replace(splitAnchor, splitAnchor + ' disp = uLift + ( vec3( 1.0 ) - uLift ) * clamp( disp, 0.0, 1.0 );'); m.fragmentShader = s; m.needsUpdate = true; return 'eotf_liftlast'; })()"
+  }
+]
