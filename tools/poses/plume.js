@@ -47,9 +47,16 @@
   // as a small disc, and the shader weights alpha by fresnel so a head-on plume
   // is its own dimmest view — the worst possible angle for the one frame whose
   // job is to show it.
-  debug.cameraBehindPlayer({ back: 9.0, up: 3.2, side: 7.0, lookY: 5.4, fov: 40 });
+  debug.cameraBehindPlayer({ back: 11.0, up: 3.0, side: 7.5, lookY: 5.2, fov: 42 });
   debug.setPass('motionBlur', false);
   debug.step(0.08);
+
+  // FREEZE. The harness renders ~1.1 s of real time after this returns, and a
+  // mech holding vertical thrust climbs at up to 18 m/s — so the last frame put
+  // it 15 m above where the camera was aimed and cropped its head off. Freezing
+  // stops the simulation but not the renderer, and the flame handles keep the
+  // intensity they were driven to, so the shot is exactly what was set up here.
+  debug.freeze(true);
 
   const g = game;
   const m = g.player.moveState || {};
@@ -81,5 +88,9 @@
   if (!flames.length) window.__POSE_NOTE__.warning = 'no plume above idle — the thruster drive is not running';
 
   // Leave the pass as we found it; poses share one browser session.
-  setTimeout(() => { debug.releaseKeys(); debug.setPass('motionBlur', true); }, 3000);
+  setTimeout(() => {
+    debug.freeze(false);
+    debug.releaseKeys();
+    debug.setPass('motionBlur', true);
+  }, 3000);
 })();
