@@ -594,9 +594,22 @@ export class Physics {
   /**
    * Nearest hit along a ray. Allocation-free when `out` is supplied; the
    * default `out` is a shared object so consumers must copy anything they keep.
+   *
+   * NON-FINITE INPUTS RETURN null. That guard is not defensive padding, it
+   * closes a real class of bug: the miss test at the bottom is
+   * `if (best >= maxDist) return null`, and `NaN >= NaN` is FALSE, so a NaN
+   * range used to fall through and report a HIT at a NaN distance. One NaN
+   * component anywhere upstream (a `?? ` default that catches undefined but not
+   * NaN, a normalise of a zero vector, a collider height that was never set)
+   * therefore turned every cast into a phantom occluder. It cost four
+   * iterations of chasing the arena scorer when the real symptom was
+   * "4 enemies in frustum, 0 visible", and `TargetingSystem` uses this same
+   * call for line-of-sight, where it would have dropped the player's lock
+   * permanently and looked exactly like scenery.
+   *
    * @param {THREE.Vector3} origin
    * @param {THREE.Vector3} dir      must be normalised
-   * @param {number} maxDist
+   * @param {number} maxDist         must be finite and > 0, else null
    * @param {object} [out]
    * @returns {{hit:boolean,point:THREE.Vector3,normal:THREE.Vector3,distance:number,object:*}|null}
    */
@@ -604,6 +617,13 @@ export class Physics {
     const res = out || this._rayOut;
     res.hit = false;
     res.object = null;
+    res.distance = 0;
+    // `!(maxDist > 0)` and not `maxDist <= 0`, because NaN fails BOTH
+    // comparisons and only the negated form rejects it.
+    if (!(maxDist > 0) || !Number.isFinite(maxDist)) return null;
+    if (!origin || !dir) return null;
+    if (!Number.isFinite(origin.x) || !Number.isFinite(origin.y) || !Number.isFinite(origin.z)) return null;
+    if (!Number.isFinite(dir.x) || !Number.isFinite(dir.y) || !Number.isFinite(dir.z)) return null;
     res.distance = maxDist;
     if (this._dirty) this.build();
     if (this._triCount === 0 && this._boxCount === 0) return null;
@@ -1383,8 +1403,25 @@ export class Physics {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * World Y of the topmost surface under (x,z). Cached on a 1.5 m lattice —
-   * AI steering and prop placement hammer this and the terrain is static.
+   * World Y of the **TOPMOST** static surface in the column at (x,z), cast from
+   * above the whole world downward. Cached on a 1.5 m lattice — AI steering and
+   * prop placement hammer this and the terrain is static.
+   *
+   * ### READ THIS BEFORE CALLING IT. IT IS NOT "THE GROUND".
+   *
+   * Under a deck, catwalk, gantry, bridge or hangar roof this returns the
+   * **CEILING ABOVE YOU**, not the floor you are standing on. The name reads
+   * like "height of the ground", every caller so far has assumed that, and it
+   * has already caused two separate bugs: a mech solving both legs to a full
+   * crouch and folding them over its own head (spawn at y 18.6, sampler
+   * answered 26.5 — the catwalk above), and enemies placed on roofs. Several
+   * review poses stand under a catwalk, so it is not a corner case.
+   *
+   * Use it only when you genuinely want the top of the column — silhouette
+   * tests, "is anything at all here", a fallback for a point outside the
+   * collision geometry. For "what am I standing on", call
+   * {@link Physics#floorHeight}, which casts DOWN from a height you supply.
+   *
    * @returns {number} height, or -Infinity if nothing is below
    */
   groundHeight(x, z) {
@@ -1405,6 +1442,44 @@ export class Physics {
     this._ghKey[h] = key;
     this._ghVal[h] = val;
     return val;
+  }
+
+  /**
+   * World Y of the first static surface **BELOW** `fromY` at (x,z) — the floor
+   * a body at that height is actually standing on, deck or terrain.
+   *
+   * This is the companion `groundHeight` should have shipped with. It casts
+   * down from where the caller already is instead of from the top of the world,
+   * so a mech under a catwalk gets the catwalk's underside skipped and the
+   * apron beneath it returned. `Game.js` open-codes exactly this twice for the
+   * rig's foot sampler; new callers should use this instead.
+   *
+   * Not cached: the answer depends on `fromY`, so a 2-D lattice cache would be
+   * wrong, and the raycast is already grid-accelerated.
+   *
+   * @param {number} x
+   * @param {number} z
+   * @param {number} fromY   start height; the cast begins `lift` above it
+   * @param {object} [opts]
+   * @param {number} [opts.lift=3]     head-room so a body slightly sunk into the
+   *                                   floor still sees it
+   * @param {number} [opts.maxDrop=400] how far down to look
+   * @param {boolean} [opts.fallback=true] fall back to `groundHeight` on a miss
+   * @returns {number} height, or -Infinity when nothing is below and fallback is off
+   */
+  floorHeight(x, z, fromY, opts) {
+    const lift = opts?.lift ?? 3;
+    const maxDrop = opts?.maxDrop ?? 400;
+    const fallback = opts?.fallback !== false;
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(fromY)) return -Infinity;
+    _v3a.set(x, fromY + lift, z);
+    _v3b.set(0, -1, 0);
+    // `_ghOut` is the groundHeight scratch and is safe to share: raycast results
+    // are read out immediately here, never held across another cast (see the
+    // contract amendment on the shared mutable scratch object).
+    const hit = this.raycast(_v3a, _v3b, maxDrop + lift, this._ghOut);
+    if (hit && hit.hit) return _v3a.y - hit.distance;
+    return fallback ? this.groundHeight(x, z) : -Infinity;
   }
 
   /** Line-of-sight helper used by AI; true when nothing blocks a → b. */
