@@ -18,8 +18,18 @@
   const mats = g.mechFactory?.materials;
   if (!mats) return { error: 'no MechMaterials on the factory' };
 
-  /** Histogram of one ORM channel, plus the acGrime the shader derives from B. */
-  function survey(tex, label) {
+  /**
+   * Histogram of one ORM channel, plus the acGrime the shader derives from B.
+   *
+   * ALSO the GREEN channel, because three evaluates `roughness * roughnessMap.g`
+   * and `MechMaterials` then multiplies AGAIN by a per-slot factor — so the
+   * number a slot actually renders at is `map.g * uSlotRough[n]`, never the slot
+   * value on its own. `TextureForge` writes a mean near 0.5 with a floor near
+   * 0.06, which is exactly the shape that turned the level's `dark` family into
+   * a mirror (see the conveyor-blowout amendment). `slotRough` below resolves
+   * the same question for the mech.
+   */
+  function survey(tex, label, slotRough) {
     const img = tex?.metalnessMap?.image;
     if (!img) return { label, error: 'no metalnessMap image' };
     const S = img.width;
@@ -38,6 +48,7 @@
     let n = 0, sumB = 0, sumG = 0, minB = 1, maxB = 0;
     let any = 0, half = 0, full = 0;
     const hist = new Array(20).fill(0);
+    const rough = [];
     for (let i = 0; i < px.length; i += 4) {
       const b = px[i + 2] / 255;
       n++; sumB += b; minB = Math.min(minB, b); maxB = Math.max(maxB, b);
@@ -47,11 +58,35 @@
       if (grime > 0.01) any++;
       if (grime > 0.5) half++;
       if (grime > 0.9) full++;
+      // Sample the roughness channel on a stride — percentiles need an array
+      // and a 1M-entry sort is not worth it for a distribution this smooth.
+      if ((i & 63) === 0) rough.push(px[i + 1] / 255);
+    }
+    rough.sort((a, b2) => a - b2);
+    const pct = (p) => +rough[Math.min(rough.length - 1, Math.floor(p * rough.length))].toFixed(3);
+    // What each mask slot ACTUALLY renders at: three's roughnessFactor is
+    // `material.roughness (1) * map.g`, and ROUGH then multiplies by the slot.
+    // A slot is a mirror wherever this drops under ~0.25.
+    const eff = {};
+    if (slotRough) {
+      const names = ['base', 'accent', 'trim', 'steel'];
+      for (let k = 0; k < 4; k++) {
+        eff[names[k]] = {
+          k: slotRough[k],
+          p05: +Math.min(1, pct(0.05) * slotRough[k]).toFixed(3),
+          median: +Math.min(1, pct(0.5) * slotRough[k]).toFixed(3),
+          p95: +Math.min(1, pct(0.95) * slotRough[k]).toFixed(3),
+        };
+      }
     }
     return {
       label,
       size: S,
       ormB: { min: +minB.toFixed(3), max: +maxB.toFixed(3), mean: +(sumB / n).toFixed(3) },
+      ormG: {
+        min: pct(0), p05: pct(0.05), median: pct(0.5), p95: pct(0.95), max: pct(1),
+      },
+      effectiveRough: eff,
       // What the term does now that it is defined.
       acGrime: {
         mean: +(sumG / n).toFixed(4),

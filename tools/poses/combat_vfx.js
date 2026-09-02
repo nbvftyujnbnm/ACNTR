@@ -31,15 +31,17 @@
   // half of what this frame is meant to show.
   const rp = game.player.root.position;
   const gy = game.physics?.groundHeight?.(rp.x, rp.z);
-  if (Number.isFinite(gy)) debug.placePlayer(rp.x, gy + 16, rp.z, game.player.root.rotation.y);
+  // debug.yaw(), not root.rotation.y — feeding the root's yaw back into
+  // placePlayer rotates the mech by however far the two have drifted, and
+  // they have been measured a clean 180 deg apart.
+  if (Number.isFinite(gy)) debug.placePlayer(rp.x, gy + 16, rp.z, debug.yaw());
   debug.holdKeys(['Space']);
   debug.step(0.6);
 
   const p = game.player.root.position.clone();
-  const yaw = game.player.root.rotation.y;
-  // Mech basis: forward is -Z rotated by yaw, right is +X rotated by yaw.
-  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  // The basis the camera actually uses — see the note in gameplay.js.
+  const fwd = debug.forward();
+  const right = debug.right();
   const at = (f, u, r) => p.clone().addScaledVector(fwd, f).addScaledVector(right, r).setY(p.y + u);
 
   debug.spawnEnemy('ac', ...at(26, -6, -7).toArray(), 2);

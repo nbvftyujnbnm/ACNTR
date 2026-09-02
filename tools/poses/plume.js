@@ -31,8 +31,10 @@
   // under thrust.
   const gy = game.physics?.groundHeight?.(game.player.root.position.x, game.player.root.position.z);
   if (Number.isFinite(gy)) {
+    // debug.yaw(), not root.rotation.y — the two have been measured 180 deg
+    // apart, and feeding the root's back in spins the mech by the difference.
     debug.placePlayer(game.player.root.position.x, gy + 30, game.player.root.position.z,
-                      game.player.root.rotation.y);
+                      debug.yaw());
   }
   debug.holdKeys(['Space']);
   debug.step(1.1);

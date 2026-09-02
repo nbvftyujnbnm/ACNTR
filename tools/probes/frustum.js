@@ -45,11 +45,8 @@
   // lens. Report all three and spawn along the CAMERA's, since the camera is
   // the thing that decides what is in the picture.
   cam.updateMatrixWorld();
-  const camFlat = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-  camFlat.y = 0;
-  camFlat.normalize();
-  const camRight = new THREE.Vector3(camFlat.z, 0, -camFlat.x);
-  const at = (ahead, side) => p.clone().addScaledVector(camFlat, ahead).addScaledVector(camRight, side);
+  const camFlat = debug.forward();
+  const at = (ahead, side) => debug.aheadOfPlayer(ahead, side, new THREE.Vector3());
 
   // The same four spawns the gameplay pose asks for, and what the ground query
   // said at each spot — so a bad Y is visible next to the request that made it.

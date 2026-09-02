@@ -315,6 +315,7 @@ the file for the phrase in caps.
 | add negative space to the mech | **THE "ONLY ONE TRUE SKY-GAP" DEFECT IS STALE** and **THE LEG'S FLAT PROFILE IS A WIDTH/DEPTH BUDGET PROBLEM** |
 | change a loadout-derived number | **EVERY LOADOUT MULTIPLIER WAS PINNED AT ITS CLAMP FLOOR** — `warnIfSaturated` exists to catch the recurrence |
 | debug the thruster plumes | **THE THRUSTER PLUMES RENDER**, **THE mech.thrusters ANCHORS POINTED THE WRONG WAY**, and **THE INSTANCED PARTICLE PATH WORKS** — a long elimination list, do not redo it |
+| ask "which way is the mech facing" in a tool | **`root.rotation.y` IS 180 DEG FROM `aimYaw`** — use `debug.forward()`/`right()`/`aheadOfPlayer()`/`yaw()`, never rebuild the basis from the root |
 | spawn or place an entity from a tool | **`debug.spawnEnemy` TRANSPOSED TIER AND POSITION** — every review frame had NaN enemies; print coordinates before theorising about occlusion |
 | wire a subsystem | **THE NEVER-CALLED-SETTER SWEEP** — it has found seven real bugs |
 
@@ -1525,3 +1526,32 @@ two of the silhouette metrics were wrong on their first outing.
   does not throw, it produces NaN, and NaN propagates into a state that
   reads as "working but empty". Validate at the boundary of anything that
   takes an ordered pair of same-shaped arguments.
+- 2026-09-02 [tools] EVERY POSE READ `player.root.rotation.y` AS "FORWARD",
+  AND IT IS 180 DEG FROM THE AIM THE CAMERA FOLLOWS. Measured immediately
+  after an arena placement that asked for yaw = PI: `root.rotation.y` was 0
+  while `aimYaw` was PI. So every pose that spawned "34 m ahead" put its
+  enemies 34 m BEHIND THE LENS — alive, finite, on open ground, and out of
+  shot.
+  This is the same lesson as the existing "ROOT ROTATION IS NOT THE AIM"
+  amendment, only half-learned: that one fixed WRITING the yaw (placePlayer
+  now sets the rig, the entity and the controller), and nobody went back to
+  fix the four poses and two probes that READ it back off the root. A
+  correction that lands on the write path and not the read path leaves the
+  bug live in a form that looks like someone already handled it.
+  Use `debug.forward()`, `debug.right()`, `debug.aheadOfPlayer(ahead, side)`
+  and `debug.yaw()`. They resolve `aimYaw` first (CameraRig writes it and the
+  camera follows it) and fall back to the live camera basis. Never rebuild
+  the basis from `root.rotation.y` in a tool again, and never feed
+  `root.rotation.y` back into `placePlayer` — that rotates the mech by
+  however far the two have drifted.
+- 2026-09-02 [tools] THE ARENA SCORER ONLY VETTED GROUND OUT TO 40 m WHILE
+  THE POSE SPAWNED TO 58 m, so a 49 m cliff starting at 46 m scored a perfect
+  "140 m clear, zero relief". The two enemies past the edge sat 32-37 deg
+  below the camera axis against a 29 deg half-FOV. `placePlayerInOpenGround`
+  now takes `{ ahead, behind, step, maxRelief }`, walks in 3 m strides rather
+  than 5 (a 5 m stride can straddle a ledge narrower than itself), defaults
+  `ahead` to 65, and reports `vettedTo` so a pose note shows whether the
+  arena was checked over the ground it actually used. A caller that places
+  anything past `ahead` must raise it. Tightening from 40 to 70 m cut the
+  candidate pool from 95 to 22, so the flat ground is genuinely scarce on
+  this map — expect that, and do not read a small pool as a bug.

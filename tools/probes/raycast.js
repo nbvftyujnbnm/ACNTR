@@ -46,8 +46,9 @@
     };
   };
 
-  const yaw = g.player.root.rotation.y;
-  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  // The aim the camera follows, not the root's stale rotation — measured a
+  // clean 180 deg apart, which would fire this probe's "forward" ray backwards.
+  const fwd = d.forward();
 
   const out = {
     openGround: open,

@@ -22,12 +22,10 @@
 
   // Spawn relative to the player, ahead of the chase camera — absolute world
   // coordinates do not survive real terrain.
-  const p = game.player.root.position;
-  const yaw = game.player.root.rotation.y;
-  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  // Placed ON the terrain — see the note in gameplay.js.
-  const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
+  // Placed ON the terrain, and ahead in the frame the CAMERA uses — see the
+  // note in gameplay.js. `root.rotation.y` reads a full 180 deg away from the
+  // aim the camera follows, which put every spawn behind the lens.
+  const at = (ahead, side) => debug.aheadOfPlayer(ahead, side, new THREE.Vector3());
   const spots = [
     ['ac', at(46, -16), 3, 8],
     ['mt', at(68, 24), 1, 0],
