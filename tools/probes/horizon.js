@@ -14,6 +14,7 @@
 // --rect` to read the value those metres actually rendered at.
 (() => {
   const { debug, game, THREE } = window.__ACNTR__;
+  const clampF = (v, a, b) => (v < a ? a : v > b ? b : v);
 
   // Reproduce tools/poses/vista.js exactly.
   debug.setHudVisible(false);
@@ -72,8 +73,36 @@
   const owners = {};
   for (const c of cols) owners[c.edge] = (owners[c.edge] || 0) + 1;
 
+  // Is the ridge LIT at all? A face with no key on it cannot express relief:
+  // every normal returns the same ambient, so geometry buys nothing and only
+  // albedo is left. Sample N.L on the face itself before authoring either.
+  const sun = game.sky?.sunDirection?.clone?.() || new THREE.Vector3(0, 1, 0);
+  const lit = [];
+  for (let sx = 0.08; sx <= 0.95; sx += 0.12) {
+    v2.set(sx * 2 - 1, 1 - 2 * 0.30);
+    ray.setFromCamera(v2, cam);
+    const hits = ray.intersectObjects(game.scene.children, true).filter((h) => h.object.visible);
+    const h = hits[0];
+    if (!h) { lit.push({ sx: +sx.toFixed(2), hit: 'sky' }); continue; }
+    const n = h.face
+      ? h.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize()
+      : null;
+    lit.push({
+      sx: +sx.toFixed(2),
+      name: h.object.name || h.object.type,
+      d: Math.round(h.distance),
+      nDotL: n ? +n.dot(sun).toFixed(3) : null,
+      normal: n ? n.toArray().map((v) => +v.toFixed(2)) : null,
+    });
+  }
+
+  const fog = game.scene.fog;
   return {
     camera: [cam.position.x, cam.position.y, cam.position.z],
+    sun: sun.toArray().map((v) => +v.toFixed(3)),
+    sunElevationDeg: +(Math.asin(clampF(sun.y, -1, 1)) * 180 / Math.PI).toFixed(1),
+    fog: fog ? { type: fog.type || fog.constructor.name, density: fog.density, near: fog.near, far: fog.far, color: fog.color.getHexString() } : null,
+    faceLighting: lit,
     silhouetteOwners: owners,
     edgeDistance: ds.length
       ? { min: ds[0], p25: ds[(ds.length * 0.25) | 0], median: ds[(ds.length * 0.5) | 0], p75: ds[(ds.length * 0.75) | 0], max: ds[ds.length - 1] }

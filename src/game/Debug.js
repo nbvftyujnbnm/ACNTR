@@ -119,6 +119,69 @@ export class Debug {
   }
 
   /**
+   * The flat forward direction the camera is actually going to look down.
+   *
+   * READ THIS INSTEAD OF `player.root.rotation.y`. The amendment above covers
+   * WRITING the yaw; every pose still READ it back off the root, and the root
+   * is not the authority. Measured immediately after an arena placement that
+   * asked for yaw = PI: `root.rotation.y` was 0 while `aimYaw` was PI — a
+   * clean 180 deg disagreement. Poses computing `(-sin rootYaw, 0, -cos
+   * rootYaw)` therefore spawned their enemies EXACTLY BEHIND THE CAMERA, and
+   * reported "no enemies visible" while every enemy was alive, finite, on
+   * open ground, and directly behind the lens.
+   *
+   * `aimYaw` is the authority because CameraRig writes it and the camera
+   * follows it. The live camera is used as a cross-check and a fallback: it
+   * is the ground truth for what will be in the picture, but it lags during
+   * the frames right after a placement, so aimYaw is preferred when present.
+   */
+  /**
+   * The authoritative yaw, for callers that need the scalar — re-placing the
+   * player at its current facing, for instance. Passing
+   * `player.root.rotation.y` back into `placePlayer` spins the mech by
+   * whatever the two have drifted apart by, which has been a clean 180 deg.
+   */
+  yaw() {
+    const y = this.game.player?.entity?.aimYaw ?? this.game.player?.aimYaw;
+    if (Number.isFinite(y)) return y;
+    const r = this.game.player?.root?.rotation?.y;
+    return Number.isFinite(r) ? r : 0;
+  }
+
+  forward(out = new THREE.Vector3()) {
+    const yaw = this.game.player?.entity?.aimYaw ?? this.game.player?.aimYaw;
+    if (Number.isFinite(yaw)) return out.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const cam = this.game.engine?.camera;
+    if (cam) {
+      cam.updateMatrixWorld();
+      out.set(0, 0, -1).applyQuaternion(cam.quaternion);
+      out.y = 0;
+      if (out.lengthSq() > 1e-6) return out.normalize();
+    }
+    return out.set(0, 0, -1);
+  }
+
+  /** The flat right-hand direction matching `forward()`. */
+  right(out = new THREE.Vector3()) {
+    this.forward(out);
+    return out.set(-out.z, 0, out.x);
+  }
+
+  /**
+   * A point `ahead` metres in front of the player and `side` metres to its
+   * right, in the frame the camera actually uses. The one correct way for a
+   * pose to say "put an enemy over there".
+   */
+  aheadOfPlayer(ahead = 40, side = 0, out = new THREE.Vector3()) {
+    const p = this.game.player?.root?.position;
+    const f = this.forward();
+    const r = this.right();
+    if (p) out.copy(p); else out.set(0, 0, 0);
+    out.addScaledVector(f, ahead).addScaledVector(r, side);
+    return out;
+  }
+
+  /**
    * Drop the mech onto the terrain at (x, z). Review poses must not hard-code a
    * world Y — the level has real terrain, so an absolute Y either buries the
    * mech or floats it, and the shot silently becomes worthless.
@@ -296,7 +359,13 @@ export class Debug {
    * @param {{arc?:number, rays?:number, range?:number}} [opts]
    * @returns {{x:number, z:number, yaw:number, clear:number}|null}
    */
-  placePlayerInOpenGround({ arc = Math.PI * 0.5, rays = 7, range = 140, rank = 0 } = {}) {
+  placePlayerInOpenGround({
+    arc = Math.PI * 0.5, rays = 7, range = 140, rank = 0,
+    // How far the heightfield walk reaches. `ahead` must cover the furthest
+    // thing the caller intends to place, or the scorer will happily hand back
+    // a clifftop whose drop begins one metre past where it stopped looking.
+    ahead = 65, behind = 16, step = 3, maxRelief = 2.5,
+  } = {}) {
     const pts = this.game.level?.spawnPoints;
     const ph = this.game.physics;
     if (!pts?.length || !ph?.raycast) return null;
@@ -401,7 +470,9 @@ export class Debug {
     best = candidates[idx];
     this._openGroundCandidates = candidates.length;
     this.placePlayerOnGround(best.x, best.z, best.yaw, 0.05);
-    this._lastOpenGround = { ...best, rank, of: candidates.length };
+    // Report how far the relief walk actually reached, so a pose note shows
+    // whether the arena was vetted over the ground it went on to use.
+    this._lastOpenGround = { ...best, rank, of: candidates.length, vettedTo: ahead };
     return this._lastOpenGround;
   }
 

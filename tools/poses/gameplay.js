@@ -35,7 +35,11 @@
 
   for (let rank = 0; rank < 4; rank++) {
     debug.clearEnemies();
-    open = debug.placePlayerInOpenGround({ rank });
+    // Vet the ground out past the furthest spawn below (58 m), not just the
+    // 40 m the scorer used to check: a clifftop whose drop starts at 46 m
+    // scores as perfectly clear and then puts half the fight far below the
+    // bottom of frame.
+    open = debug.placePlayerInOpenGround({ rank, ahead: 70 });
     if (!open && rank === 0) debug.placePlayerOnGround(0, 40, 0, 1.0);
     debug.step(0.5);
 
@@ -45,10 +49,13 @@
     // Close, too: an AC6 gameplay screenshot is a knife fight at 30-60 m, and
     // the mech travels far enough during the pose to leave a wider spread
     // strung out through scenery.
-    const yaw = game.player.root.rotation.y;
-    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
+    // Ask the debug layer where "ahead" is. Deriving it from
+    // `root.rotation.y` here put the whole fight exactly 180 deg behind the
+    // camera: measured straight after an arena placement that asked for
+    // yaw = PI, the root read 0 while aimYaw — which is what the camera
+    // follows — read PI. Every enemy was alive, finite and on open ground,
+    // and all of them were behind the lens.
+    const at = (ahead, side) => debug.aheadOfPlayer(ahead, side, new THREE.Vector3());
     const a = at(34, -12);
     const b = at(46, 16);
     const c = at(58, -2);
@@ -99,6 +106,8 @@
     camY: seen.camY,
     openGround: open ? open.clear : null,
     arenaRank: open ? open.rank : null,
+    arenaVettedTo: open ? open.vettedTo : null,
+    arenaCandidates: open ? open.of : null,
     speed: +(m.speed ?? 0).toFixed(1),
     grounded: !!m.grounded,
   };

@@ -176,8 +176,8 @@ float fbm3_5( vec3 p ) {
  * space (between the sigmoid and the inverse EOTF) which is where 3-way
  * lift/gamma/gain actually belongs.
  *
- * `agxDisplay()` returns ~[0,1] display-encoded values; `agxToLinear()` undoes
- * the 2.2 EOTF so the renderer's sRGB OETF can be applied afterwards.
+ * `agxDisplay()` returns ~[0,1] display-encoded values; `displayToLinear()`
+ * undoes the sRGB EOTF so the renderer's sRGB OETF cancels it exactly.
  */
 export const GLSL_TONEMAP = /* glsl */ `
 const mat3 AGX_IN = mat3(
@@ -225,8 +225,46 @@ vec3 agxDisplay( vec3 color, vec4 look ) {
   return clamp( color, 0.0, 1.0 );
 }
 
-vec3 agxToLinear( vec3 displayColor ) {
-  return pow( max( displayColor, vec3( 0.0 ) ), vec3( 2.2 ) );
+/**
+ * Display-referred -> linear, so that three's `colorspace_fragment` can put it
+ * straight back and the pair CANCELS.
+ *
+ * MEASURED BUG, and it is why the black point was blue-clipped. This used to be
+ * pow( disp, 2.2 ), which is NOT the inverse of the sRGB OETF three applies
+ * afterwards. The shipped 8-bit output was therefore OETF( disp^2.2 ), a net
+ * transfer that is near-identity above display 0.35 and a hard crush below it:
+ * a display 0.040 the grade asked for came out at code 3, and a 0.070 at
+ * code 10. Everything the grade does in display space -- the black floor most
+ * of all -- was being squeezed into the bottom few code values, and because
+ * that squeeze is a POWER it expands ratios, so the floor's mild blue weight
+ * turned into a blue/red ratio of 221:1 on the hero frame.
+ *
+ * Using the real EOTF makes the round trip an identity, i.e. the number the
+ * grade computes is the number that reaches the screen. Same multiply-add form
+ * and same 2.4 exponent as three's own `sRGBTransferEOTF`, so the residual is
+ * three's own (its OETF writes 0.41666 rather than 1/2.4) and under 0.03 of a
+ * code value.
+ *
+ * BEWARE when reading any grade measurement from before 2026-09-02: every
+ * exchange rate quoted for lift, power and contrast in CONTRACT.md was computed
+ * on `disp`, upstream of this, and the crush then ate most of what they claimed
+ * at the toe.
+ */
+vec3 displayToLinear( vec3 displayColor ) {
+  vec3 c = clamp( displayColor, vec3( 0.0 ), vec3( 1.0 ) );
+  return mix(
+    pow( c * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ),
+    c * 0.0773993808,
+    vec3( lessThanEqual( c, vec3( 0.04045 ) ) ) );
+}
+
+/** Linear -> display-referred. The inverse of the above, for the ACES path. */
+vec3 linearToDisplay( vec3 linearColor ) {
+  vec3 c = clamp( linearColor, vec3( 0.0 ), vec3( 1.0 ) );
+  return mix(
+    pow( c, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ),
+    c * 12.92,
+    vec3( lessThanEqual( c, vec3( 0.0031308 ) ) ) );
 }
 
 const mat3 ACES_IN = mat3(

@@ -31,14 +31,25 @@
   debug.clearEnemies();
   debug.resetState();
 
-  const open = debug.placePlayerInOpenGround();
+  const open = debug.placePlayerInOpenGround({ ahead: 70 });
   debug.step(0.5);
 
   const p = game.player.root.position.clone();
   const yaw = game.player.root.rotation.y;
   const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
   const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  const at = (ahead, side) => p.clone().addScaledVector(fwd, ahead).addScaledVector(right, side);
+
+  // Which "forward" is the real one? The contract records that root rotation
+  // is NOT the aim — CameraRig owns `aimYaw` and re-applies it — so a pose
+  // that spawns along the root's facing can put the whole fight behind the
+  // lens. Report all three and spawn along the CAMERA's, since the camera is
+  // the thing that decides what is in the picture.
+  cam.updateMatrixWorld();
+  const camFlat = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+  camFlat.y = 0;
+  camFlat.normalize();
+  const camRight = new THREE.Vector3(camFlat.z, 0, -camFlat.x);
+  const at = (ahead, side) => p.clone().addScaledVector(camFlat, ahead).addScaledVector(camRight, side);
 
   // The same four spawns the gameplay pose asks for, and what the ground query
   // said at each spot — so a bad Y is visible next to the request that made it.
@@ -114,6 +125,14 @@
     player: p.toArray().map((n) => +n.toFixed(1)),
     playerYawDeg: +THREE.MathUtils.radToDeg(yaw).toFixed(1),
     playerFwd: fwd.toArray().map((n) => +n.toFixed(2)),
+    // The three candidate "forwards", side by side. If these disagree, a pose
+    // that picked the wrong one spawned its fight out of shot.
+    aimYawDeg: Number.isFinite(game.player.entity?.aimYaw ?? game.player.aimYaw)
+      ? +THREE.MathUtils.radToDeg(game.player.entity?.aimYaw ?? game.player.aimYaw).toFixed(1) : null,
+    camFlatFwd: camFlat.toArray().map((n) => +n.toFixed(2)),
+    rootVsCamFwdDeg: +THREE.MathUtils.radToDeg(
+      Math.acos(Math.min(1, Math.max(-1, fwd.dot(camFlat)))),
+    ).toFixed(1),
     camera: cam.position.toArray().map((n) => +n.toFixed(1)),
     camFwd: camFwd.toArray().map((n) => +n.toFixed(2)),
     camFov: cam.fov,

@@ -37,6 +37,7 @@ const _ref = new THREE.Vector3();
 const _w0 = new THREE.Vector3();
 const _w1 = new THREE.Vector3();
 const _w2 = new THREE.Vector3();
+const _w3 = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _c0 = new THREE.Color();
 const _c1 = new THREE.Color();
@@ -1784,27 +1785,59 @@ export class VFX {
     _w1.y = 0;
     if (_w1.lengthSq() < 1e-6) _w1.set(1, 0, 0);
     _w1.normalize();
+    // side vector for the splay
+    _w2.set(-_w1.z, 0, _w1.x);
 
+    // A THRUSTER WASH IS A WALL JET, and the shape of a wall jet is the whole
+    // effect: the exhaust hits the deck, turns, and races OUTWARD along the
+    // surface far faster than it ever rises, then rolls up into a billow at the
+    // periphery once drag has eaten the horizontal run. The old numbers had it
+    // backwards — up to 6.6 m/s of launch velocity straight up against 3-10 m/s
+    // along the ground — so the dust behaved like a smoke puff released at
+    // ankle height and never read as anything blasting the deck.
+    //
+    // Horizontal is now 4x the vertical at birth, drag is high so the run stops
+    // inside a couple of metres, and GRAVITY IS NEGATIVE: fine dust is buoyant
+    // in its own turbulence, so the sheet lifts as it slows. That, and not a
+    // launch velocity, is what makes the billow happen at the RIM instead of at
+    // the source.
+    const grit = Math.random() < 0.22;
     const p = ps.begin(BATCH_ALPHA);
-    // Splayed outward from the flow line, not along it — a downwash spreads.
-    const spread = randRange(-1, 1);
-    _w2.set(-_w1.z, 0, _w1.x).multiplyScalar(spread);
-    p.pos.copy(pos).addScaledVector(_w2, randRange(0.4, 2.2) * s);
-    p.pos.y += randRange(0, 0.35) * s;
-    p.vel.copy(_w1).multiplyScalar(randRange(3, 10) * st * s)
-      .addScaledVector(_w2, randRange(2, 7) * s);
-    p.vel.y = randRange(1.4, 4.4) * (0.5 + st);
-    p.drag = 1.9;
-    p.gravity = 1.2;
-    p.life = randRange(0.7, 1.6);
-    p.size0 = 0.5 * s; p.size1 = randRange(2.6, 5.2) * s;
-    p.tile = Math.random() < 0.6 ? TILE.DUST : TILE.SMOKE_B + (Math.random() < 0.5 ? 0 : 1);
-    p.color0.setRGB(0.38, 0.315, 0.235);
-    p.color1.setRGB(0.115, 0.100, 0.086);
-    p.alpha0 = randRange(0.20, 0.36) * (0.45 + st * 0.55); p.alpha1 = 0;
-    p.fadeIn = 0.11; p.erode = 0.66; p.sizeCurve = 0.5;
-    p.turb = 0.35; p.turbFreq = 1.7;
-    p.rot = Math.random() * TAU; p.spin = randRange(-1.5, 1.5);
+    const off = randRange(-1, 1);
+    p.pos.copy(pos).addScaledVector(_w2, off * randRange(0.3, 1.6) * s)
+      .addScaledVector(_w1, randRange(-0.2, 0.9) * s);
+    p.pos.y += randRange(0.02, 0.30) * s;
+    p.vel.copy(_w1).multiplyScalar(randRange(7, 17) * (0.45 + st) * s)
+      .addScaledVector(_w2, off * randRange(1.5, 5.0) * s);
+
+    if (grit) {
+      // The sharp half: a low, fast, streaked skirt that outruns the billow and
+      // gives the sheet a defined leading edge instead of a soft gradient.
+      p.vel.y = randRange(0.1, 0.9);
+      p.drag = 1.5;
+      p.gravity = 3.0;
+      p.life = randRange(0.35, 0.75);
+      p.size0 = 0.22 * s; p.size1 = randRange(0.9, 1.7) * s;
+      p.stretch = randRange(0.02, 0.05);
+      p.tile = TILE.DUST;
+      p.color0.setRGB(0.46, 0.385, 0.29);
+      p.color1.setRGB(0.16, 0.14, 0.12);
+      p.alpha0 = randRange(0.22, 0.40) * (0.45 + st * 0.55); p.alpha1 = 0;
+      p.fadeIn = 0.05; p.erode = 0.5; p.sizeCurve = 0.45; p.alphaCurve = 1.4;
+    } else {
+      p.vel.y = randRange(0.3, 1.8) * (0.5 + st);
+      p.drag = 3.1;
+      p.gravity = -0.55;                 // buoyant: the sheet lofts as it slows
+      p.life = randRange(1.0, 2.2);
+      p.size0 = 0.55 * s; p.size1 = randRange(3.0, 6.0) * s;
+      p.tile = Math.random() < 0.6 ? TILE.DUST : TILE.SMOKE_B + (Math.random() < 0.5 ? 0 : 1);
+      p.color0.setRGB(0.38, 0.315, 0.235);
+      p.color1.setRGB(0.115, 0.100, 0.086);
+      p.alpha0 = randRange(0.18, 0.32) * (0.45 + st * 0.55); p.alpha1 = 0;
+      p.fadeIn = 0.13; p.erode = 0.66; p.sizeCurve = 0.42;
+      p.turb = 0.42; p.turbFreq = 1.5;
+      p.rot = Math.random() * TAU; p.spin = randRange(-1.5, 1.5);
+    }
     ps.emit();
   }
 
@@ -1822,25 +1855,55 @@ export class VFX {
     const s = clamp(scale, 0.5, 4);
 
     basisFrom(_up, _t1, _t2);
-    const n = Math.round(clamp(7 + 12 * hard, 7, 20) * q);
+
+    // TWO SHEETS, and the fast one is what says "60 tonnes". A landing slam
+    // drives a thin skirt of dust out along the deck several times faster than
+    // the billow that follows it, so for the first ~0.3 s there is a sharp
+    // expanding edge with a rolling cloud catching up behind. One population of
+    // puffs at one speed can only ever be a puff.
+    const n = Math.round(clamp(10 + 16 * hard, 10, 26) * q);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * TAU + Math.random() * 0.5;
       radialDir(_v0, _t1, _t2, a);
       const p = ps.begin(BATCH_ALPHA);
       p.pos.copy(pos).addScaledVector(_v0, randRange(0.3, 1.1) * s);
       p.pos.y += 0.1;
-      p.vel.copy(_v0).multiplyScalar(randRange(5, 14) * hard * s);
-      p.vel.y = randRange(0.6, 3.0) * hard;
-      p.drag = 2.6;
-      p.life = randRange(0.85, 1.9);
-      p.size0 = 0.45 * s; p.size1 = randRange(2.2, 4.4) * s;
+      p.vel.copy(_v0).multiplyScalar(randRange(6, 17) * hard * s);
+      p.vel.y = randRange(0.2, 1.4) * hard;   // out, not up — see groundWash
+      p.drag = 2.9;
+      p.gravity = -0.5;                       // buoyant, so the rim rolls up
+      p.life = randRange(1.0, 2.2);
+      p.size0 = 0.45 * s; p.size1 = randRange(2.4, 5.0) * s;
       p.tile = i % 3 === 0 ? TILE.SMOKE_B : TILE.DUST;
       p.color0.setRGB(0.44, 0.365, 0.27);
       p.color1.setRGB(0.125, 0.110, 0.095);
-      p.alpha0 = 0.34 * (0.5 + hard * 0.5); p.alpha1 = 0;
-      p.fadeIn = 0.07; p.erode = 0.64; p.sizeCurve = 0.5;
+      p.alpha0 = 0.32 * (0.5 + hard * 0.5); p.alpha1 = 0;
+      p.fadeIn = 0.07; p.erode = 0.64; p.sizeCurve = 0.45;
       p.turb = 0.4; p.turbFreq = 1.8;
       p.rot = Math.random() * TAU; p.spin = randRange(-1.8, 1.8);
+      ps.emit();
+    }
+
+    // The sharp skirt: low, fast, velocity-streaked, gone before the billow is.
+    const skirt = Math.round(clamp(6 + 10 * hard, 6, 16) * q);
+    for (let i = 0; i < skirt; i++) {
+      const a = (i / skirt) * TAU + Math.random() * 0.7;
+      radialDir(_v0, _t1, _t2, a);
+      const p = ps.begin(BATCH_ALPHA);
+      p.pos.copy(pos).addScaledVector(_v0, randRange(0.2, 0.8) * s);
+      p.pos.y += randRange(0.02, 0.2);
+      p.vel.copy(_v0).multiplyScalar(randRange(14, 30) * hard * s);
+      p.vel.y = randRange(0.05, 0.5);
+      p.drag = 4.2;
+      p.gravity = 2.0;
+      p.life = randRange(0.3, 0.62);
+      p.size0 = 0.3 * s; p.size1 = randRange(1.1, 2.0) * s;
+      p.stretch = randRange(0.02, 0.05);
+      p.tile = TILE.DUST;
+      p.color0.setRGB(0.50, 0.42, 0.31);
+      p.color1.setRGB(0.17, 0.15, 0.13);
+      p.alpha0 = 0.30 * (0.5 + hard * 0.5); p.alpha1 = 0;
+      p.fadeIn = 0.04; p.erode = 0.48; p.sizeCurve = 0.4; p.alphaCurve = 1.3;
       ps.emit();
     }
 
@@ -1890,7 +1953,9 @@ export class VFX {
    */
   _updateGroundWash(dt) {
     if (!this.enabled || dt <= 0) return;
-    const WASH_H = 4.2;
+    // A main nozzle sits ~6 m up on a 9 m mech and the exhaust is several metres
+    // long, so it is still scouring the deck with the feet well clear of it.
+    const WASH_H = 5.5;
     for (let i = this._washers.length - 1; i >= 0; i--) {
       const w = this._washers[i];
       const e = w.entity;
@@ -1903,28 +1968,59 @@ export class VFX {
       const near = 1 - clamp(h / WASH_H, 0, 1);          // 1 on the deck, 0 at WASH_H
       const speed = m.speed || 0;
       const run = clamp(speed / 60, 0, 1.35);
-      const downwash = m.grounded ? 0 : near * 0.75;
-      const strength = clamp(run * (0.55 + near * 0.75) + downwash, 0, 1.5);
-      if (strength < 0.16) { w.accum = 0; continue; }
 
-      w.accum += dt * (10 + 46 * strength) * this.quality;
+      // THRUST, not just altitude, decides whether the deck is being blasted.
+      // The old rule was `grounded ? 0 : near * 0.75`, which gave a mech hovering
+      // 20 cm off the deck under full lift exactly as much wash as one drifting
+      // through the same point with cold engines, and gave a mech STANDING on it
+      // under ground boost none at all. Mirrors Game._updatePlayerThrusters so
+      // the dust and the plume agree about how hard the engines are working.
+      let thrust = m.grounded ? 0.10 : 0.45;
+      if (m.boosting) thrust = Math.max(thrust, 0.72);
+      if (m.assaultBoost) thrust = Math.max(thrust, 1.0);
+      if (m.quickBoost || (m.qbTimer ?? 0) > 0) thrust = 1.3;
+      if (m.staggered) thrust = 0;
+      // near^2: a jet's scour falls off fast with standoff distance.
+      const downwash = thrust * near * near;
+      const strength = clamp(run * (0.35 + near * 0.65) + downwash, 0, 1.5);
+      if (strength < 0.14) { w.accum = 0; continue; }
+
+      w.accum += dt * (8 + 54 * strength) * this.quality;
       let count = w.accum | 0;
-      if (count > 5) count = 5;                            // never a frame-rate spike
+      if (count > 6) count = 6;                            // never a frame-rate spike
       w.accum -= count;
       if (!count || !this.ps.canSpawn(count)) continue;
 
       // Contact point is under the mech's origin, which the contract puts at the
-      // feet; the wash trails BEHIND it, opposite the direction of travel.
+      // feet.
       _v1.copy(e.root.position);
       _v1.y -= h;
       const vel = e.velocity;
-      if (vel && (vel.x * vel.x + vel.z * vel.z) > 1) _v3.set(-vel.x, 0, -vel.z).normalize();
-      else _v3.set(Math.random() * 2 - 1, 0, Math.random() * 2 - 1).normalize();
+      const moving = vel && (vel.x * vel.x + vel.z * vel.z) > 4;
+      if (moving) _v3.set(-vel.x, 0, -vel.z).normalize();
+      else _v3.set(0, 0, 0);
 
+      // How much of the wash is a stationary jet hitting the deck (radial) and
+      // how much is dust the machine is outrunning (trailing). A hovering mech
+      // is all radial; one crossing the map at 90 m/s leaves a wake.
+      const radialShare = moving ? clamp(downwash / Math.max(strength, 1e-3), 0.12, 1) : 1;
       const reach = clamp(resolveRadius(e, 2.2), 1.2, 4);
+
       for (let k = 0; k < count; k++) {
-        _w0.copy(_v1).addScaledVector(_v3, randRange(0.2, 2.6) * reach * (0.4 + run));
-        this.groundWash(_w0, _v3, strength, reach * 0.55);
+        if (Math.random() < radialShare) {
+          // WALL JET. The exhaust column hits the deck and turns: dust leaves
+          // the impingement point radially, in a flat sheet, in every direction
+          // at once. This is the half that was missing entirely — the old code
+          // only ever blew dust along one line.
+          const a = Math.random() * TAU;
+          _w3.set(Math.cos(a), 0, Math.sin(a));
+          _w0.copy(_v1).addScaledVector(_w3, randRange(0.15, 1.0) * reach);
+          this.groundWash(_w0, _w3, strength, reach * 0.55);
+        } else {
+          _w3.copy(_v3);
+          _w0.copy(_v1).addScaledVector(_w3, randRange(0.2, 2.6) * reach * (0.4 + run));
+          this.groundWash(_w0, _w3, strength, reach * 0.55);
+        }
       }
     }
   }
@@ -1957,6 +2053,13 @@ export class VFX {
   attachDamageSmoke(entity, opts) {
     const h = new DamageSmokeHandle(this, entity, opts || {});
     this._damage.push(h);
+    // Free bootstrap for the ground wash. `_noteWasher` otherwise only latches
+    // an entity when it LANDS, assault-boosts or runs its EN dry, so a mech
+    // that spawned on the deck and ground-boosted away raised no dust at all
+    // until the first time it jumped — the whole opening of a mission. Game
+    // calls this for the player at boot and for every enemy as it spawns, which
+    // is exactly the set that wants a wash.
+    this._noteWasher(entity);
     return h;
   }
 
