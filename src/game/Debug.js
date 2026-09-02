@@ -352,10 +352,18 @@ export class Debug {
         // y 47.7 — had its line to every one of them clipped by the cliff edge.
         // Four ranked arenas in a row failed that way, which is what made it
         // look like a bug in the visibility test rather than in the scoring.
+        // Walk BEHIND the mech as well as ahead of it. Checking only forward
+        // still let the scorer pick a ledge with the drop at its BACK: the
+        // chase camera swings backwards, out over that drop, and ends up high
+        // above the terrain — measured at camY 70.9, not buried, with its line
+        // to every enemy ahead clipped by the mech's own plateau edge. Where
+        // the camera stands decides what it can see, so the ground under the
+        // camera has to be scored too.
         const fx = Math.sin(bearing);
         const fz = Math.cos(bearing);
         let relief = 0;
-        for (let s = 5; s <= 40; s += 5) {
+        for (let s = -14; s <= 40; s += 5) {
+          if (s === 0) continue;
           const gh = ph.groundHeight?.(sp.x + fx * s, sp.z + fz * s);
           if (!isFinite(gh)) { relief = Infinity; break; }
           relief = Math.max(relief, Math.abs(gh - g));
