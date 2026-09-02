@@ -341,19 +341,27 @@ export class Debug {
         if (worst < 25) continue;
 
         // Rays clear terrain they pass OVER, so a spot can be ray-clear and
-        // still be a pit or a hillside. Walk the heightfield instead: the
-        // ground must not rise more than a couple of metres over the first
-        // 40 m, or the mech has nowhere to go and anything spawned ahead of it
-        // at ground level is buried in the slope.
+        // still be a pit, a hillside or — the case that actually bit — a
+        // CLIFFTOP. Walk the heightfield instead, and reject a DROP as firmly
+        // as a rise.
+        //
+        // Rejecting only rises let the scorer pick the edge of a mesa: the
+        // horizontal rays flew out over the drop and reported the full 140 m
+        // clear, there was no rise, so it scored perfectly. Enemies were then
+        // spawned on the terrain far below, and the chase camera — measured at
+        // y 47.7 — had its line to every one of them clipped by the cliff edge.
+        // Four ranked arenas in a row failed that way, which is what made it
+        // look like a bug in the visibility test rather than in the scoring.
         const fx = Math.sin(bearing);
         const fz = Math.cos(bearing);
-        let rise = 0;
+        let relief = 0;
         for (let s = 5; s <= 40; s += 5) {
           const gh = ph.groundHeight?.(sp.x + fx * s, sp.z + fz * s);
-          if (!isFinite(gh)) { rise = Infinity; break; }
-          rise = Math.max(rise, gh - g);
+          if (!isFinite(gh)) { relief = Infinity; break; }
+          relief = Math.max(relief, Math.abs(gh - g));
         }
-        if (rise > 2.5) continue;
+        if (relief > 2.5) continue;
+        const rise = relief;
 
         // The rays point along (sin b, 0, cos b); the controller's forward is
         // (-sin yaw, 0, -cos yaw), so facing down that bearing is yaw = b + PI.
@@ -430,7 +438,11 @@ export class Debug {
       dir.divideScalar(d || 1);
       const hit = ph.raycast(cam.position, dir, d - 3);
       if (!hit || !hit.hit) visible++;
-      else blockedAt.push(+hit.distance.toFixed(1));
+      // `Physics.raycast` returns a SHARED scratch object and does not always
+      // carry a finite distance on a hit; the first run of this reported four
+      // nulls, which is a NaN surviving JSON. Report it honestly rather than
+      // emitting a number that is not one.
+      else blockedAt.push(isFinite(hit.distance) ? +hit.distance.toFixed(1) : 'hit(no distance)');
     }
     return { inFrustum, visible, blockedAt, camBuried, camY: +cam.position.y.toFixed(1) };
   }

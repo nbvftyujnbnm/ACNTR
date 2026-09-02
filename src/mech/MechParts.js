@@ -1488,29 +1488,53 @@ export function buildShin(o = {}) {
   // knee pivot. Those two horizontal bands, plus the hip band in buildThigh,
   // are the negative space: three see-through slots per leg that a 3/4 camera
   // cannot close, because yaw does not change a height.
-  const BOT = -L + 0.34;             // bottom face of the shin masses
+  // The masses stop 42 cm short of the ankle pivot (was 34) and 10 cm short of
+  // the knee. Those two horizontal bands, plus the hip band in buildThigh, are
+  // the negative space: three see-through slots per leg that a 3/4 camera
+  // cannot close, because yaw does not change a height. The extra 8 cm at the
+  // ankle was bought back out of the masses' own heights, so the shin did not
+  // move up the leg — it is a longer open cage, not a shorter shin.
+  const BOT = -L + 0.42;             // bottom face of the shin masses
   // knee cap — dropped clear of the thigh block's underside
-  b.box('armor', MASK.ACCENT, 0.72, 0.48, 0.66, 0.05, 0, -0.26, rev ? 0.26 : -0.26, 0, 0, 0, { taperZ: 0.9 });
+  b.box('armor', MASK.ACCENT, 0.66, 0.48, 0.62, 0.05, 0, -0.28, rev ? 0.24 : -0.24, 0, 0, 0, { taperZ: 0.9 });
   axleJoint(b, 'mech', MASK.STEEL, 0, 0, 0, 0.17, 0.60, 14);
 
   // structural shin core
-  b.box('mech', MASK.TRIM, 0.62, 1.16, 0.92, 0.045, 0, BOT + 0.58, 0);
+  b.box('mech', MASK.TRIM, 0.58, 1.08, 0.92, 0.045, 0, BOT + 0.54, 0);
 
   // LARGE armour shroud — the dominant leg silhouette element
   const shroudZ = rev ? 0.50 : -0.48;
-  b.addM('armor', MASK.BASE, plate(beveledRectShape(1.00, 1.20, { tl: 0.30, tr: 0.30, bl: 0.22, br: 0.22 }), 0.32, 0.05),
-    _m.compose(_pv.set(0, BOT + 0.60, shroudZ), _q.setFromEuler(_e.set(rev ? -0.06 : 0.06, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
-  // side skirts wrapping the shroud — narrower across, deeper fore-and-aft
+  b.addM('armor', MASK.BASE, plate(beveledRectShape(0.94, 1.12, { tl: 0.30, tr: 0.30, bl: 0.22, br: 0.22 }), 0.32, 0.05),
+    _m.compose(_pv.set(0, BOT + 0.56, shroudZ), _q.setFromEuler(_e.set(rev ? -0.06 : 0.06, rev ? Math.PI : 0, 0)), _sc.set(1, 1, 1)));
+  // Side skirts wrapping the shroud. They set the shin's WIDTH, and they came
+  // in from +-0.51 to +-0.46 to pay for the calf below: at the graded 45 degree
+  // yaws a centimetre of X and a centimetre of Z cost the same screen width, so
+  // the 11 cm off the width is what the 17 cm of calf depth is bought with.
   for (let i = -1; i <= 1; i += 2) {
-    b.box('armor', MASK.BASE, 0.18, 1.16, 1.02, 0.045, i * 0.42, BOT + 0.58, shroudZ * 0.30, 0, 0, i * -0.05,
+    b.box('armor', MASK.BASE, 0.15, 1.08, 1.02, 0.045, i * 0.365, BOT + 0.54, shroudZ * 0.30, 0, 0, i * -0.05,
       { taperX: 0.82, taperZ: 0.88 });
   }
-  b.box('armor', MASK.TRIM, 0.72, 0.80, 0.42, 0.04, 0, BOT + 0.66, -shroudZ * 0.76);
-  // A calf block was tried here to give the leg a profile and reverted — see
-  // the note in buildThigh. Depth is not free at a 3/4 camera.
+
+  // --- CALF ---------------------------------------------------------------
+  // Two opposed wedges meeting at their widest, which is the only way to get a
+  // spindle out of a linear taper: one box can pinch one end, not both. The
+  // apex sits 54 cm above the ankle band and stands 74 cm behind the knee axis
+  // against the 43 cm the shin carries at the knee and the 44 cm it carries at
+  // the ankle, so the rear line of the leg is a curve rather than a plumb drop.
+  //
+  // It is the mirror of the thigh: deep at the hip, pinched at the knee, deep
+  // over the calf, pinched at the ankle. Every centimetre of it is inboard of
+  // the skirts, so it is free in X — the cost was paid above, once, by the
+  // skirts coming in.
+  const cz = rev ? -1 : 1;
+  b.box('armor', MASK.BASE, 0.60, 0.54, 0.36, 0.05, 0, BOT + 0.27, cz * 0.24, 0, 0, 0,
+    { taperZ: 2.44, taperX: 1.10 });
+  b.box('armor', MASK.BASE, 0.66, 0.56, 0.40, 0.05, 0, BOT + 0.82, cz * 0.48, 0, 0, 0,
+    { taperZ: 0.70, shearZ: cz * -0.22, taperX: 0.92 });
+  b.box('armor', MASK.TRIM, 0.46, 0.22, 0.16, 0.03, 0, BOT + 0.54, cz * 0.66);
 
   // --- ANKLE ------------------------------------------------------------
-  // Everything above stops at BOT; the foot's own block starts 17 cm lower, so
+  // Everything above stops at BOT; the foot's own block starts 26 cm lower, so
   // the ankle is an open cage of an axle and three rams rather than a filled
   // taper. Same trick as the hip and the knee, and the three slots land at
   // three different heights so the leg reads as jointed rather than sliced.
@@ -1520,20 +1544,22 @@ export function buildShin(o = {}) {
   piston(b, 0, BOT + 0.22, -shroudZ * 0.50, 0, -L + 0.06, -shroudZ * 0.58, 0.060);
   axleJoint(b, 'mech', MASK.TRIM, 0, -L, 0, 0.16, 0.48, 14);
 
-  // ankle thruster
+  // Ankle thruster, hung off the back of the calf apex now that the calf is
+  // what stands furthest aft. It sat at z 0.41 and would be buried 33 cm inside
+  // the new mass.
   _q.setFromEuler(_e.set(Math.PI * 0.5 - 0.30, 0, 0));
-  _pv.set(0, BOT + 0.52, -shroudZ * 0.86); _sc.set(1, 1, 1);
+  _pv.set(0, BOT + 0.44, cz * 0.74); _sc.set(1, 1, 1);
   _m.compose(_pv, _q, _sc);
   b.addM('mech', MASK.TRIM, nozzle(0.085, 0.15, 0.22, 14), _m);
-  _pv.set(0, BOT + 0.51, -shroudZ * 0.98); _m.compose(_pv, _q, _sc);
+  _pv.set(0, BOT + 0.43, cz * 0.86); _m.compose(_pv, _q, _sc);
   b.addM('glow', MASK.BASE, chamferCyl(0.082, 0.076, 0.03, 12, 0.008), _m);
-  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.49, BOT + 0.62, shroudZ * 0.28);
+  b.box('glow', MASK.BASE, 0.04, 0.05, 0.30, 0.01, s * 0.445, BOT + 0.62, shroudZ * 0.28);
 
   if (d) {
-    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.50, BOT + 0.58, shroudZ * 0.30, 0.78, 0.86, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
-    greebleFace(b, 'armor', MASK.BASE, rev ? 'pz' : 'nz', 0, BOT + 0.60, shroudZ * 1.16, 0.66, 0.90, rng, { cols: 3, rows: 4, depth: 0.038, accent: 0.04 });
-    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, BOT + 0.74, -shroudZ * 0.92, 0.44, 0.42, 4, 0.07);
-    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.30, -0.26, rev ? 0.26 : -0.26, 0.19, 8, 0.024, 0.016);
+    greebleFace(b, 'armor', MASK.BASE, s > 0 ? 'px' : 'nx', s * 0.46, BOT + 0.54, shroudZ * 0.30, 0.78, 0.80, rng, { cols: 3, rows: 3, depth: 0.032, fill: 0.6 });
+    greebleFace(b, 'armor', MASK.BASE, rev ? 'pz' : 'nz', 0, BOT + 0.58, shroudZ * 1.16, 0.62, 0.84, rng, { cols: 3, rows: 4, depth: 0.038, accent: 0.04 });
+    ventGrill(b, 'mech', MASK.TRIM, rev ? 'nz' : 'pz', 0, BOT + 0.92, cz * 0.52, 0.40, 0.34, 4, 0.06);
+    boltRing(b, 'mech', MASK.STEEL, s > 0 ? 'px' : 'nx', s * 0.28, -0.28, rev ? 0.24 : -0.24, 0.18, 8, 0.024, 0.016);
   }
   return { b, anchors: { ankle: [0, -L, 0] } };
 }

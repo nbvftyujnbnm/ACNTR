@@ -495,7 +495,11 @@ void main() {
     // 1 — dome shockwave: rim-lit shell, brightest at grazing angles.
     float fres = 1.0 - abs(dot(normalize(vNormalW), normalize(vViewDirW)));
     fres = pow(clamp(fres, 0.0, 1.0), 2.4);
-    float shell = smoothstep(1.0, 1.0 - th * 2.0, r);
+    // Same undefined-smoothstep trap as flameFrag: edge0 (1.0) was greater than
+    // edge1, so on a driver that short-circuits the low edge this returned 0 and
+    // the explosion's DOME shockwave never drew a pixel. Solid inside, feathered
+    // out at the rim.
+    float shell = 1.0 - smoothstep(1.0 - max(th * 2.0, 0.02), 1.0, r);
     a = fres * shell;
     rgb *= 1.0 + fres * 2.0;
   } else if (mode < 2.5) {
@@ -695,7 +699,15 @@ void main() {
   col += vec3(1.0, 0.92, 0.85) * dia * 1.4;
 
   float a = (body * 0.55 + fres * 0.75) * intensity * uGain;
-  a *= smoothstep(1.0, 0.55, v);          // fade the tip out, never a cut edge
+  // NEVER write smoothstep(hi, lo, x) to get a falling edge. GLSL ES leaves
+  // edge0 >= edge1 UNDEFINED, and the usual driver implementation short-circuits
+  // with "if x is below edge0, return 0" — which for smoothstep(1.0, 0.55, v)
+  // with v in [0,1] returns ZERO FOR EVERY FRAGMENT. That is what made this layer
+  // rasterise nothing while every other VFX batch drew fine: the draw was
+  // submitted, the vertex stage was correct, and then every fragment hit the
+  // discard below. Write 1.0 - smoothstep(lo, hi, x) instead; it is the same
+  // curve and it is defined.
+  a *= 1.0 - smoothstep(0.55, 1.0, v);    // fade the tip out, never a cut edge
   a *= smoothstep(0.0, 0.06, v);          // hide the open throat inside the nozzle
   a *= softDepthFade(vScreen, vViewZ, 0.35);
   if (a <= 0.003) discard;

@@ -119,6 +119,34 @@ function findTemplateLiterals(src) {
 }
 
 const findings = [];
+const smoothFindings = [];
+
+/**
+ * `smoothstep(edge0, edge1, x)` is UNDEFINED in GLSL ES when `edge0 >= edge1`,
+ * and the usual driver implementation short-circuits `if (x < edge0) return 0.0`
+ * — so the "obvious" way to write a falling edge, `smoothstep(1.0, 0.55, v)`,
+ * returns ZERO FOR EVERY x below the high edge. It compiles, it links, it draws,
+ * and it produces no pixels. That is exactly how the thruster plumes and the
+ * explosion dome shockwave were dark for weeks while every other VFX batch drew
+ * fine. Write `1.0 - smoothstep(lo, hi, x)` instead.
+ *
+ * Only NUMERIC LITERAL edges are checked. Symbolic ones (`smoothstep(inner,
+ * 1.0 - th, r)`) cannot be decided without evaluating the shader, and a lint
+ * that guesses is a lint that cries wolf — see the note above about the
+ * backtick sweep that was tried and removed.
+ */
+const SMOOTHSTEP_LITERALS = /\bsmoothstep\s*\(\s*(-?\d+(?:\.\d*)?|-?\.\d+)\s*,\s*(-?\d+(?:\.\d*)?|-?\.\d+)\s*,/g;
+
+/**
+ * Blank out GLSL comments, preserving length and newlines so byte offsets still
+ * map to the right line. Without this the check fires on the comment that
+ * explains the bug, which is how a lint teaches people to ignore it.
+ */
+function stripGlslComments(body) {
+  return body
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+}
 
 for (const file of files) {
   let src;
@@ -134,6 +162,24 @@ for (const file of files) {
 
   for (const lit of findTemplateLiterals(src)) {
     if (!looksLikeGLSL(lit.body)) continue;
+
+    const code = stripGlslComments(lit.body);
+    SMOOTHSTEP_LITERALS.lastIndex = 0;
+    let sm;
+    while ((sm = SMOOTHSTEP_LITERALS.exec(code)) !== null) {
+      const e0 = parseFloat(sm[1]);
+      const e1 = parseFloat(sm[2]);
+      if (e0 < e1) continue;
+      const line = lineOf(lit.open + 1 + sm.index);
+      smoothFindings.push({
+        file,
+        line,
+        msg: e0 === e1
+          ? `smoothstep(${sm[1]}, ${sm[2]}, ...) has a zero-width edge — undefined, divides by zero`
+          : `smoothstep(${sm[1]}, ${sm[2]}, ...) runs backwards — undefined, and returns 0 on the common driver`,
+        text: (lines[line - 1] ?? '').trim().slice(0, 110),
+      });
+    }
 
     if (lit.close === -1) {
       findings.push({ file, line: lineOf(lit.open), msg: 'GLSL template literal is never closed' });
@@ -163,7 +209,17 @@ if (findings.length) {
     if (f.text) console.error(`    ${f.text}`);
   }
   console.error(`\n${findings.length} finding(s). Replace backticks in GLSL comments with plain words.\n`);
-  process.exit(1);
 }
+
+if (smoothFindings.length) {
+  console.error('\n=== BACKWARDS smoothstep ===');
+  for (const f of smoothFindings) {
+    console.error(`\n${relative(ROOT, f.file)}:${f.line}  ${f.msg}`);
+    if (f.text) console.error(`    ${f.text}`);
+  }
+  console.error(`\n${smoothFindings.length} finding(s). Write 1.0 - smoothstep(lo, hi, x) for a falling edge.\n`);
+}
+
+if (findings.length || smoothFindings.length) process.exit(1);
 
 console.log(`glsl-lint: clean (${files.length} files scanned)`);

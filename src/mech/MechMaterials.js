@@ -351,7 +351,13 @@ roughnessFactor = clamp( mix( roughnessFactor, 0.93, uDamage * 0.55 ), 0.045, 1.
 const METAL = /* glsl */`
 #include <metalnessmap_fragment>
 float acPaintMetal = dot( uSlotMetal, vMask );
-float acGrime = smoothstep( 0.62, 0.40, metalnessFactor );
+// Was smoothstep( 0.62, 0.40, ... ). GLSL ES leaves smoothstep UNDEFINED when
+// edge0 >= edge1, and the usual driver implementation returns 0 for every x
+// below edge0 — so this term was very likely a constant 0 and grime never
+// buried any metal at all. This is the identical curve, written the defined way.
+// FLAGGED FOR THE MECH OWNER: if it was silently 0 on this driver, grime now
+// starts doing its job and the alloy/grime balance may want re-measuring.
+float acGrime = 1.0 - smoothstep( 0.40, 0.62, metalnessFactor );
 metalnessFactor = mix( acPaintMetal, 1.0, acChipG ) * ( 1.0 - acGrime );
 `;
 
