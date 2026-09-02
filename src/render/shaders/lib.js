@@ -225,8 +225,8 @@ vec3 agxDisplay( vec3 color, vec4 look ) {
   return clamp( color, 0.0, 1.0 );
 }
 
-/**
- * Display-referred -> linear, so that three's `colorspace_fragment` can put it
+/*
+ * Display-referred -> linear, so that three's colorspace_fragment can put it
  * straight back and the pair CANCELS.
  *
  * MEASURED BUG, and it is why the black point was blue-clipped. This used to be
@@ -241,13 +241,13 @@ vec3 agxDisplay( vec3 color, vec4 look ) {
  *
  * Using the real EOTF makes the round trip an identity, i.e. the number the
  * grade computes is the number that reaches the screen. Same multiply-add form
- * and same 2.4 exponent as three's own `sRGBTransferEOTF`, so the residual is
+ * and same 2.4 exponent as three's own sRGBTransferEOTF, so the residual is
  * three's own (its OETF writes 0.41666 rather than 1/2.4) and under 0.03 of a
  * code value.
  *
  * BEWARE when reading any grade measurement from before 2026-09-02: every
  * exchange rate quoted for lift, power and contrast in CONTRACT.md was computed
- * on `disp`, upstream of this, and the crush then ate most of what they claimed
+ * on disp, upstream of this, and the crush then ate most of what they claimed
  * at the toe.
  */
 vec3 displayToLinear( vec3 displayColor ) {

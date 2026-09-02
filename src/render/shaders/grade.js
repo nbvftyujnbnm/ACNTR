@@ -260,7 +260,7 @@ void main() {
 
   vec3 disp = uTonemapMode < 0.5
     ? agxDisplay( color, uAgxLook )
-    : pow( acesFilmic( color ), vec3( 1.0 / 2.2 ) );
+    : linearToDisplay( acesFilmic( color ) );
 
   // ---- 3-way grade, display referred -------------------------------------
   disp = uGain * disp;
@@ -333,7 +333,7 @@ void main() {
   // ---- ordered dither before 8-bit quantisation --------------------------
   disp += ( hash12( gl_FragCoord.xy + fract( uTime ) * 137.0 ) - 0.5 ) * ( 1.0 / 255.0 );
 
-  gl_FragColor = vec4( agxToLinear( clamp( disp, 0.0, 1.0 ) ), 1.0 );
+  gl_FragColor = vec4( displayToLinear( clamp( disp, 0.0, 1.0 ) ), 1.0 );
 
   #include <colorspace_fragment>
 }
