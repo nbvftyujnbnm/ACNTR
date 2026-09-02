@@ -52,7 +52,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
-import { readPng } from './measure-frame.mjs';
+import { readPng } from './png.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -226,8 +226,8 @@ function report(tag, s) {
   const p = s.lumP;
   console.log(`  ${tag.padEnd(11)} luma p.1/1/5/25/50/75/95/99 = ` +
     `${p.map((v) => String(v).padStart(3)).join(' ')}`);
-  console.log(`  ${''.padEnd(11)} BLACK  zero%% R ${r.zero.toFixed(2)} G ${g.zero.toFixed(2)} B ${b.zero.toFixed(2)}` +
-    `  allzero ${s.zeroAll.toFixed(3)}%  darkest-1%% RGB ${dz.map((v) => v.toFixed(1).padStart(5)).join('')}  B/R ${br}`);
+  console.log(`  ${''.padEnd(11)} BLACK  zero% R ${r.zero.toFixed(2)} G ${g.zero.toFixed(2)} B ${b.zero.toFixed(2)}` +
+    `  allzero ${s.zeroAll.toFixed(3)}%  darkest-1% RGB ${dz.map((v) => v.toFixed(1).padStart(5)).join('')}  B/R ${br}`);
   console.log(`  ${''.padEnd(11)} TOE    <8 ${s.b8.toFixed(2)}%  <16 ${s.b16.toFixed(2)}%  <24 ${s.b24.toFixed(2)}%` +
     `   per-ch p1  R ${String(r.p01).padStart(3)} G ${String(g.p01).padStart(3)} B ${String(b.p01).padStart(3)}`);
   console.log(`  ${''.padEnd(11)} SHOULDER 230-254 ${(r.shoulder + g.shoulder + b.shoulder).toFixed(3)}%` +
