@@ -406,6 +406,13 @@ export class Debug {
     const aim = new THREE.Vector3();
     let inFrustum = 0;
     let visible = 0;
+    // Distances to the first blocker, so "0 visible" can be told apart from
+    // "the camera is buried". The chase camera swings behind the mech and can
+    // end up inside a berm or a wall, in which case EVERY ray hits within a
+    // metre or two and nothing is ever visible no matter where the fight is.
+    const blockedAt = [];
+    const camGround = this.game.physics?.groundHeight?.(cam.position.x, cam.position.z);
+    const camBuried = isFinite(camGround) ? cam.position.y < camGround + 0.5 : false;
     for (const e of entities || []) {
       if (!e?.root) continue;
       // Aim at the CHEST, not the root. Mech roots are authored at the feet
@@ -423,8 +430,9 @@ export class Debug {
       dir.divideScalar(d || 1);
       const hit = ph.raycast(cam.position, dir, d - 3);
       if (!hit || !hit.hit) visible++;
+      else blockedAt.push(+hit.distance.toFixed(1));
     }
-    return { inFrustum, visible };
+    return { inFrustum, visible, blockedAt, camBuried, camY: +cam.position.y.toFixed(1) };
   }
 
   frameHeroShot({ dist = 18.4, height = 6.4, lookY = 4.7, fov = 34, yaw = null } = {}) {
