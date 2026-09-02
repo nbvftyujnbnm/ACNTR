@@ -142,10 +142,7 @@ export class Game {
       if (e.entity === this.player) this._onPlayerDeath();
     });
 
-    // Soft particles need the scene depth buffer to fade against geometry.
-    // The pipeline recreates it on every resize, so re-push whenever it changes
-    // rather than wiring once at init.
-    this._vfxDepthTex = null;
+    // See _wireVfxDepth: the soft-particle fade is deliberately off.
     this._vfxColorTex = null;
     this._wireVfxDepth();
     bus.on('engine:resize', () => this._wireVfxDepth());
@@ -206,14 +203,27 @@ export class Game {
     });
   }
 
-  /** Hand the pipeline's depth texture to the VFX system for soft-particle fade. */
+  /**
+   * Soft-particle depth fade — DELIBERATELY LEFT OFF, and this is not an
+   * oversight to be "fixed" by passing the obvious texture.
+   *
+   * I previously wired this to `pipeline.rtScene.depthTexture`, which is the
+   * depth attachment of the very render target the VFX draws into. Sampling a
+   * buffer you are simultaneously writing is a feedback loop, and it was
+   * MEASURED: the renderer logs GL_INVALID_OPERATION on every single frame
+   * while the pipeline is attached, and none while it is detached.
+   *
+   * With no texture, `uSoftParams.x` stays 0 and `softDepthFade()` returns 1.0,
+   * so particles are fully opaque and simply intersect geometry with a hard
+   * edge. That is a small visual cost and strictly better than a per-frame GL
+   * error plus an undefined sample.
+   *
+   * To restore the feature properly, the pipeline has to COPY depth into a
+   * texture the scene pass is not writing (or hand over the previous frame's),
+   * and then this can pass that. Until it does, leave it alone.
+   */
   _wireVfxDepth() {
-    const p = this.pipeline;
-    const tex = p?.depthTexture || p?._depthTexture || p?.rtScene?.depthTexture || null;
-    if (!tex || tex === this._vfxDepthTex) return;
-    this._vfxDepthTex = tex;
-    const cam = this.engine.camera;
-    this.vfx?.setDepthTexture?.(tex, cam.near, cam.far);
+    this.vfx?.setDepthTexture?.(null);
   }
 
   /**

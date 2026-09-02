@@ -1436,3 +1436,33 @@ two of the silhouette metrics were wrong on their first outing.
   `AudioDirector.setMuted` and `setVolume` have no caller anywhere, so the game
   ships with no way to mute or change volume. That is a settings-UI feature,
   not a rendering defect.
+- 2026-09-02 [combat] **THE PLUMES WERE NEVER A PIPELINE PROBLEM — smoothstep
+  ran backwards.** `flameFrag` ended with `a *= smoothstep(1.0, 0.55, v)` to
+  fade the tip. GLSL ES leaves `smoothstep` UNDEFINED when edge0 >= edge1, and
+  the usual driver implementation short-circuits "if x is below edge0, return
+  0" — which for edges (1.0, 0.55) and v in [0,1] returns ZERO FOR EVERY
+  FRAGMENT, so all of them hit the `discard` two lines later. Draw submitted,
+  vertex stage correct, instance data correct, nothing rasterised. Three
+  separate investigations chased that symptom into the render pipeline.
+  The same bug was in `ringFrag`'s mode-1 dome shockwave, so explosion domes
+  never drew either — only the mode-0 ring, which is why particles.png looked
+  like the particle path was healthy and led me to declare it "refuted".
+  And a third in `MechMaterials`, `smoothstep(0.62, 0.40, metalnessFactor)`,
+  the term meant to let grime bury metal: if that was silently 0 on this driver
+  then grime has never done anything, and the alloy/grime balance may want
+  re-measuring now that it works.
+  ALWAYS write `1.0 - smoothstep(lo, hi, x)` for a falling edge. Never
+  `smoothstep(hi, lo, x)`. `tools/lint-glsl.mjs` now fails on any smoothstep
+  inside a GLSL literal whose two edges are numeric literals and not strictly
+  increasing.
+- 2026-09-02 [game/render] THE SOFT-PARTICLE DEPTH FADE IS DELIBERATELY OFF.
+  `Game._wireVfxDepth` used to hand the particle system
+  `pipeline.rtScene.depthTexture` — the depth attachment of the very target the
+  VFX draws into. MEASURED: the renderer logs GL_INVALID_OPERATION on EVERY
+  FRAME while the pipeline is attached, and none while it is detached. With no
+  texture, `uSoftParams.x` stays 0, `softDepthFade()` returns 1.0, and
+  particles intersect geometry with a hard edge — a small visual cost, and
+  strictly better than a per-frame GL error plus an undefined sample.
+  To restore it properly the pipeline must COPY depth into a texture the scene
+  pass is not writing (or expose the previous frame's), and only then can this
+  pass it. Do not "fix" this by passing the obvious texture again.
