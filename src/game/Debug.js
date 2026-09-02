@@ -568,10 +568,24 @@ export class Debug {
     return this;
   }
 
-  /** Spawn an enemy of a given archetype near a position. */
+  /**
+   * Spawn an enemy of a given archetype near a position.
+   *
+   * The manager's signature is `spawn(archetypeId, TIER, POSITION)` — tier
+   * second, position third. This called it with those two transposed for a
+   * long time, and nothing complained: `root.position.copy(2)` reads `2.x`,
+   * gets undefined, and quietly turns the whole transform into NaN, while
+   * `tierScale(someVector3)` turns every stat into NaN alongside it. The
+   * entity stays `alive`, its root stays `visible`, and it renders nowhere,
+   * because a NaN transform makes the GPU drop the geometry silently.
+   *
+   * That is why every combat review frame reported zero enemies visible: the
+   * enemies were never anywhere. Keep the argument names spelled out here.
+   */
   spawnEnemy(archetype = 'mt', x = 0, y = 0, z = -40, tier = 1) {
     try {
-      return this.game.enemies?.spawn?.(archetype, new THREE.Vector3(x, y, z), tier) ?? null;
+      const position = new THREE.Vector3(x, y, z);
+      return this.game.enemies?.spawn?.(archetype, tier, position) ?? null;
     } catch (e) {
       console.warn('[debug] spawnEnemy failed', e);
       return null;

@@ -315,6 +315,7 @@ the file for the phrase in caps.
 | add negative space to the mech | **THE "ONLY ONE TRUE SKY-GAP" DEFECT IS STALE** and **THE LEG'S FLAT PROFILE IS A WIDTH/DEPTH BUDGET PROBLEM** |
 | change a loadout-derived number | **EVERY LOADOUT MULTIPLIER WAS PINNED AT ITS CLAMP FLOOR** — `warnIfSaturated` exists to catch the recurrence |
 | debug the thruster plumes | **THE THRUSTER PLUMES RENDER**, **THE mech.thrusters ANCHORS POINTED THE WRONG WAY**, and **THE INSTANCED PARTICLE PATH WORKS** — a long elimination list, do not redo it |
+| spawn or place an entity from a tool | **`debug.spawnEnemy` TRANSPOSED TIER AND POSITION** — every review frame had NaN enemies; print coordinates before theorising about occlusion |
 | wire a subsystem | **THE NEVER-CALLED-SETTER SWEEP** — it has found seven real bugs |
 
 Two habits the file exists to enforce: **measure before you fix**, and when a
@@ -1496,3 +1497,31 @@ two of the silhouette metrics were wrong on their first outing.
   inputs — up misses, down hits at exactly the expected distance, a 120 m
   forward ray across scored-clear ground misses, a 2 m ray misses. The only
   defect is the NaN-range path recorded above.
+- 2026-09-02 [ai/tools] `debug.spawnEnemy` TRANSPOSED TIER AND POSITION, so
+  EVERY ENEMY IN EVERY REVIEW FRAME WAS AT NaN AND RENDERED NOWHERE. This is
+  the actual cause of "NO ENEMIES VISIBLE", and it outlived two other
+  diagnoses that were each real bugs in their own right (the phantom raycast
+  hit, the arena scorer) but were never this one.
+  The manager's signature is `spawn(archetypeId, TIER, POSITION, opts)`. Debug
+  called `spawn(archetype, new Vector3(x,y,z), tier)`. Nothing threw:
+  `root.position.copy(2)` reads `2.x`, gets `undefined`, and writes NaN into
+  all three components, while `tierScale(someVector3)` runs
+  `clamp(vector3 || 1, 1, 6)` and turns every stat NaN alongside it.
+  WHY IT WAS INVISIBLE FOR SO LONG: the entity reports `alive: true` and its
+  root reports `visible: true`, and a NaN transform makes the GPU drop the
+  draw with NO error and NO warning — there is nothing in a console log, a
+  draw-call count, or an entity count that differs from a working enemy. The
+  frame just has no enemies in it. `enemies: 4` in the capture stats was true
+  and meaningless.
+  DIAGNOSED BY PRINTING THE COORDINATES (tools/probes/frustum.js) after two
+  rounds of reasoning about occlusion and framing had failed. When something
+  is not on screen, print where it is BEFORE theorising about what is in
+  front of it.
+  Fixed at the call site, and `EnemyManager.spawn` now rejects a non-finite
+  tier or a non-finite position with a console.error instead of building a
+  live-but-nowhere entity.
+  THE GENERAL RULE, now three for three in this project (loadout units, NaN
+  raycast range, this): a numeric contract violated at a JS call boundary
+  does not throw, it produces NaN, and NaN propagates into a state that
+  reads as "working but empty". Validate at the boundary of anything that
+  takes an ordered pair of same-shaped arguments.

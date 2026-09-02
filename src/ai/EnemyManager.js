@@ -360,6 +360,23 @@ export class EnemyManager {
    */
   spawn(archetypeId, tier, position, opts) {
     const arch = getArchetype(archetypeId);
+    // Reject a transposed call rather than building a live enemy that is
+    // nowhere. Passing (id, position, tier) instead of (id, tier, position)
+    // makes `tierScale(vector3)` produce NaN stats and `position.copy(2)`
+    // produce a NaN transform; the entity then reports alive and visible and
+    // renders nothing at all, because a NaN matrix makes the GPU drop the
+    // draw without an error. That combination is invisible to every check
+    // short of printing the coordinates, and it silently invalidated every
+    // combat frame this project captured for weeks.
+    if (typeof tier !== 'number' || !Number.isFinite(tier)) {
+      console.error('[EnemyManager] spawn(archetypeId, TIER, POSITION): tier must be a finite number, got', tier);
+      return null;
+    }
+    if (position != null
+        && !(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z))) {
+      console.error('[EnemyManager] spawn(): position must be a Vector3 with finite components, got', position);
+      return null;
+    }
     const t = tier || 1;
     const block = arch.stats(t);
     const scale = tierScale(t);
