@@ -482,14 +482,22 @@ void main() {
   float seed = vExtra.y;
 
   if (mode < 0.5) {
-    // 0 — thin expanding shockwave ring, hot leading edge.
-    float inner = 1.0 - th;
-    float band = smoothstep(inner, 1.0 - th * 0.25, r) * (1.0 - smoothstep(1.0 - th * 0.12, 1.0, r));
+    // 0 — expanding shockwave ring, hot leading edge.
+    //
+    // THE OUTER EDGE MUST BE AS SOFT AS THE INNER ONE. The old band fell off
+    // over th * 0.12 — 0.7% of the radius, which on a 17 m ring is a 12 cm
+    // ramp, i.e. a hard line. Measured on shots/vfx00/combat_vfx.png: the
+    // frame was three enormous white ellipse OUTLINES, "a visible hard polygon
+    // silhouette on something meant to be curved" in everything but name.
+    // Both edges now ramp over 45% of the thickness, so the ring reads as a
+    // band of compressed dust rather than as a stroked circle.
+    float band = smoothstep(1.0 - th, 1.0 - th * 0.45, r)
+               * (1.0 - smoothstep(1.0 - th * 0.45, 1.0, r));
     // ragged edge so it never looks like a CAD circle
-    float ragged = 0.86 + 0.14 * fbm2(vec2(ang * 3.2 + seed * 9.0, seed * 4.0));
+    float ragged = 0.72 + 0.28 * fbm2(vec2(ang * 3.2 + seed * 9.0, seed * 4.0));
     band *= ragged;
-    float lead = smoothstep(1.0 - th * 0.55, 1.0 - th * 0.05, r);
-    rgb = mix(rgb, rgb * 2.6 + vec3(0.35), lead);
+    float lead = smoothstep(1.0 - th * 0.7, 1.0 - th * 0.15, r);
+    rgb = mix(rgb, rgb * 2.0 + vec3(0.2), lead);
     a = band;
   } else if (mode < 1.5) {
     // 1 — dome shockwave: rim-lit shell, brightest at grazing angles.
@@ -516,7 +524,7 @@ void main() {
     rgb *= 1.0 + ripple * 3.2;
   } else if (mode < 3.5) {
     // 3 — energy disc with radial spikes (stagger / lock bursts).
-    float band = smoothstep(1.0 - th, 1.0 - th * 0.2, r) * (1.0 - smoothstep(1.0 - th * 0.08, 1.0, r));
+    float band = smoothstep(1.0 - th, 1.0 - th * 0.45, r) * (1.0 - smoothstep(1.0 - th * 0.45, 1.0, r));
     float spikes = pow(abs(sin(ang * 6.0 + seed * 12.0)), 22.0)
                  + pow(abs(sin(ang * 14.0 + seed * 5.0)), 34.0) * 0.6;
     float radial = spikes * (1.0 - smoothstep(0.15, 1.0, r)) * 1.4;
@@ -574,11 +582,20 @@ void main() {
   vec2 suv = vScreen.xy / max(abs(vScreen.w), 1e-5) * 0.5 + 0.5;
   vec2 dir = normalize(vLocal + 1e-5);
   // Push the sample outward through the wavefront — compression at the front.
+  //
+  // uStrength is a fraction of the SCREEN, not of the ring, so it must stay
+  // small: at 0.045 a full-strength fragment sampled 86 px away at 1920 wide,
+  // which on shots/vfx00/combat_vfx.png turned the whole sky into wavy
+  // horizontal bands wherever a blast ring crossed it. Refraction through a
+  // shock front is a few pixels of displacement, not a lens.
   vec2 off = dir * amt * uStrength * (0.6 + 0.4 * fbm2(vLocal * 6.0 + uTime));
   vec3 scene = texture2D(uSceneColor, clamp(suv + off, vec2(0.001), vec2(0.999))).rgb;
-  vec3 rgb = scene * (1.0 + amt * 0.35) + vColor.rgb * amt * 0.25;
+  // Bent air does not EMIT. The old +0.35 gain and +0.25 colour term were what
+  // made this pass draw a bright white ellipse outline over the frame rather
+  // than a distortion you have to look for.
+  vec3 rgb = scene * (1.0 + amt * 0.10) + vColor.rgb * amt * 0.05;
 
-  gl_FragColor = vec4(rgb, clamp(amt * 1.6, 0.0, 1.0));
+  gl_FragColor = vec4(rgb, clamp(amt * 1.2, 0.0, 1.0));
 
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

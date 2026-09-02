@@ -272,7 +272,11 @@ export class ProjectileManager {
       this._fxRing[i] = { point: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), type: 'metal', scale: 1 };
     }
     this._fxIdx = 0;
-    this._explOpts = { color: 0xffa040, power: 1, type: 'explosive', shockwave: true };
+    this._explOpts = { color: 0xffa040, power: 1, type: 'explosive', shockwave: true, ground: true };
+    // scratch for the ground probe under a detonation — see _fxExplosion
+    this._gDown = new THREE.Vector3(0, -1, 0);
+    this._gHit = { hit: false, point: new THREE.Vector3(), normal: new THREE.Vector3(), distance: 0, object: null };
+    this._gNormal = new THREE.Vector3(0, 1, 0);
     this._trailPayload = {
       position: new THREE.Vector3(),
       direction: new THREE.Vector3(),
@@ -1107,6 +1111,29 @@ export class ProjectileManager {
     o.power = power;
     o.type = 'explosive';
     o.shockwave = radius > 6;
+
+    // IS THERE ACTUALLY GROUND UNDER THIS BLAST? `VFX.explosion` defaults its
+    // ground layer ON, and nothing ever told it otherwise, so every airburst —
+    // a missile intercepted at 40 m, a mech killed mid-boost — laid a
+    // ground-hugging dust ring and a scorch DECAL in open air. Probe down half a
+    // blast radius and let the answer decide.
+    //
+    // Physics.raycast returns a SHARED mutable scratch object that the next cast
+    // invalidates, so we pass our own `out` and read it immediately. It also
+    // reports a phantom hit when maxDist is not a positive finite number, hence
+    // the guard on the range rather than on the result.
+    o.ground = false;
+    o.groundNormal = null;
+    const reach = radius * 0.6;
+    if (this.physics?.raycast && reach > 0 && Number.isFinite(reach)) {
+      const g = this._gDown;
+      const hit = this.physics.raycast(point, g, reach, this._gHit);
+      if (hit && hit.hit) {
+        o.ground = true;
+        o.groundNormal = this._gNormal.copy(hit.normal);
+        if (this._gNormal.lengthSq() < 1e-6) this._gNormal.set(0, 1, 0);
+      }
+    }
     const pay = this._fxRing[this._fxIdx++ & 15];
     pay.point.copy(point);
     pay.normal.copy(WORLD_UP);

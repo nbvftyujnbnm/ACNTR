@@ -1205,7 +1205,9 @@ export class ParticleSystem {
       uniforms: {
         uTime: this.timeUniform,
         uSceneColor: this.sceneColorUniform,
-        uStrength: { value: 0.045 },
+        // Fraction of the SCREEN the wavefront displaces its sample by. See the
+        // note in ringDistortFrag — 0.045 was 86 px at 1920 and smeared the sky.
+        uStrength: { value: 0.010 },
       },
       transparent: true,
       depthWrite: false,

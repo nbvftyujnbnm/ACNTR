@@ -359,16 +359,27 @@ export class Debug {
         // to every enemy ahead clipped by the mech's own plateau edge. Where
         // the camera stands decides what it can see, so the ground under the
         // camera has to be scored too.
+        // The walk has to reach AS FAR AS THE CALLER WILL SPAWN. It used to
+        // stop at 40 m while the gameplay pose spawned out to 58 m, so a
+        // 49 m cliff sat just past the scorer's horizon and scored a perfect
+        // 140 m clear with zero relief. The two enemies beyond the edge ended
+        // up 32-37 deg below the camera axis — outside a 29 deg half-FOV — and
+        // the frame reported "no enemies visible" for a spot the scorer was
+        // still calling ideal. Callers that spawn far must ask for `ahead`.
+        //
+        // The step is 3 m rather than 5 for the same class of reason: a 5 m
+        // stride can straddle a ledge narrower than itself and sample flat
+        // ground either side of it.
         const fx = Math.sin(bearing);
         const fz = Math.cos(bearing);
         let relief = 0;
-        for (let s = -14; s <= 40; s += 5) {
+        for (let s = -behind; s <= ahead; s += step) {
           if (s === 0) continue;
           const gh = ph.groundHeight?.(sp.x + fx * s, sp.z + fz * s);
           if (!isFinite(gh)) { relief = Infinity; break; }
           relief = Math.max(relief, Math.abs(gh - g));
         }
-        if (relief > 2.5) continue;
+        if (relief > maxRelief) continue;
         const rise = relief;
 
         // The rays point along (sin b, 0, cos b); the controller's forward is

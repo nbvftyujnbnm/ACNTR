@@ -1066,21 +1066,29 @@ export class VFX {
     }
 
     // --- 5. shockwave ------------------------------------------------------
-    // The mode-1 dome has only drawn since the smoothstep fix, so these numbers
-    // had never been seen. r1 was R * 3.1: a 40 m rim-lit bubble around a
-    // mech-kill blast, expanding faster than the fireball it is supposed to be
-    // driven by. A real detonation front outruns the ball by a little, not by
-    // three times. Sized to the blast, and kept short.
+    //
+    // MEASURED ON shots/vfx00/combat_vfx.png, and it was the worst thing in the
+    // VFX layer: at R * 2.4 / R * 2.6 these rings are 17-34 m across, which from
+    // a 40 m camera is most of the frame — three enormous thin white ellipses
+    // laid over the sky, with the fireball they belong to invisible underneath.
+    // Neither ring had ever been seen at these numbers (the dome was dark until
+    // the smoothstep fix, and the mode-0 ring only became a distortion once the
+    // pipeline started handing VFX a scene colour texture).
+    //
+    // The front of a detonation outruns the fireball by a little, not by three
+    // times: the ring is now barely wider than the ball, and it is gone in
+    // 0.18 s. Radius is the knob that matters — halving alpha on a shape that
+    // spans the frame still leaves a shape that spans the frame.
     ps.ring({
       pos, normal: _up,
-      r0: R * 0.3, r1: R * 1.55, thickness: 0.1, life: 0.22,
-      color: hdr(_c1, 1.0, 0.84, 0.62, 2.1), alpha: 0.85,
+      r0: R * 0.3, r1: R * 1.15, thickness: 0.14, life: 0.20,
+      color: hdr(_c1, 1.0, 0.84, 0.62, 1.7), alpha: 0.55,
       growth: 2.6, mode: 1, dome: 0.82,
     });
     ps.ring({
       pos, normal: _up,
-      r0: R * 0.2, r1: R * 2.4, thickness: 0.06, life: 0.26,
-      color: hdr(_c1, 1.0, 0.9, 0.8, 2.0), alpha: 0.75,
+      r0: R * 0.2, r1: R * 1.35, thickness: 0.13, life: 0.18,
+      color: hdr(_c1, 1.0, 0.9, 0.8, 1.5), alpha: 0.45,
       growth: 3.0, mode: 0, distort: true,
     });
 
@@ -1152,8 +1160,8 @@ export class VFX {
       ps.ring({
         pos: _v1.copy(pos).addScaledVector(_v3, 0.12),
         normal: _v3,
-        r0: R * 0.3, r1: R * 2.6, thickness: 0.18, life: 0.45,
-        color: hdr(_c1, 0.9, 0.72, 0.5, 1.2), alpha: 0.45, growth: 2.6, mode: 0,
+        r0: R * 0.3, r1: R * 1.7, thickness: 0.22, life: 0.40,
+        color: hdr(_c1, 0.9, 0.72, 0.5, 0.85), alpha: 0.30, growth: 2.6, mode: 0,
       });
       ps.decal(pos, _v3, R * 1.3, TILE.SCORCH, _c1.setRGB(0.030, 0.024, 0.020), 0.9, 30);
     }

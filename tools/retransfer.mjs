@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * Apply a change to the grade's FINAL TRANSFER to a capture that already
- * exists, exactly, without rendering anything.
+ * OFFLINE RE-GRADE — measure a capture's tonal placement, and apply a candidate
+ * grade change to it NUMERICALLY, without rendering anything.
  *
- *   node tools/retransfer.mjs shots/iter11/boost.png [more.png ...] [--out DIR]
+ *   node tools/retransfer.mjs shots/toefix/hero.png                  # measure only
+ *   node tools/retransfer.mjs shots/**\/hero.png --map encode=srgb   # one candidate
+ *   node tools/retransfer.mjs shots/w_a0/vista.png \
+ *        --map 'encode=srgb;lift=0.010,0.012,0.018' --out shots/cand
  *
  * WHY THIS IS EXACT, and where it stops being exact.
  *
@@ -11,33 +14,41 @@
  * `agxToLinear(disp)` and lets three's `colorspace_fragment` apply the sRGB
  * OETF. So the shipped 8-bit output is
  *
- *     out  = OETF( pow( disp, 2.2 ) )
+ *     code = 255 * OETF( disp ^ 2.2 )
  *
- * and `agxToLinear` is supposed to be the INVERSE of that OETF, so that the
- * pair round-trips and the grade's display-space intent survives to the screen.
- * A 2.2 power is not the inverse of the sRGB OETF. Replacing it with the real
- * sRGB EOTF makes the round trip an identity, i.e.
+ * That map is strictly monotonic per channel, so it INVERTS exactly:
  *
- *     out' = disp = pow( EOTF( out ), 1 / 2.2 )
+ *     disp = ( EOTF( code / 255 ) ) ^ (1 / 2.2)
  *
- * — a function of the SHIPPED CODE VALUE ALONE. Every capture in `shots/` can
- * therefore be converted to what the fixed build would have produced, with no
- * rebuild and, more importantly, with none of the cross-build contamination the
- * Contract Amendments warn about: this is the same frame, not a second one.
+ * Every capture in `shots/` can therefore be taken back to the display value
+ * the grade actually produced, a candidate change applied there, and the frame
+ * re-encoded — with no rebuild, and with none of the cross-build contamination
+ * the Contract Amendments warn about (A/B MEASUREMENT RIG): this is the SAME
+ * frame, not a second one.
  *
- * THE LIMITS, which matter:
+ * The grade stages between the tonemap and the encode are also invertible, so
+ * `lift`, `saturation`, `splitShadow`/`splitHighlight` and `gain` can each be
+ * re-applied to an existing capture. See `unGrade()` for the exact chain and
+ * for which step is solved iteratively.
+ *
+ * THE LIMITS, which matter and are reported rather than hidden:
  *  - 8-bit quantisation. The shipped encode CRUSHES the toe, so many distinct
  *    `disp` values collide onto one output code down there; the inverse
  *    therefore expands one code into two or three. Region statistics (medians,
- *    percentiles, area fractions) are accurate; a magnified crop of the
- *    predicted image will show posterisation the real build will not have.
- *  - A code value of exactly 0 carries no information. Those pixels were
- *    already clipped before the encode, so this cannot recover them — which is
- *    precisely why the blue-clipped black point is a SEPARATE defect from the
- *    encode, and why the count of hard zeros is reported below.
- *  - Grain and dither are inside `disp` and are remapped with everything else.
+ *    percentiles, area fractions) are accurate; a magnified crop of a predicted
+ *    image will show posterisation the real build will not have.
+ *  - CLIPPING IS INFORMATION LOSS. A channel that hit 0 or 1.0 inside the grade
+ *    cannot be recovered, so a candidate that would have opened it up is
+ *    UNDER-estimated by this tool. Every report prints the clipped population;
+ *    when it is large, believe the direction and not the magnitude.
+ *  - Grain, dither and the 1% scanline are inside `disp` and are carried
+ *    through with everything else. They are unbiased, so they do not move a
+ *    median or a percentile, but they widen a histogram's bottom bins.
+ *  - The vignette is undone from the pixel's own screen position, which assumes
+ *    `vignette.amount` / `.smoothness` matched the shipped values at capture
+ *    time. Pass `--vig a,s` if a capture used different ones.
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -45,16 +56,192 @@ import { readPng } from './measure-frame.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const srgbEOTF = (x) => (x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4));
+/* ---------------------------------------------------------------------------
+ * The shipped grade, mirrored from src/render/Pipeline.js `params.grade` and
+ * `params.vignette`. Keep these in step with the pipeline — a candidate is only
+ * meaningful relative to the values the capture was actually shot with.
+ * ------------------------------------------------------------------------ */
+const SHIPPED = {
+  lift: [0.022, 0.025, 0.038],
+  gain: [1.035, 1.0, 0.950],
+  saturation: 0.94,
+  splitShadow: [-0.038, -0.008, 0.058],
+  splitHighlight: [0.032, 0.012, -0.024],
+  splitBalance: 0.42,
+  vignette: 0.26,
+  vignetteSmooth: 0.42,
+  encode: 2.2,
+};
 
-/** out -> out' for the 2.2-power to sRGB-EOTF fix, tabulated over all 256 codes. */
-function buildLut() {
-  const lut = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) {
-    const disp = Math.pow(srgbEOTF(i / 255), 1 / 2.2);
-    lut[i] = Math.max(0, Math.min(255, Math.round(disp * 255)));
+const srgbEOTF = (x) => (x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4));
+const srgbOETF = (x) => (x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const LUMA = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+const smoothstep = (e0, e1, x) => {
+  const t = clamp01((x - e0) / (e1 - e0 || 1e-9));
+  return t * t * (3 - 2 * t);
+};
+
+/* --- the shipped encode, and its exact inverse ---------------------------- */
+
+/** code (0-255) -> `disp`, the display value FINAL_FRAG produced. Exact. */
+function codeToDisp(code, power) {
+  return Math.pow(srgbEOTF(code / 255), 1 / power);
+}
+
+/**
+ * `disp` -> code, for a candidate final transfer.
+ *   'srgb'  : agxToLinear replaced by the true sRGB EOTF, so the pair
+ *             round-trips and the grade's display intent reaches the screen.
+ *   number  : the shipped form with a different power.
+ */
+function dispToCode(disp, encode) {
+  const v = encode === 'srgb' ? disp : srgbOETF(Math.pow(Math.max(disp, 0), encode));
+  return Math.max(0, Math.min(255, Math.round(v * 255)));
+}
+
+/* --- the grade chain, forward and back ------------------------------------
+ * FINAL_FRAG, from the tonemap down:
+ *    gain -> gamma -> contrast -> LIFT -> SATURATION -> SPLIT -> VIGNETTE
+ *    -> damage -> scanline -> grain -> dither -> encode
+ * Everything from LIFT down is undone here; anything above it is left alone,
+ * since a candidate expressed above the tonemap is not a function of the code
+ * value and cannot be evaluated offline.
+ * ---------------------------------------------------------------------- */
+
+/** Forward split toning, exactly as FINAL_FRAG writes it. */
+function applySplit(c, g) {
+  const lum = LUMA(c[0], c[1], c[2]);
+  const ws = 1 - smoothstep(0, g.splitBalance, lum);
+  const wh = smoothstep(g.splitBalance, 1, lum);
+  for (let i = 0; i < 3; i++) {
+    c[i] = clamp01(c[i] + g.splitShadow[i] * ws + g.splitHighlight[i] * wh);
   }
-  return lut;
+}
+
+/**
+ * Inverse split toning. The forward map is additive with weights that depend on
+ * the OUTPUT's own luma, so it is solved by fixed-point iteration rather than
+ * in closed form: the offsets are bounded by 0.058, which makes the iteration a
+ * strong contraction — six passes converge to well under a code value.
+ */
+function unSplit(c, g) {
+  const y = [c[0], c[1], c[2]];
+  const x = [c[0], c[1], c[2]];
+  for (let k = 0; k < 6; k++) {
+    const lum = LUMA(x[0], x[1], x[2]);
+    const ws = 1 - smoothstep(0, g.splitBalance, lum);
+    const wh = smoothstep(g.splitBalance, 1, lum);
+    for (let i = 0; i < 3; i++) x[i] = y[i] - g.splitShadow[i] * ws - g.splitHighlight[i] * wh;
+  }
+  c[0] = x[0]; c[1] = x[1]; c[2] = x[2];
+}
+
+/**
+ * Undo LIFT -> SATURATION -> SPLIT -> VIGNETTE, leaving the value the grade had
+ * just before the black floor was applied. Saturation is exactly invertible
+ * because it is luma-preserving: `luma(out) == luma(in)` by construction, so
+ * the pivot is read straight off the output.
+ */
+function unGrade(c, g, vig) {
+  if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] /= vig;
+  unSplit(c, g);
+  const l = LUMA(c[0], c[1], c[2]);
+  for (let i = 0; i < 3; i++) c[i] = l + (c[i] - l) / g.saturation;
+  for (let i = 0; i < 3; i++) c[i] = (c[i] - g.lift[i]) / (1 - g.lift[i]);
+}
+
+/** Re-apply the same chain with (possibly different) parameters. */
+function reGrade(c, g, vig) {
+  for (let i = 0; i < 3; i++) c[i] = g.lift[i] + (1 - g.lift[i]) * clamp01(c[i]);
+  const l = LUMA(c[0], c[1], c[2]);
+  for (let i = 0; i < 3; i++) c[i] = clamp01(l + (c[i] - l) * g.saturation);
+  applySplit(c, g);
+  if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
+}
+
+/* --- statistics ----------------------------------------------------------- */
+
+function hist256(data, n, ch) {
+  const h = new Float64Array(256);
+  for (let p = ch, i = 0; i < n; i++, p += 4) h[data[p]]++;
+  return h;
+}
+
+/** Percentile of a 256-bin histogram, in code values. */
+function hq(h, n, f) {
+  let acc = 0;
+  const want = f * n;
+  for (let v = 0; v < 256; v++) { acc += h[v]; if (acc >= want) return v; }
+  return 255;
+}
+
+function describe(data, n) {
+  const H = [hist256(data, n, 0), hist256(data, n, 1), hist256(data, n, 2)];
+  const lum = new Float64Array(256);
+  let zeroAll = 0, sat255 = 0;
+  // darkest-1% colour: collect by luma rank using a luma histogram
+  const lumH = new Float64Array(256);
+  for (let p = 0, i = 0; i < n; i++, p += 4) {
+    const l = Math.round(LUMA(data[p], data[p + 1], data[p + 2]));
+    lumH[l < 0 ? 0 : l > 255 ? 255 : l]++;
+    if (data[p] === 0 && data[p + 1] === 0 && data[p + 2] === 0) zeroAll++;
+    if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) sat255++;
+  }
+  lum.set(lumH);
+  // mean RGB of the darkest 1% by luma
+  const cut = hq(lumH, n, 0.01);
+  let dn = 0, dR = 0, dG = 0, dB = 0;
+  for (let p = 0, i = 0; i < n; i++, p += 4) {
+    if (LUMA(data[p], data[p + 1], data[p + 2]) <= cut) {
+      dn++; dR += data[p]; dG += data[p + 1]; dB += data[p + 2];
+    }
+  }
+  const perCh = H.map((h) => ({
+    zero: (100 * h[0]) / n,
+    p001: hq(h, n, 0.001), p01: hq(h, n, 0.01), p05: hq(h, n, 0.05),
+    med: hq(h, n, 0.5),
+    p99: hq(h, n, 0.99), p999: hq(h, n, 0.999),
+    full: (100 * h[255]) / n,
+    shoulder: (100 * (h.slice(230, 255).reduce((a, b) => a + b, 0))) / n,
+  }));
+  return {
+    n, H, lumH,
+    ch: perCh,
+    zeroAll: (100 * zeroAll) / n,
+    sat255: (100 * sat255) / n,
+    lumP: [0.001, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99].map((f) => hq(lumH, n, f)),
+    darkRGB: dn ? [dR / dn, dG / dn, dB / dn] : [0, 0, 0],
+    darkCut: cut,
+    b8: (100 * lumH.slice(0, 8).reduce((a, b) => a + b, 0)) / n,
+    b16: (100 * lumH.slice(0, 16).reduce((a, b) => a + b, 0)) / n,
+    b24: (100 * lumH.slice(0, 24).reduce((a, b) => a + b, 0)) / n,
+  };
+}
+
+function report(tag, s) {
+  const [r, g, b] = s.ch;
+  const dz = s.darkRGB;
+  const br = dz[0] > 0.05 ? (dz[2] / dz[0]).toFixed(2) : 'inf';
+  const p = s.lumP;
+  console.log(`  ${tag.padEnd(11)} luma p.1/1/5/25/50/75/95/99 = ` +
+    `${p.map((v) => String(v).padStart(3)).join(' ')}`);
+  console.log(`  ${''.padEnd(11)} BLACK  zero%% R ${r.zero.toFixed(2)} G ${g.zero.toFixed(2)} B ${b.zero.toFixed(2)}` +
+    `  allzero ${s.zeroAll.toFixed(3)}%  darkest-1%% RGB ${dz.map((v) => v.toFixed(1).padStart(5)).join('')}  B/R ${br}`);
+  console.log(`  ${''.padEnd(11)} TOE    <8 ${s.b8.toFixed(2)}%  <16 ${s.b16.toFixed(2)}%  <24 ${s.b24.toFixed(2)}%` +
+    `   per-ch p1  R ${String(r.p01).padStart(3)} G ${String(g.p01).padStart(3)} B ${String(b.p01).padStart(3)}`);
+  console.log(`  ${''.padEnd(11)} SHOULDER 230-254 ${(r.shoulder + g.shoulder + b.shoulder).toFixed(3)}%` +
+    `  at-255 R ${r.full.toFixed(3)} G ${g.full.toFixed(3)} B ${b.full.toFixed(3)}  any-255 ${s.sat255.toFixed(3)}%`);
+}
+
+function lowHist(s) {
+  const names = ['R', 'G', 'B'];
+  console.log('  low-end histogram, codes 0..15 (per mille of frame)');
+  for (let c = 0; c < 3; c++) {
+    const row = [];
+    for (let v = 0; v < 16; v++) row.push(((1000 * s.H[c][v]) / s.n).toFixed(1).padStart(6));
+    console.log(`    ${names[c]} ${row.join('')}`);
+  }
 }
 
 /* --- minimal PNG writer (RGB, filter 0) ---------------------------------- */
@@ -94,78 +281,138 @@ function writePng(path, W, H, rgba) {
   ]));
 }
 
-/* --- statistics ----------------------------------------------------------- */
-const L = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+/* --- candidate spec parsing ---------------------------------------------- */
 
-function describe(data, n) {
-  const lum = new Float64Array(n);
-  let zeroR = 0, zeroAll = 0, darkN = 0, dR = 0, dG = 0, dB = 0, dRzero = 0;
-  for (let p = 0, i = 0; i < n; i++, p += 4) {
-    const l = L(data, p);
-    lum[i] = l;
-    if (data[p] === 0) zeroR++;
-    if (data[p] === 0 && data[p + 1] === 0 && data[p + 2] === 0) zeroAll++;
-    if (l < 20) {
-      darkN++; dR += data[p]; dG += data[p + 1]; dB += data[p + 2];
-      if (data[p] === 0) dRzero++;
+function parseMap(spec) {
+  const cand = { ...SHIPPED, lift: [...SHIPPED.lift], gain: [...SHIPPED.gain],
+    splitShadow: [...SHIPPED.splitShadow], splitHighlight: [...SHIPPED.splitHighlight] };
+  let touchesGrade = false;
+  for (const part of spec.split(';').map((s) => s.trim()).filter(Boolean)) {
+    const [k, v] = part.split('=');
+    const nums = () => v.split(',').map(Number);
+    switch (k) {
+      case 'encode': cand.encode = v === 'srgb' ? 'srgb' : Number(v); break;
+      case 'lift': cand.lift = nums(); touchesGrade = true; break;
+      case 'split': cand.splitShadow = nums(); touchesGrade = true; break;
+      case 'splitHi': cand.splitHighlight = nums(); touchesGrade = true; break;
+      case 'bal': cand.splitBalance = Number(v); touchesGrade = true; break;
+      case 'sat': cand.saturation = Number(v); touchesGrade = true; break;
+      default: throw new Error(`unknown map key '${k}' (encode|lift|split|splitHi|bal|sat)`);
     }
   }
-  const s = Array.from(lum).sort((a, b) => a - b);
-  const q = (f) => s[Math.min(n - 1, Math.floor(f * (n - 1)))];
-  const below = (t) => (100 * s.findIndex((v) => v >= t)) / n;
-  let sum = 0; for (const v of s) sum += v;
-  const mean = sum / n;
-  let sd = 0; for (const v of s) sd += (v - mean) * (v - mean);
-  return {
-    mean, sd: Math.sqrt(sd / n), p05: q(0.05), p25: q(0.25), med: q(0.5), p75: q(0.75), p95: q(0.95),
-    b8: below(8), b16: below(16), b24: below(24), b48: below(48),
-    zeroR: (100 * zeroR) / n, zeroAll: (100 * zeroAll) / n,
-    darkArea: (100 * darkN) / n,
-    darkRGB: darkN ? [dR / darkN, dG / darkN, dB / darkN] : null,
-    darkRedClipped: darkN ? (100 * dRzero) / darkN : 0,
-  };
+  cand._grade = touchesGrade;
+  return cand;
 }
 
-function row(tag, s) {
-  return `  ${tag.padEnd(9)} ${s.mean.toFixed(1).padStart(6)} ${s.sd.toFixed(1).padStart(5)} ` +
-    `${s.p05.toFixed(0).padStart(4)} ${s.p25.toFixed(0).padStart(4)} ${s.med.toFixed(0).padStart(4)} ` +
-    `${s.p75.toFixed(0).padStart(4)} ${s.p95.toFixed(0).padStart(4)}  ` +
-    `${s.b8.toFixed(2).padStart(6)} ${s.b16.toFixed(2).padStart(6)} ${s.b24.toFixed(2).padStart(6)} ${s.b48.toFixed(2).padStart(6)}  ` +
-    `${s.zeroR.toFixed(2).padStart(6)} ${s.darkArea.toFixed(2).padStart(6)} ` +
-    `${s.darkRGB ? s.darkRGB.map((v) => v.toFixed(1).padStart(5)).join('') : '    -'} ${s.darkRedClipped.toFixed(1).padStart(6)}`;
+function describeCand(c) {
+  const bits = [];
+  if (c.encode !== SHIPPED.encode) bits.push(`encode ${SHIPPED.encode} -> ${c.encode}`);
+  if (String(c.lift) !== String(SHIPPED.lift)) bits.push(`lift ${c.lift}`);
+  if (String(c.splitShadow) !== String(SHIPPED.splitShadow)) bits.push(`splitShadow ${c.splitShadow}`);
+  if (String(c.splitHighlight) !== String(SHIPPED.splitHighlight)) bits.push(`splitHigh ${c.splitHighlight}`);
+  if (c.splitBalance !== SHIPPED.splitBalance) bits.push(`balance ${c.splitBalance}`);
+  if (c.saturation !== SHIPPED.saturation) bits.push(`sat ${c.saturation}`);
+  return bits.length ? bits.join(', ') : 'identity';
 }
 
-const args = process.argv.slice(2);
-const oi = args.indexOf('--out');
-const outDir = oi === -1 ? null : resolve(ROOT, args[oi + 1]);
-const files = args.filter((a, i) => !a.startsWith('--') && i !== oi + 1);
+/* --- transform ------------------------------------------------------------ */
+
+function transform(img, cand, vigParams) {
+  const { width: W, height: H, data } = img;
+  const out = new Uint8Array(data.length);
+  const c = [0, 0, 0];
+  let clipLo = 0, clipHi = 0;
+  const [vA, vS] = vigParams;
+  for (let y = 0; y < H; y++) {
+    const dy = (y + 0.5) / H - 0.5;
+    for (let x = 0; x < W; x++) {
+      const p = (y * W + x) * 4;
+      const dx = (x + 0.5) / W - 0.5;
+      const rEdge = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 1.41421356);
+      const vig = 1 - vA * smoothstep(Math.min(vS, 0.98), 1, rEdge);
+
+      c[0] = codeToDisp(data[p], SHIPPED.encode);
+      c[1] = codeToDisp(data[p + 1], SHIPPED.encode);
+      c[2] = codeToDisp(data[p + 2], SHIPPED.encode);
+
+      if (cand._grade) {
+        // A channel already at the rail carried no information into the code
+        // value; count it so the caveat is quantified rather than assumed away.
+        if (data[p] === 0 || data[p + 1] === 0 || data[p + 2] === 0) clipLo++;
+        if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) clipHi++;
+        unGrade(c, SHIPPED, vig);
+        reGrade(c, cand, vig);
+      }
+
+      out[p] = dispToCode(clamp01(c[0]), cand.encode);
+      out[p + 1] = dispToCode(clamp01(c[1]), cand.encode);
+      out[p + 2] = dispToCode(clamp01(c[2]), cand.encode);
+      out[p + 3] = 255;
+    }
+  }
+  return { out, clipLo: (100 * clipLo) / (W * H), clipHi: (100 * clipHi) / (W * H) };
+}
+
+/* --- main ----------------------------------------------------------------- */
+
+const argv = process.argv.slice(2);
+const flag = (name) => {
+  const i = argv.indexOf(`--${name}`);
+  return i === -1 ? null : argv[i + 1];
+};
+const has = (name) => argv.includes(`--${name}`);
+
+const outDir = flag('out') ? resolve(ROOT, flag('out')) : null;
+const mapSpecs = argv.reduce((acc, a, i) => (a === '--map' ? [...acc, argv[i + 1]] : acc), []);
+const vigParams = flag('vig') ? flag('vig').split(',').map(Number)
+  : [SHIPPED.vignette, SHIPPED.vignetteSmooth];
+const skip = new Set();
+for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) skip.add(i + 1);
+const files = argv.filter((a, i) => !a.startsWith('--') && !skip.has(i));
+
+if (!files.length) {
+  console.error('usage: node tools/retransfer.mjs <png ...> [--map SPEC]... [--out DIR] [--hist] [--vig a,s]');
+  process.exit(1);
+}
 if (outDir) mkdirSync(outDir, { recursive: true });
 
-const LUT = buildLut();
-console.log('CODE MAPPING  in -> out  (2.2 power replaced by the exact sRGB EOTF)');
-console.log('  ' + [0, 1, 2, 3, 5, 8, 12, 16, 24, 32, 48, 64, 96, 128, 180, 255]
-  .map((v) => `${v}->${LUT[v]}`).join('  '));
+const cands = mapSpecs.map(parseMap);
+
+// The code mapping is the whole story for an encode-only candidate, so print it.
+for (const cand of cands) {
+  if (cand._grade) continue;
+  const probe = [0, 1, 2, 3, 5, 8, 12, 16, 24, 32, 48, 64, 96, 128, 180, 230, 255];
+  console.log(`CODE MAPPING  [${describeCand(cand)}]`);
+  console.log('  ' + probe.map((v) =>
+    `${v}->${dispToCode(codeToDisp(v, SHIPPED.encode), cand.encode)}`).join('  '));
+}
 
 for (const f of files) {
   const path = resolve(ROOT, f);
-  const img = readPng(path);
+  let img;
+  try { img = readPng(path); } catch (e) { console.log(`\n=== ${f} — SKIPPED (${e.message})`); continue; }
   const n = img.width * img.height;
-  const before = describe(img.data, n);
-  const after4 = new Uint8Array(img.data.length);
-  for (let p = 0; p < img.data.length; p += 4) {
-    after4[p] = LUT[img.data[p]];
-    after4[p + 1] = LUT[img.data[p + 1]];
-    after4[p + 2] = LUT[img.data[p + 2]];
-    after4[p + 3] = 255;
-  }
-  const after = describe(after4, n);
   console.log(`\n=== ${f}  ${img.width}x${img.height} ===`);
-  console.log('            mean    sd  p05  p25  med  p75  p95    <8%   <16%   <24%   <48%   R==0%  <20 area  <20 mean RGB  redClip%');
-  console.log(row('shipped', before));
-  console.log(row('fixed', after));
-  if (outDir) {
-    const p = resolve(outDir, basename(f).replace(/\.png$/, '_fixed.png'));
-    writePng(p, img.width, img.height, after4);
-    console.log(`  wrote ${p.replace(ROOT + '/', '')}`);
+  const base = describe(img.data, n);
+  report('shipped', base);
+  if (has('hist')) lowHist(base);
+
+  for (const cand of cands) {
+    const { out, clipLo, clipHi } = transform(img, cand, vigParams);
+    const s = describe(out, n);
+    console.log(`  -- candidate: ${describeCand(cand)}`);
+    report('candidate', s);
+    if (has('hist')) lowHist(s);
+    if (cand._grade) {
+      console.log(`  ${''.padEnd(11)} CLIPPED IN THE CAPTURE (magnitude under-estimated here):` +
+        ` lo ${clipLo.toFixed(2)}%  hi ${clipHi.toFixed(2)}%`);
+    }
+    if (outDir) {
+      const nm = basename(f).replace(/\.png$/, '') + '_' +
+        (cand.encode === 'srgb' ? 'srgb' : `e${cand.encode}`) + (cand._grade ? '_g' : '') + '.png';
+      const p = resolve(outDir, nm);
+      writePng(p, img.width, img.height, out);
+      console.log(`  wrote ${p.replace(ROOT + '/', '')}`);
+    }
   }
 }
