@@ -1411,7 +1411,11 @@ export function buildThigh(o = {}) {
   // essentially touching, so the block MUST NOT grow in X — check
   // `node tools/legbudget.mjs`, which reports the clearance at a matched
   // height, before changing any number on this line.
-  b.box('armor', MASK.BASE, 0.84, 1.22, 0.90, 0.075, 0, TOP - 0.61, rev ? 0.10 : 0.04, 0, 0, 0,
+  // It is also 12 cm shorter than it was, and that is the knee slot: the block
+  // now stops 27 cm above the knee pivot rather than 15, so the horizontal band
+  // at the knee — the one with nothing in it but the axle, the fork cheeks and
+  // the actuator — runs 31 cm instead of 19.
+  b.box('armor', MASK.BASE, 0.84, 1.10, 0.90, 0.075, 0, TOP - 0.55, rev ? 0.10 : 0.04, 0, 0, 0,
     { taperX: 1.20, taperZ: rev ? 1.18 : 1.28 });
   // QUADRICEPS FACE. The old version of this plate was 1.00 m tall and ran the
   // full height of the block at a fixed Z, which is what pinned the front face
