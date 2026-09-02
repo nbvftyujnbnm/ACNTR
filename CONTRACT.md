@@ -1388,3 +1388,27 @@ no "default Three.js" look (no lambert-grey, no visible polygon silhouettes on c
   sweep. It was tried and flagged three ordinary JavaScript comments in
   Level.js nowhere near a shader. A lint that cries wolf gets ignored, which is
   how a guard stops guarding.
+- 2026-09-01 [audit] THE NEVER-CALLED-SETTER SWEEP IS CLEAN, and it is worth
+  re-running after any big wiring change because it has found seven real bugs:
+  projectiles unable to damage anything, the loadout reaching neither weapons
+  nor movement, soft particles without a depth buffer, the player's thrusters
+  never lit, the rig never given a ground sampler, damage smoke attached to
+  nothing, and explosion distortion rings hidden outright.
+    for f in $(find src -name '*.js'); do
+      grep -oP '^\s{2}(set|attach|register|bind|enable)[A-Z]\w*(?=\()' "$f" \
+      | tr -d ' ' | sort -u | while read m; do
+        n=$(grep -rE "\.${m}(\?\.)?\(" src tools --include=*.js | grep -v "^${f}:" | wc -l)
+        [ "$n" -eq 0 ] && echo "UNCALLED $m <- $f"
+      done
+    done
+  Use `grep -E` and allow for `?.` — a first attempt used basic-regex escapes,
+  matched nothing, and reported two dozen false positives including setters that
+  are demonstrably called from Game.js.
+  What survives the sweep today is all benign: `VFX.setAxis` (optional, and the
+  thruster anchors now carry the right orientation so nothing needs it),
+  `MechRig.setStiffness` (tuning), and `Lighting.setShadowQuality` (reachable
+  via the `render:quality` bus event, so not really uncalled).
+  ONE REAL GAP REMAINS, out of scope for the visual bar but worth knowing:
+  `AudioDirector.setMuted` and `setVolume` have no caller anywhere, so the game
+  ships with no way to mute or change volume. That is a settings-UI feature,
+  not a rendering defect.

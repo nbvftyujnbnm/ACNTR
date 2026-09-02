@@ -84,7 +84,7 @@ const trs = (x, y, z, rx = 0, ry = 0, rz = 0) =>
  */
 function buildParts(which) {
   const parts = [];
-  for (const side of [-1, 1]) {
+  for (const side of which.sides ?? [-1, 1]) {
     const hipM = trs(side * D.hipX, D.pelvisY - 0.10, 0);
     if (which.leg) {
       collect(parts, MP.buildThigh({ rng: rng32(7), side, legType: 'biped' }), hipM, 'thigh');
@@ -111,27 +111,27 @@ function buildParts(which) {
 
 /**
  * Rasterise the projection into a per-row list of filled column spans.
- * Returns { rows, y0, dy, x0, dx } where rows[i] is a Uint8Array of columns.
+ *
+ * A FIXED world grid (`GRID`) is used for every raster so that columns taken
+ * from different builds — one leg, both legs, legs + arm — can be joined row by
+ * row. An auto-fitted grid per raster silently compares different heights,
+ * which is exactly the mistake the old arm/thigh clearance line made: it took a
+ * global max on the leg and a global min on the arm and subtracted two numbers
+ * measured 1.5 m apart.
  */
-function raster(tris, yawDeg, px) {
+const GRID = { minU: -3.2, maxV: 4.35, minV: -0.45, scale: 200 }; // 5 mm/px
+function raster(tris, yawDeg) {
   const th = (yawDeg * Math.PI) / 180;
   const c = Math.cos(th), s = Math.sin(th);
   const n = tris.length / 3;
   const u = new Float64Array(n), v = new Float64Array(n);
-  let minU = 1e9, maxU = -1e9, minV = 1e9, maxV = -1e9;
   for (let i = 0; i < n; i++) {
     const x = tris[i * 3], y = tris[i * 3 + 1], z = tris[i * 3 + 2];
-    const uu = x * c - z * s;
-    u[i] = uu; v[i] = y;
-    if (uu < minU) minU = uu; if (uu > maxU) maxU = uu;
-    if (y < minV) minV = y; if (y > maxV) maxV = y;
+    u[i] = x * c - z * s; v[i] = y;
   }
-  const pad = 0.05;
-  minU -= pad; maxU += pad; minV -= pad; maxV += pad;
-  const spanU = maxU - minU, spanV = maxV - minV;
-  const scale = px / Math.max(spanU, spanV);
-  const W = Math.max(2, Math.ceil(spanU * scale));
-  const H = Math.max(2, Math.ceil(spanV * scale));
+  const { minU, maxV, scale } = GRID;
+  const W = Math.ceil((-minU * 2) * scale);
+  const H = Math.ceil((maxV - GRID.minV) * scale);
   const mask = new Uint8Array(W * H);
   const toX = (a) => (a - minU) * scale;
   const toY = (a) => (maxV - a) * scale;
@@ -165,6 +165,9 @@ function raster(tris, yawDeg, px) {
   return { mask, W, H, minU, maxV, scale };
 }
 
+/** Row index for a world height. */
+const rowAt = (yM) => Math.round((GRID.maxV - yM) * GRID.scale);
+
 /** Per-height runs, in metres, from the top of the raster down. */
 function rowRuns(r, y) {
   const runs = [];
@@ -180,53 +183,82 @@ function rowRuns(r, y) {
 
 const fmt = (n, w = 6, p = 2) => String(n.toFixed(p)).padStart(w);
 
-for (const yaw of YAWS) {
-  const legOnly = raster(buildParts({ leg: true }), yaw, PX);
-  console.log(`\n=== yaw ${yaw} ===`);
-  console.log('  height   legSpan  gap(m)  nRuns   (height = metres above sole)');
-  const rows = [];
-  for (let py = 0; py < legOnly.H; py++) {
-    const runs = rowRuns(legOnly, py);
-    if (!runs.length) continue;
-    const yM = legOnly.maxV - (py + 0.5) / legOnly.scale;
-    const lo = runs[0][0], hi = runs[runs.length - 1][1];
-    let gap = 0;
-    for (let i = 1; i < runs.length; i++) gap = Math.max(gap, (runs[i][0] - runs[i - 1][1] - 1) / legOnly.scale);
-    rows.push({ yM, span: (hi - lo + 1) / legOnly.scale, gap, n: runs.length });
+/** Widest daylight between consecutive runs, and the run count, on one row. */
+function rowStats(r, py) {
+  const runs = rowRuns(r, py);
+  if (!runs.length) return null;
+  let gap = 0;
+  for (let i = 1; i < runs.length; i++) {
+    gap = Math.max(gap, (runs[i][0] - runs[i - 1][1] - 1) / r.scale);
   }
-  // report every 0.25 m
-  let next = Math.ceil(rows[0].yM / 0.25) * 0.25;
-  for (const r of rows) {
-    if (r.yM > next) continue;
-    console.log(`  ${fmt(r.yM)}  ${fmt(r.span)}  ${fmt(r.gap)}   ${String(r.n).padStart(2)}`);
-    next -= 0.25;
-    if (next < -0.2) break;
-  }
-  const open = rows.filter((r) => r.n >= 2).length / rows.length;
-  console.log(`  legs-only openRows ${open.toFixed(3)}  (rows with daylight between the legs)`);
+  return {
+    n: runs.length,
+    gap,
+    lo: runs[0][0] / r.scale + r.minU,
+    hi: (runs[runs.length - 1][1] + 1) / r.scale + r.minU,
+    span: (runs[runs.length - 1][1] - runs[0][0] + 1) / r.scale,
+  };
 }
 
-// --- arm / thigh clearance ---------------------------------------------------
-{
-  const all = buildParts({ leg: true, arm: true });
-  // Right side only: outermost thigh point vs innermost forearm point, per height.
-  const th = buildParts({ leg: true });
-  let thighMaxX = -1e9, thighAtY = 0;
-  for (let i = 0; i < th.length; i += 3) {
-    const y = th[i + 1];
-    if (y < D.pelvisY - 2.4 || y > D.pelvisY) continue;
-    if (th[i] > thighMaxX) { thighMaxX = th[i]; thighAtY = y; }
+// One leg's own extent in X and in Z is fixed geometry: it does not depend on
+// the camera, and it is the pair of numbers the whole budget is spent from.
+const RIGHT = { leg: true, sides: [1] };
+const wR = raster(buildParts(RIGHT), 0);
+const dR = raster(buildParts(RIGHT), 90);
+
+const yTop = D.pelvisY + 0.15;
+const HEIGHTS = [];
+for (let y = yTop; y > -0.15; y -= 0.125) HEIGHTS.push(y);
+
+console.log('\n=== ONE LEG: the section budget (camera-independent) ===');
+console.log('  height   width   depth   w+d    su45   (metres; su45 = screen width at a 3/4 yaw)');
+for (const y of HEIGHTS) {
+  const a = rowStats(wR, rowAt(y));
+  const b = rowStats(dR, rowAt(y));
+  if (!a || !b) continue;
+  const su = rowStats(raster([], 0), 0); void su;
+  const s45 = (a.span + b.span) * Math.SQRT1_2;
+  console.log(`  ${fmt(y)}  ${fmt(a.span)}  ${fmt(b.span)}  ${fmt(a.span + b.span)}  ${fmt(s45)}`);
+}
+
+for (const yaw of YAWS) {
+  const legs = raster(buildParts({ leg: true }), yaw);
+  const one = raster(buildParts(RIGHT), yaw);
+  const withArm = raster(buildParts({ leg: true, arm: true, sides: [1] }), yaw);
+  console.log(`\n=== yaw ${yaw} ===`);
+  console.log('  height  1leg-su  legGap  nRuns   armGap  (armGap: right leg to right arm)');
+  for (const y of HEIGHTS) {
+    const py = rowAt(y);
+    const L = rowStats(legs, py);
+    if (!L) continue;
+    const O = rowStats(one, py);
+    const A = rowStats(withArm, py);
+    const armGap = A && A.n >= 2 ? A.gap : 0;
+    console.log(`  ${fmt(y)}  ${fmt(O ? O.span : 0)}  ${fmt(L.gap)}   ${String(L.n).padStart(2)}    ${fmt(armGap)}`);
   }
-  const arm = buildParts({ arm: true });
-  let armMinX = 1e9, armAtY = 0;
-  for (let i = 0; i < arm.length; i += 3) {
-    const y = arm[i + 1];
-    if (y < D.pelvisY - 2.4 || y > D.pelvisY) continue;
-    if (arm[i] > 0 && arm[i] < armMinX) { armMinX = arm[i]; armAtY = y; }
+  let occ = 0, open = 0;
+  for (let py = 0; py < legs.H; py++) {
+    const L = rowStats(legs, py);
+    if (!L) continue;
+    occ++; if (L.n >= 2) open++;
   }
-  console.log(`\narm/thigh clearance over y ${(D.pelvisY - 2.4).toFixed(2)}..${D.pelvisY.toFixed(2)}:`);
-  console.log(`  thigh outer face  ${thighMaxX.toFixed(3)} m  (at y ${thighAtY.toFixed(2)})`);
-  console.log(`  forearm inner face ${armMinX.toFixed(3)} m  (at y ${armAtY.toFixed(2)})`);
-  console.log(`  clearance ${(armMinX - thighMaxX).toFixed(3)} m`);
-  void all;
+  console.log(`  legs-only openRows ${(open / occ).toFixed(3)}   (${open}/${occ} rows with daylight between the legs)`);
+}
+
+// --- arm / thigh clearance, measured AT THE SAME HEIGHT -----------------------
+// The cap on outboard growth. Reported in world X (what buildThigh's comment is
+// written in) and in screen-u at 45 deg, which is what actually closes the hole.
+for (const yaw of [0, 45]) {
+  const leg = raster(buildParts(RIGHT), yaw);
+  const arm = raster(buildParts({ arm: true, sides: [1] }), yaw);
+  let worst = Infinity, worstY = 0;
+  for (let py = 0; py < leg.H; py++) {
+    const L = rowStats(leg, py);
+    const A = rowStats(arm, py);
+    if (!L || !A) continue;
+    const c = A.lo - L.hi;          // inner face of the arm minus outer face of the leg
+    if (c < worst) { worst = c; worstY = GRID.maxV - py / GRID.scale; }
+  }
+  console.log(`\narm/leg clearance at yaw ${yaw}: ${worst.toFixed(3)} m at y ${worstY.toFixed(2)}` +
+    (worst === Infinity ? '  (no shared height)' : ''));
 }
