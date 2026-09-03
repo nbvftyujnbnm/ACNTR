@@ -119,6 +119,19 @@ export class Debug {
   }
 
   /**
+   * The authoritative yaw, for callers that need the scalar — re-placing the
+   * player at its current facing, for instance. Passing
+   * `player.root.rotation.y` back into `placePlayer` spins the mech by
+   * whatever the two have drifted apart by, which has been a clean 180 deg.
+   */
+  yaw() {
+    const y = this.game.player?.entity?.aimYaw ?? this.game.player?.aimYaw;
+    if (Number.isFinite(y)) return y;
+    const r = this.game.player?.root?.rotation?.y;
+    return Number.isFinite(r) ? r : 0;
+  }
+
+  /**
    * The flat forward direction the camera is actually going to look down.
    *
    * READ THIS INSTEAD OF `player.root.rotation.y`. The amendment above covers
@@ -135,19 +148,6 @@ export class Debug {
    * is the ground truth for what will be in the picture, but it lags during
    * the frames right after a placement, so aimYaw is preferred when present.
    */
-  /**
-   * The authoritative yaw, for callers that need the scalar — re-placing the
-   * player at its current facing, for instance. Passing
-   * `player.root.rotation.y` back into `placePlayer` spins the mech by
-   * whatever the two have drifted apart by, which has been a clean 180 deg.
-   */
-  yaw() {
-    const y = this.game.player?.entity?.aimYaw ?? this.game.player?.aimYaw;
-    if (Number.isFinite(y)) return y;
-    const r = this.game.player?.root?.rotation?.y;
-    return Number.isFinite(r) ? r : 0;
-  }
-
   forward(out = new THREE.Vector3()) {
     const yaw = this.game.player?.entity?.aimYaw ?? this.game.player?.aimYaw;
     if (Number.isFinite(yaw)) return out.set(-Math.sin(yaw), 0, -Math.cos(yaw));
@@ -230,12 +230,16 @@ export class Debug {
   cameraBehindPlayer({ back = 12, up = 4, side = 0, lookY = 4.6, lookAhead = 0, fov = 38 } = {}) {
     const p = this.game.player?.root;
     if (!p) return this;
-    const yaw = p.rotation.y;
-    // Mech forward is (-sin yaw, 0, -cos yaw); behind it is the negation.
-    const fx = -Math.sin(yaw);
-    const fz = -Math.cos(yaw);
-    const rx = Math.cos(yaw);
-    const rz = -Math.sin(yaw);
+    // NOT `p.rotation.y` — the root lags the aim by up to 180 deg (see the
+    // "ROOT ROTATION IS NOT THE AIM" amendment). This helper existed precisely
+    // to guarantee which SIDE of the mech the lens lands on, and reading the
+    // stale root yaw silently gave it a coin flip.
+    const f = this.forward();
+    const r = this.right();
+    const fx = f.x;
+    const fz = f.z;
+    const rx = r.x;
+    const rz = r.z;
     return this.setCamera(
       {
         x: p.position.x - fx * back + rx * side,

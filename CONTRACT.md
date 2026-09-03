@@ -1555,3 +1555,24 @@ two of the silhouette metrics were wrong on their first outing.
   anything past `ahead` must raise it. Tightening from 40 to 70 m cut the
   candidate pool from 95 to 22, so the flat ground is genuinely scarce on
   this map — expect that, and do not read a small pool as a bug.
+- 2026-09-03 [player/camera] THE CHASE BOOM WAS AT 13 m AND THE MECH ATE 0.63
+  OF THE FRAME. Measured by projecting the mech's bounding box through the
+  live camera (tools/probes/framing.js), not by eye: the mesh is 8.71 m tall
+  (NOT the collider height — shoulders, weapons and boosters sit outside the
+  capsule), and at 13 m with a 58 deg FOV the visible height at the pivot is
+  14.4 m. An AC6 gameplay screenshot frames the player AC nearer 0.30 of frame
+  height with the arena and its targets around it; at 0.63 the player mech
+  simply buries the fight it is in.
+  The sweep, kept here so nobody re-derives it: at 58 deg FOV, 13 m gives
+  0.63, 16 m 0.51, 19 m 0.43, 22 m 0.37, 25 m 0.33, 26 m 0.31, 30 m 0.27,
+  36 m 0.22. Widening the FOV moves the same curve down (66 deg reaches 0.31
+  by 22 m). `distance` is now 25.0 — top of the AC6 band, and past about 30 m
+  the mech is small enough that the panel and grime work stops reading at all.
+  FOV was deliberately NOT changed: mech coverage is measurable, but lens
+  distortion and how wide-angle sells speed are not, and `fovAssault` already
+  adds 18 deg on top of the base.
+  THIS ONLY BECAME VISIBLE ONCE THE COMBAT FRAME HAD A FIGHT IN IT. Two
+  separate bugs (enemies spawned at NaN, then enemies spawned 180 deg behind
+  the camera) had kept every gameplay capture empty, and an empty frame hides
+  every composition problem in the game — there is nothing to be composed
+  against. Fix what makes a frame representative BEFORE grading anything in it.

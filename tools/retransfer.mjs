@@ -64,13 +64,21 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHIPPED = {
   lift: [0.022, 0.025, 0.038],
   gain: [1.035, 1.0, 0.950],
+  gamma: [1.0, 1.0, 1.0],
+  contrast: 1.24,
   saturation: 0.94,
   splitShadow: [-0.038, -0.008, 0.058],
   splitHighlight: [0.032, 0.012, -0.024],
   splitBalance: 0.42,
   vignette: 0.26,
   vignetteSmooth: 0.42,
-  encode: 2.2,
+  // THE SHIPPED ENCODE IS NOW AN IDENTITY. Before 2026-09-02 FINAL_FRAG wrote
+  // pow(disp, 2.2) and let three's sRGB OETF run on top, so code =
+  // 255 * OETF(disp^2.2) — a hard crush below display 0.35. `displayToLinear`
+  // is the true sRGB EOTF now, so the pair cancels and code = 255 * disp.
+  // Pass `--from 2.2` to measure a capture taken before that commit; every
+  // shot directory older than shots/iter31 needs it.
+  encode: 'srgb',
 };
 
 const srgbEOTF = (x) => (x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4));
@@ -86,6 +94,7 @@ const smoothstep = (e0, e1, x) => {
 
 /** code (0-255) -> `disp`, the display value FINAL_FRAG produced. Exact. */
 function codeToDisp(code, power) {
+  if (power === 'srgb') return code / 255;
   return Math.pow(srgbEOTF(code / 255), 1 / power);
 }
 
@@ -102,12 +111,41 @@ function dispToCode(disp, encode) {
 
 /* --- the grade chain, forward and back ------------------------------------
  * FINAL_FRAG, from the tonemap down:
- *    gain -> gamma -> contrast -> LIFT -> SATURATION -> SPLIT -> VIGNETTE
+ *    GAIN -> GAMMA -> CONTRAST -> LIFT -> SATURATION -> SPLIT -> VIGNETTE
  *    -> damage -> scanline -> grain -> dither -> encode
- * Everything from LIFT down is undone here; anything above it is left alone,
- * since a candidate expressed above the tonemap is not a function of the code
- * value and cannot be evaluated offline.
+ *
+ * EVERY stage in capitals is undone here, back to the raw AgX output. That is
+ * the whole grade: only `exposure` and `agxLook` sit above the tonemap, and
+ * those are not functions of the code value so they cannot be evaluated
+ * offline at all. Each stage is strictly monotonic per channel, so each one
+ * inverts; `contrast` has no closed form and is bisected.
  * ---------------------------------------------------------------------- */
+
+/**
+ * Filmic S-contrast, exactly as FINAL_FRAG writes it: a mix toward the
+ * smoothstep of the value itself, pivoted at 0.5.
+ */
+const contrastK = (contrast) => Math.max(-0.9, Math.min(0.9, (contrast - 1) * 2));
+const applyContrast1 = (x, k) => {
+  const v = clamp01(x);
+  return v + k * (v * v * (3 - 2 * v) - v);
+};
+
+/**
+ * Inverse S-contrast, by bisection. The forward map's derivative is
+ * (1 - k) + 6k*x*(1 - x), which is strictly positive for |k| < 0.9 — it is
+ * monotonic on [0,1] with fixed endpoints, so 24 halvings land inside 1e-7,
+ * three orders of magnitude below a code value.
+ */
+function unContrast1(y, k) {
+  if (Math.abs(k) < 1e-9) return clamp01(y);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = 0.5 * (lo + hi);
+    if (applyContrast1(mid, k) < y) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
 
 /** Forward split toning, exactly as FINAL_FRAG writes it. */
 function applySplit(c, g) {
@@ -138,10 +176,11 @@ function unSplit(c, g) {
 }
 
 /**
- * Undo LIFT -> SATURATION -> SPLIT -> VIGNETTE, leaving the value the grade had
- * just before the black floor was applied. Saturation is exactly invertible
- * because it is luma-preserving: `luma(out) == luma(in)` by construction, so
- * the pivot is read straight off the output.
+ * Undo the whole chain — VIGNETTE -> SPLIT -> SATURATION -> LIFT -> CONTRAST
+ * -> GAMMA -> GAIN — leaving the raw display value the tonemap produced.
+ * Saturation is exactly invertible because it is luma-preserving:
+ * `luma(out) == luma(in)` by construction, so the pivot is read straight off
+ * the output.
  */
 function unGrade(c, g, vig) {
   if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] /= vig;
@@ -149,6 +188,11 @@ function unGrade(c, g, vig) {
   const l = LUMA(c[0], c[1], c[2]);
   for (let i = 0; i < 3; i++) c[i] = l + (c[i] - l) / g.saturation;
   for (let i = 0; i < 3; i++) c[i] = (c[i] - g.lift[i]) / (1 - g.lift[i]);
+  const k = contrastK(g.contrast);
+  for (let i = 0; i < 3; i++) c[i] = unContrast1(c[i], k);
+  for (let i = 0; i < 3; i++) {
+    c[i] = Math.pow(Math.max(c[i], 0), g.gamma[i]) / g.gain[i];
+  }
 }
 
 const applyLift = (c, g) => {
@@ -173,6 +217,12 @@ const applySat = (c, g) => {
  * is NEGATIVE in red; under 'liftlast' it is exactly `lift`.
  */
 function reGrade(c, g, vig) {
+  for (let i = 0; i < 3; i++) {
+    c[i] = Math.pow(Math.max(c[i] * g.gain[i], 0), 1 / Math.max(g.gamma[i], 0.01));
+  }
+  const k = contrastK(g.contrast);
+  for (let i = 0; i < 3; i++) c[i] = applyContrast1(c[i], k);
+
   if (g.order === 'liftlast') {
     applySat(c, g);
     applySplit(c, g);
@@ -311,19 +361,29 @@ function writePng(path, W, H, rgba) {
 
 function parseMap(spec) {
   const cand = { ...SHIPPED, lift: [...SHIPPED.lift], gain: [...SHIPPED.gain],
+    gamma: [...SHIPPED.gamma],
     splitShadow: [...SHIPPED.splitShadow], splitHighlight: [...SHIPPED.splitHighlight] };
   let touchesGrade = false;
   for (const part of spec.split(';').map((s) => s.trim()).filter(Boolean)) {
     const [k, v] = part.split('=');
     const nums = () => v.split(',').map(Number);
+    const tri = () => (v.includes(',') ? nums() : [Number(v), Number(v), Number(v)]);
     switch (k) {
       case 'encode': cand.encode = v === 'srgb' ? 'srgb' : Number(v); break;
-      case 'lift': cand.lift = nums(); touchesGrade = true; break;
+      case 'lift': cand.lift = tri(); touchesGrade = true; break;
+      case 'gain': cand.gain = tri(); touchesGrade = true; break;
+      case 'gamma': cand.gamma = tri(); touchesGrade = true; break;
+      case 'contrast': cand.contrast = Number(v); touchesGrade = true; break;
       case 'split': cand.splitShadow = nums(); touchesGrade = true; break;
       case 'splitHi': cand.splitHighlight = nums(); touchesGrade = true; break;
       case 'bal': cand.splitBalance = Number(v); touchesGrade = true; break;
       case 'sat': cand.saturation = Number(v); touchesGrade = true; break;
-      default: throw new Error(`unknown map key '${k}' (encode|lift|split|splitHi|bal|sat)`);
+      case 'vig': cand.vignette = Number(v); touchesGrade = true; break;
+      case 'vigSmooth': cand.vignetteSmooth = Number(v); touchesGrade = true; break;
+      case 'order': cand.order = v; touchesGrade = true; break;
+      default: throw new Error(
+        `unknown map key '${k}' ` +
+        '(encode|lift|gain|gamma|contrast|split|splitHi|bal|sat|vig|vigSmooth|order)');
     }
   }
   cand._grade = touchesGrade;
@@ -334,6 +394,12 @@ function describeCand(c) {
   const bits = [];
   if (c.encode !== SHIPPED.encode) bits.push(`encode ${SHIPPED.encode} -> ${c.encode}`);
   if (String(c.lift) !== String(SHIPPED.lift)) bits.push(`lift ${c.lift}`);
+  if (String(c.gain) !== String(SHIPPED.gain)) bits.push(`gain ${c.gain}`);
+  if (String(c.gamma) !== String(SHIPPED.gamma)) bits.push(`gamma ${c.gamma}`);
+  if (c.contrast !== SHIPPED.contrast) bits.push(`contrast ${c.contrast}`);
+  if (c.vignette !== SHIPPED.vignette) bits.push(`vignette ${c.vignette}`);
+  if (c.vignetteSmooth !== SHIPPED.vignetteSmooth) bits.push(`vigSmooth ${c.vignetteSmooth}`);
+  if (c.order) bits.push(`order ${c.order}`);
   if (String(c.splitShadow) !== String(SHIPPED.splitShadow)) bits.push(`splitShadow ${c.splitShadow}`);
   if (String(c.splitHighlight) !== String(SHIPPED.splitHighlight)) bits.push(`splitHigh ${c.splitHighlight}`);
   if (c.splitBalance !== SHIPPED.splitBalance) bits.push(`balance ${c.splitBalance}`);
@@ -356,6 +422,8 @@ function transform(img, cand, vigParams) {
       const dx = (x + 0.5) / W - 0.5;
       const rEdge = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 1.41421356);
       const vig = 1 - vA * smoothstep(Math.min(vS, 0.98), 1, rEdge);
+      const vigC = 1 - cand.vignette *
+        smoothstep(Math.min(cand.vignetteSmooth, 0.98), 1, rEdge);
 
       c[0] = codeToDisp(data[p], SHIPPED.encode);
       c[1] = codeToDisp(data[p + 1], SHIPPED.encode);
@@ -367,7 +435,7 @@ function transform(img, cand, vigParams) {
         if (data[p] === 0 || data[p + 1] === 0 || data[p + 2] === 0) clipLo++;
         if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) clipHi++;
         unGrade(c, SHIPPED, vig);
-        reGrade(c, cand, vig);
+        reGrade(c, cand, vigC);
       }
 
       out[p] = dispToCode(clamp01(c[0]), cand.encode);
@@ -397,10 +465,19 @@ for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) skip.add(i +
 const files = argv.filter((a, i) => !a.startsWith('--') && !skip.has(i));
 
 if (!files.length) {
-  console.error('usage: node tools/retransfer.mjs <png ...> [--map SPEC]... [--out DIR] [--hist] [--vig a,s]');
+  console.error('usage: node tools/retransfer.mjs <png ...> [--map SPEC]... [--out DIR]' +
+    ' [--hist] [--vig a,s] [--from 2.2|srgb]\n' +
+    "  SPEC keys: encode lift gain gamma contrast split splitHi bal sat vig vigSmooth order\n" +
+    "  e.g. --map 'contrast=1.40;lift=0.014,0.016,0.026'");
   process.exit(1);
 }
 if (outDir) mkdirSync(outDir, { recursive: true });
+
+// `--from 2.2` measures a capture taken BEFORE the encode fix (2026-09-02);
+// without it those frames are read through the wrong inverse and every toe
+// statistic comes out wrong. Must run before parseMap, which snapshots SHIPPED.
+const fromEncode = flag('from');
+if (fromEncode) SHIPPED.encode = fromEncode === 'srgb' ? 'srgb' : Number(fromEncode);
 
 const cands = mapSpecs.map(parseMap);
 

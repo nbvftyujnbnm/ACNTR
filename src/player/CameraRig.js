@@ -58,7 +58,18 @@ const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
 
 export const DEFAULT_CAM = {
   pivotHeight: 4.5,
-  distance: 13.0,
+  // MEASURED, not guessed. The mech's mesh is 8.71 m tall. At the old 13 m
+  // boom and a 58 deg FOV the visible height at the pivot is 2*13*tan(29 deg)
+  // = 14.4 m, so the mech covered 0.63 of the frame — confirmed by projecting
+  // its bounding box in tools/probes/framing.js, and plainly visible in the
+  // first real gameplay frame this project captured, where the player buries
+  // the fight behind it. An AC6 gameplay screenshot frames the player AC
+  // nearer 0.30 of frame height, with the arena and its targets around it.
+  // The same sweep prices the alternatives: 22 m gives 0.37, 25 m gives 0.33,
+  // 26 m gives 0.31, and past ~30 m the mech is small enough that the panel
+  // and grime work stops reading at all. 25 m sits at the top of the AC6 band
+  // without throwing that away.
+  distance: 25.0,
   shoulder: 0.7,
   distanceSpeedGain: 0.052, // metres of pull-back per m/s over walk speed
   distanceSpeedMax: 3.4,

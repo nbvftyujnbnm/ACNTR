@@ -30,9 +30,11 @@
   if (!open) debug.placePlayerOnGround(0, 150, 0, 0.05);
   debug.step(0.4);
 
-  const yaw = game.player.root.rotation.y;
-  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  // `debug.forward()`/`right()`, never a basis rebuilt from `root.rotation.y`:
+  // the root trails the aim by up to 180 deg, which put this camera behind the
+  // mech with its own torso between the lens and the muzzle.
+  const fwd = debug.forward();
+  const right = debug.right();
 
   // Frame the RIGHT arm's muzzle from ahead and outboard, with the mech's own
   // torso behind it. A flash photographed against sky shows its shape and
