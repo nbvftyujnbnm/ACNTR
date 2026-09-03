@@ -2009,3 +2009,57 @@ two of the silhouette metrics were wrong on their first outing.
   butte hue story earlier today — an impression from a full-size frame, stated
   as a measurement, that the numbers then refuted. Count the pixels before
   telling anyone what to change.
+- 2026-09-03 [render/tools] **`tools/skysim.mjs` — SKY_FRAG EVALUATED ON THE
+  CPU, so a sky question costs eight seconds instead of a Chromium capture.**
+  Same argument `tools/grade-model.mjs` makes for the transfer curve, one layer
+  up: the sky is a closed-form function of the view ray and ~20 uniforms, and
+  on this box a capture is 60-100 s and has killed the container when two ran
+  at once. The uniforms are PARSED out of `src/render/Sky.js` and the vignette
+  out of `Pipeline.js`, so the palette cannot silently drift; the shader body is
+  transcribed by hand and CAN, which is what `--compare` is for.
+      node tools/skysim.mjs --pose vista --out /tmp/sky.png \
+        --compare shots/iter36/vista.png --rect skyUpMid:760,60,400,110
+  VALIDATED against shots/iter36/vista.png, sim vs capture, mean display luma
+  over pure-sky rects: 159.9 / 157.9 mid-frame, 109.5 / 108.6 upper left,
+  205.1 / 211.0 upper right near the sun (the sim reads low there because bloom
+  is the one term it does not model). Standard deviations agree to ~1.
+  `--term cloud|band|veil` renders one term of the shader as a mask, which is
+  how you find out where a term is actually reaching. Rect coordinates are
+  always full-frame 1920x1080 whatever `--width` is, so a half-res sim (3 s)
+  compares directly against a full-res capture.
+  WHAT IT CANNOT DO: match the noise PHASE. `hash13` is a `fract()` of a
+  product, so float32-with-FMA on the GPU and doubles in JS put an individual
+  wisp in a different place. Everything statistical — orientation, spatial
+  frequency, contrast, footprint — does match. Do not read it for "is that
+  specific streak at x=180".
+- 2026-09-03 [render/world] THE FAINT CURVED STREAKS IN THE VISTA'S LEFT SKY
+  ARE NOT IN THE SKY, AND ARE NOT REPRODUCIBLE. Four things are now measured
+  about them, so the next person starts from here.
+  (1) NOT THE SKY SHADER. `tools/skysim.mjs` evaluates SKY_FRAG over the vista
+  frustum and agrees with the capture to 1-6 code values on pure sky, and it
+  shows only horizontal strata in that region — no fan, at any uTime tried.
+  (2) NOT THE CLOUD DECK, so nobody needs to touch the 0.03/0.40 elevation
+  fade the amendment above protects. `--term cloud` is exactly 0 below
+  up = 0.03 and smooth blobs above it; the deck contributes nothing where the
+  streaks are.
+  (3) THE REGION IS GEOMETRY, NOT SKY. Sim vs capture over rect 60,340,220,110:
+  the sim (bare sky) says luma 143.4, the capture says 94.1. Forty-nine code
+  values of something opaque — the distant landform, seen at ~98% veil.
+  (4) NOT THE ARENA CURTAIN, which was the obvious suspect: a raycast through
+  the streak pixels (`tools/probes/fanstreak.js`) reports Level's
+  `ContainmentField` at ~600 m on 25 of 26 rays. Hiding it changes NOTHING —
+  `tools/poses/fan_base.js` vs `fan_nofield.js`, differenced, is grain and
+  nothing else in that rect.
+  AND THE STREAKS ARE NOT IN `fan_base` EITHER, which is the vista pose byte
+  for byte. Contrast-stretched they resolve into a regular DIAGONAL LATTICE
+  WITH BRIGHT NODES AT THE CROSSINGS, ~18-25 px apart, over the distant
+  landform — the signature of a triangulated heightfield at grazing incidence,
+  not of anything in post. Two things differ between the iter36 run and the
+  clean one: the working tree's Level.js/Structures.js have moved since
+  (2.57 M triangles then, 2.95 M now), and iter36's vista ran straight after a
+  93-second `gameplay` pose. If it returns, it is a TERRAIN TESSELLATION
+  question and belongs to the level agent — start by checking whether it
+  survives a capture of `vista` alone.
+  METHOD NOTE: the useful discriminator was not any of the theories, it was
+  the CPU sim. "Is this pixel sky?" is answerable exactly and offline, and it
+  turned a sky bug into a terrain bug before a single frame was captured.
