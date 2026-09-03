@@ -1746,3 +1746,19 @@ two of the silhouette metrics were wrong on their first outing.
   preset; and `v.smoke(pos, number)` against `smoke(pos, opts)`. Dead code
   that looks like the working path is worse than no code: it is where the next
   person goes to find out why trail colours do not apply.
+- 2026-09-03 [loot/ui] THE LOOT CHAIN IS INTACT END TO END — verified, so
+  nobody re-derives it. Enemies die -> LOOT_DROP fires -> pickups spawn ->
+  walking over one collects it -> it reaches `loadout.inventory` -> the garage
+  lists all ten slots with their equipped parts -> `_equip` moves 17 derived
+  stats -> the slot reflects the new part -> close returns to 'playing'. The
+  only thing that was ever broken in it was the missing `body` node recorded
+  above, and that is fixed.
+  ONE TRAP FOR ANYONE PROBING THE UI: the garage renders `div.g-slot`
+  carrying `data-slot`, NOT `.part` / `.item` / `li` / `button`. A probe
+  guessing those selectors matched nothing and reported "0 clickable rows"
+  for a screen that was drawing all ten slots correctly. A selector that
+  matches nothing is indistinguishable from a UI that renders nothing — dump
+  the DOM before believing a zero.
+  Also: `candidatesFor('head')` returning 0 is CORRECT when the starter
+  inventory holds no spare head. An empty candidate list is not evidence of a
+  broken garage.
