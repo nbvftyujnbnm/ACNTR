@@ -127,7 +127,7 @@
   out.updateError = updateError;
 
   out.dropEventsFired = dropEvents;
-  out.enemyAliveAfter = ent ? ent.alive !== false : null;
+  out.enemiesStillAlive = (game.enemies?.list || []).filter((x) => x && x.alive !== false).length;
   out.pickupsAfterKill = countPickups();
 
   // ---- 2. can the player actually collect one? ---------------------------

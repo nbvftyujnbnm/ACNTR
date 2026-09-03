@@ -4,6 +4,7 @@ import * as M from '../core/MathUtils.js';
 import { Brain, Squad } from './Brain.js';
 import { getArchetype, tierScale } from './Archetypes.js';
 import { EncounterDirector } from './Encounters.js';
+import { telegraphVert, telegraphFrag } from '../combat/vfxShaders.js';
 
 /**
  * EnemyManager — owns every hostile entity, the AI frame budget, the shared
@@ -42,9 +43,16 @@ export class Telegraphs {
     this.scene = scene;
     this.enabled = true;
 
-    this._lineGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
+    // 12 sides, not 6. The line's glow is `|N·V|` resolved per fragment from
+    // an interpolated normal, and six facets quantise the falloff into a
+    // visible polygon — the automatic fail REVIEW.md lists for anything meant
+    // to be curved.
+    this._lineGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     this._ringGeo = new THREE.RingGeometry(0.86, 1, 40);
     this._ringGeo.rotateX(-Math.PI / 2);
+    // One shared clock object handed to every line material, so the dashes
+    // march without the update loop walking the pools.
+    this._timeU = { value: 0 };
 
     this._linePool = [];
     this._ringPool = [];
@@ -57,16 +65,43 @@ export class Telegraphs {
   }
 
   _makeMesh(kind) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      toneMapped: false,
-      fog: false,
-    });
+    // A LINE IS A LIGHT, NOT A PAINTED BAR. `MeshBasicMaterial` gives a solid
+    // one flat colour across a hard silhouette, and `setHex` caps its
+    // brightest channel at 1.0 — below the bloom prefilter's 1.90 threshold —
+    // so an aim laser rendered as a 5 px constant-width vector line that could
+    // not spill light even in principle. The glow shader carries a thin hot
+    // core inside a wide soft skirt and takes its colour as a real radiance.
+    const mat = kind === 'line'
+      ? new THREE.ShaderMaterial({
+        vertexShader: telegraphVert,
+        fragmentShader: telegraphFrag,
+        uniforms: {
+          uColor: { value: new THREE.Color(1, 0.2, 0.25) },
+          uCorePow: { value: 4.5 },
+          uSkirtPow: { value: 0.5 },
+          uSkirt: { value: 0.30 },
+          uGain: { value: 4.2 },
+          uAlpha: { value: 0.85 },
+          uDashes: { value: 0 },
+          uScroll: { value: 1.6 },
+          uTime: this._timeU,
+        },
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+      })
+      : new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        fog: false,
+      });
     const mesh = new THREE.Mesh(kind === 'line' ? this._lineGeo : this._ringGeo, mat);
     mesh.frustumCulled = false;
     mesh.renderOrder = 12;
@@ -123,8 +158,18 @@ export class Telegraphs {
     _q.setFromUnitVectors(UP, _v);
     mesh.quaternion.copy(_q);
     mesh.scale.set(width ?? 0.05, len, width ?? 0.05);
-    mesh.material.color.setHex(color ?? 0xff3040);
-    mesh.material.opacity = alpha ?? 0.85;
+    const u = mesh.material.uniforms;
+    // The hue stays a hue; `uGain` (4.2) is what puts the core past the bloom
+    // prefilter's 1.90 scene-linear threshold, and it is applied AFTER the
+    // fresnel weight so only the core crosses it and the skirt stays under.
+    // That ordering is the whole difference between a hot core with a soft
+    // halo and a uniform veil.
+    u.uColor.value.setHex(color ?? 0xff3040);
+    u.uAlpha.value = alpha ?? 0.85;
+    // Dash count scales with LENGTH so the marching pattern has a metric
+    // period instead of stretching with the shot; a 20 m sight line and a
+    // 300 m one should read as the same beam.
+    u.uDashes.value = Math.min(64, Math.round(len * 0.55));
     mesh.visible = true;
   }
 
@@ -137,7 +182,10 @@ export class Telegraphs {
     mesh.position.set(pos.x, pos.y + 0.35, pos.z);
     const k = M.clamp(t ?? 0, 0, 1);
     mesh.scale.setScalar(radius * (1.35 - k * 0.35));
-    mesh.material.color.setHex(color ?? 0xff6a20);
+    // x2.6 for the same reason the lines are lifted: a hex peaks at 1.0 and
+    // the bloom prefilter starts at 1.90, so an un-lifted warning ring is
+    // flat paint on the ground rather than a light on it.
+    mesh.material.color.setHex(color ?? 0xff6a20).multiplyScalar(2.6);
     mesh.material.opacity = 0.25 + k * 0.6;
     mesh.visible = true;
   }
@@ -170,7 +218,7 @@ export class Telegraphs {
     const mesh = this._take('ring');
     if (!mesh) return;
     mesh.position.set(pos.x, pos.y + 0.4, pos.z);
-    mesh.material.color.setHex(color ?? 0xffc070);
+    mesh.material.color.setHex(color ?? 0xffc070).multiplyScalar(3.0);
     mesh.visible = true;
     this._transient.push({ mesh, t: 0, life: life ?? 0.5, r: radius ?? 10 });
   }
@@ -193,6 +241,7 @@ export class Telegraphs {
 
   update(dt, elapsed) {
     this._now = elapsed;
+    this._timeU.value = elapsed;
     // recycle anything nobody refreshed — the safety net for interrupted states
     for (const [key, e] of this._entries) {
       if (elapsed - e.stamp > 0.16) {

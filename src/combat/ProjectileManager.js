@@ -337,7 +337,13 @@ export class ProjectileManager {
     cylZ.rotateX(Math.PI / 2);
     const beamZ = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     beamZ.rotateX(Math.PI / 2);
-    const sphere = new THREE.IcosahedronGeometry(1, 1);
+    // Detail 2, not 1. The glow's falloff is analytic (the shader uses
+    // `normalize(position)`, so the normals are exact whatever the tesselation),
+    // but a motor flare runs blown-out over most of its area and the visible
+    // edge is where the CLIPPED core ends — which at detail 1 is a 42-vertex
+    // polygon, plainly octagonal at 60 px in shots/vfx_t1/gameplay.png. 320
+    // faces against a realistic handful of live flares, not the 300 cap.
+    const sphere = new THREE.IcosahedronGeometry(1, 2);
     const fieldGeo = new THREE.IcosahedronGeometry(1, 2);
     // radiusTop ends up at +Z after rotateX(+90°), so the narrow end is the nose
     const missileGeo = new THREE.CylinderGeometry(0.18, 0.5, 1, 7, 1, false);

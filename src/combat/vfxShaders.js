@@ -701,6 +701,88 @@ void main() {
 `;
 
 // ---------------------------------------------------------------------------
+// Telegraph sight lines
+// ---------------------------------------------------------------------------
+
+/**
+ * Laser sights and ballistic-arc telegraphs. Same disease as the tracer, worse
+ * symptom: a `MeshBasicMaterial` on a plain cylinder, so an aim laser drew as
+ * a hard-edged bar of ONE flat LDR colour — measured on
+ * shots/iter31/gameplay.png as a 5 px constant-width pure-red curve with no
+ * glow, no falloff and no bloom, which is the single most artificial element
+ * left in a combat frame.
+ *
+ * The mesh is authored about **+Y** (three's CylinderGeometry, unrotated), not
+ * +Z like the projectile tube, because `Telegraphs.line` aims it with
+ * `setFromUnitVectors(UP, dir)`.
+ *
+ * TWO exponents on the same fresnel term is what turns a bar into a beam: a
+ * high one leaves a thin hot core, a low one spreads a wide dim skirt around
+ * it. That shape has to exist in the SOURCE — the bloom pass can widen a hot
+ * core but it cannot invent one inside a slab of uniform brightness.
+ */
+export const telegraphVert = /* glsl */ `
+${COMMON}
+
+varying vec3 vNrmW;
+varying vec3 vViewW;
+varying float vAxis;
+
+void main() {
+  vec2 rad = normalize(position.xz + vec2(1e-5, 0.0));
+  vec3 nLocal = vec3(rad.x, 0.0, rad.y);
+  vNrmW = normalize(mat3(modelMatrix) * nLocal);
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vViewW = cameraPosition - wp.xyz;
+  vAxis = clamp(position.y + 0.5, 0.0, 1.0);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+export const telegraphFrag = /* glsl */ `
+${COMMON}
+
+uniform vec3 uColor;     // HDR radiance, not a hue
+uniform float uCorePow;  // high -> thin hot core
+uniform float uSkirtPow; // low  -> wide soft halo
+uniform float uSkirt;    // how much halo to add
+uniform float uGain;
+uniform float uAlpha;
+uniform float uDashes;   // dash cycles along the whole line (0 = solid)
+uniform float uScroll;   // dashes per second toward the target
+uniform float uTime;
+
+varying vec3 vNrmW;
+varying vec3 vViewW;
+varying float vAxis;
+
+void main() {
+  float f = clamp(abs(dot(normalize(vNrmW), normalize(vViewW))), 0.0, 1.0);
+  float w = pow(f, uCorePow) + pow(f, uSkirtPow) * uSkirt;
+
+  float march = 1.0;
+  if (uDashes > 0.5) {
+    float s = fract(vAxis * uDashes - uTime * uScroll);
+    // Rising edge then FALLING edge written as 1.0 - smoothstep(lo, hi, x).
+    // Never smoothstep(hi, lo, x): GLSL ES leaves edge0 >= edge1 undefined and
+    // the common driver returns 0 for every fragment, which is exactly how the
+    // thruster plumes stayed invisible for weeks.
+    march = mix(0.30, 1.0,
+      smoothstep(0.0, 0.16, s) * (1.0 - smoothstep(0.56, 0.80, s)));
+  }
+  // A sight line that stops dead at the aim point reads as a drawn object.
+  march *= 1.0 - 0.8 * smoothstep(0.80, 1.0, vAxis);
+
+  float a = w * march;
+  if (a <= 0.003) discard;
+  gl_FragColor = vec4(uColor * (a * uGain), clamp(a * uAlpha, 0.0, 1.0));
+
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+// ---------------------------------------------------------------------------
 // Thruster plumes
 // ---------------------------------------------------------------------------
 

@@ -377,7 +377,13 @@ export class LootSystem {
     p.spin = 0;
     p.fade = 0;
     p.root.visible = true;
-    p.root.scale.setScalar(p.present.scale);
+    // Rarity scale goes on `body`, never on the root: the beam and decal are
+    // positioned and sized in world units off `groundY`, so a scaled root
+    // lifts them off the ground by the rarity factor. The root is reset
+    // explicitly because these rigs are pooled and an older build left the
+    // scale there.
+    p.root.scale.setScalar(1);
+    p.body.scale.setScalar(p.present.scale);
 
     this._active.push(p);
 
@@ -810,12 +816,30 @@ export class LootSystem {
     const halo = new THREE.Sprite(haloMat);
     halo.renderOrder = 7;
 
-    root.add(cage, core, bandA, bandB, shards, beam, decal, halo);
+    // `body` is the scaled node, and it did not exist. `_animate`'s doc
+    // comment has always described this split — "body is the only scaled
+    // node; the beam, decal and halo hang off the unscaled root so their
+    // world sizes stay purely rarity-driven and the ground-anchoring maths
+    // stays in world units" — but the group was never built, so `p.body` was
+    // undefined everywhere it was read.
+    //
+    // That cost two separate bugs. The `collect` and `fade` branches of
+    // update() both do `p.body.scale.setScalar(...)`, so picking up ANY drop
+    // threw "Cannot read properties of undefined (reading 'scale')" and took
+    // the frame loop with it. And `spawnPart` compensated by scaling the ROOT
+    // instead, which silently broke the world-unit maths the comment is
+    // warning about: `beam.position.y = groundY - root.position.y + beamH*0.5`
+    // and the decal's radius are computed in world units, so on a scaled root
+    // every rarity except `rare` (scale 1.0) anchored its beam and scan ring
+    // off the ground — 0.82x for common, 1.42x for prototype.
+    const body = new THREE.Group();
+    body.add(cage, core, bandA, bandB, shards);
+    root.add(body, beam, decal, halo);
     root.visible = false;
     this._group.add(root);
 
     return {
-      root, cage, core, bandA, bandB, shards, beam, decal, halo,
+      root, body, cage, core, bandA, bandB, shards, beam, decal, halo,
       mats: { hull: hullMat, core: coreMat, band: bandMat, shard: shardMat, beam: beamMat, decal: decalMat, halo: haloMat },
       part: null, present: RARITY.common.present, color: RARITY.common.color,
       shardCount: 0, light: null, vis: 1,
