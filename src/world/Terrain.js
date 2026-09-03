@@ -529,33 +529,24 @@ export class Terrain {
        * at 10 cm would alias into crawling speckle at 200 m instead.
        */
       /*
-       * uDetail.w — THE RELIEF HALF — WAS 0.62 AND IT IS THE CROCODILE SKIN.
-       * MEASURED on shots/L48/ground.png over a 360x220 patch of SUNLIT dune at
-       * 20-40 m:
-       *     mean 70.9  sd 49.2  p1/p10/p50/p90/p99 = 5 / 14 / 65 / 139 / 165
-       *     41.7% of it under code 40, 22.8% over 120
-       * A lit sand surface whose tenth percentile (14) is BELOW the tenth
-       * percentile of the deep-shadow ground beside it (15) is not textured, it
-       * is punched full of holes. 160 code values of range across flat sand.
+       * uDetail.w — THE RELIEF HALF. 0.24, down from 0.62, and the reason is
+       * A NUMBER THIS FILE HAD NEVER MEASURED: how big the dust normal map's
+       * xy actually is. Every relief argument here — this one, the ripple
+       * one — reasons about "degrees of flank" from a coefficient, which only
+       * means anything once you know what it multiplies.
        *
-       * The arithmetic is the one `uRipple` already carries, applied to the
-       * wrong term. `acDN` adds the two detail normal taps STRAIGHT into the
-       * world normal's xz: at 0.62, times the (1 + 0.50 * acNear) near boost and
-       * the 0.70/0.52 tap weights, the xz offset reaches 1.13, which is
-       * atan(1.13) = 48 DEGREES of flank. At a 13.5 degree sun N.L on level
-       * ground is sin(13.5) = 0.233, so 48 degrees swings a fragment from
-       * fully self-shadowed to more than three times base — which is exactly
-       * the measured histogram. The ripples were cut to 0.06 for 5.3 degrees
-       * of flank while this term sat ten times higher on the same surface.
-       *
-       * 0.13 with a 0.35 near boost peaks at 0.21 of xz, about 12 degrees in
-       * the worst case and 4-6 typically: read as texture, not as a pattern.
-       * The layer still does the job its own comment claims — breaking the
-       * shading terminator off the 5 m mesh quads — because that only needs the
-       * normal to stop being constant across a quad, not to be thrown 48
-       * degrees.
+       * MEASURED off the forge's canvas (`tools/probes/dustmap.js`): the dust
+       * normal map's |xy| is mean 0.224, p90 0.338, p99 0.416. So 0.62 with the
+       * 0.70/0.52 tap weights and the near boost was 9-10 degrees typical, not
+       * the 48 a naive |xy| = 1 would imply, and cutting it to 0.13 moved a
+       * sunlit dune's standard deviation by 0.6 of a code value — recorded as a
+       * NEGATIVE RESULT so nobody re-runs it. 0.24 is about 4 degrees typical,
+       * which leaves the layer doing the job its own comment claims (breaking
+       * the shading terminator off the 5 m mesh quads) without competing with
+       * the base triplanar term, which is the one that was actually wrong: see
+       * `normalStrength` at the Level.js call site.
        */
-      uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.13) },
+      uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.24) },
       uGroundMean: { value: 0.5 },
       /*
        * WIND RIPPLES. x/y are the two ripple wavelengths in METRES, z the

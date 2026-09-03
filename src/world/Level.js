@@ -651,7 +651,20 @@ export class Level {
       dustTint: 0xc3ab84,
       gravelTint: 0x6f6555,
       padTint: 0x9d9a92,
-      normalStrength: 1.35,
+      /*
+       * 0.45, NOT 1.35. This is the single term that made the lit ground
+       * bimodal, and it took a texture measurement to find because the shader
+       * arithmetic in Terrain.js assumed a normal-map magnitude nobody had
+       * checked. MEASURED off the forge's own canvas
+       * (`tools/probes/dustmap.js`): the dust normal map's |xy| runs mean 0.224,
+       * p90 0.338, p99 0.416. At 1.35 that is a typical perturbation of 0.30
+       * added to an up normal — atan(0.30) = 17 degrees of flank, 29 at p99 —
+       * and at a 13.5 degree sun, where N.L on level ground is sin(13.5) =
+       * 0.233, 17 degrees swings a fragment between fully self-shadowed and
+       * more than twice base. 0.45 lands 5.8 degrees typical and 10.6 at p99,
+       * the same neighbourhood the ripple term was tuned to.
+       */
+      normalStrength: 0.45,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = 'Terrain';
