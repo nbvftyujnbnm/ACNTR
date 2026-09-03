@@ -1762,3 +1762,42 @@ two of the silhouette metrics were wrong on their first outing.
   Also: `candidatesFor('head')` returning 0 is CORRECT when the starter
   inventory holds no spare head. An empty candidate list is not evidence of a
   broken garage.
+- 2026-09-03 [render/world] THE SKY'S CLOUDS ARE CORRECT AND DELIBERATELY
+  MASKED NEAR THE HORIZON. Do not "fix" them. The gameplay frame's sky is a
+  near-uniform pink-grey with no cloud structure, which reads as a broken
+  cloud layer; the live uniforms say cover 0.52, opacity 0.86, palette
+  separated 0.062 -> 0.42, and every smoothstep in sky.js has ascending
+  edges. `tools/poses/sky.js` points the camera up 34 deg and the deck is
+  plainly there.
+  It is held out of the low sky on purpose. `cp = V / (0.85*up + 0.22)` makes
+  cp.x and cp.z run away as a sight line flattens while cp.y barely moves —
+  8:1 anisotropy by up = 0.25 — so the deck drew as vertical CURTAINS in any
+  near-horizontal framing. `cl *= smoothstep(0.03, 0.40, up)` is the fix for
+  that, and the near-horizon sky is carried by the stratified dust bands
+  instead. Lowering that edge reintroduces the curtains. If the low sky needs
+  more structure, the bands are the thing to work on, not the cloud deck.
+- 2026-09-03 [render] THE AERIAL IN-SCATTER HUE IS NOT WHY THE DISTANT BUTTES
+  READ AS CUT-OUTS. Recorded as a MEASURED DEAD END so it is not tried again.
+  The hypothesis was reasonable: `_aerialColor` is (0.16, 0.17, 0.19), cool
+  and dark, while the sky's horizon is (0.285, 0.262, 0.23), warm — and a
+  landform at 1.5 km is ~95% veiled, so the in-scatter IS its colour.
+  Converging distant terrain to a cool grey against a warm sky should make it
+  diverge from its own background. So the term was split into horizon and
+  zenith colours blended by the view ray's elevation, keeping the
+  cool-with-height depth cue while matching the warm sky at the horizon.
+  MEASURED RESULT: about one code value. On the gameplay frame the left butte
+  went rgb(143,139,136) -> rgb(143,138,135); the near ridge and the deck did
+  not move at all. Reverted.
+  The reason the hypothesis failed is in the numbers that motivated it: the
+  sky01 sample that showed a neutral butte against a warm sky was taken at
+  roughly 45 deg elevation, in a pose pitched up 34 deg — not where the
+  buttes actually sit. In the gameplay frame the buttes are already within 4
+  luma and 3 chroma of the sky beside them (butte 143,139,136 vs sky
+  147,142,136). They are not diverging in hue OR value.
+  SO THE "FLAT PALE CUT-OUT" READ IS ABOUT INTERNAL DETAIL AND SILHOUETTE,
+  not aerial colour. At that veil there are only a few code values to work
+  with, so what is left has to be spent on shape: crest-to-toe ramp, a turned
+  anisotropic plan, and overlapping silhouettes at different ranges. Level.js
+  `_distantButtes` already argues exactly this; believe it.
+  METHOD: sample the pixels before believing a hue story, and sample them in
+  the frame the complaint is actually about.
