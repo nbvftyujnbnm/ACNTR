@@ -260,9 +260,35 @@ function reGrade(c, g, vig, dv) {
 
 /* --- statistics ----------------------------------------------------------- */
 
-function hist256(data, n, ch) {
+/**
+ * Byte offsets of every pixel in a rect, or of the whole frame when rect is
+ * null. Statistics are taken over one of these lists rather than over the raw
+ * buffer so a REGION can be measured while the grade is still inverted from the
+ * pixel's true screen position — the vignette and the damage rim are functions
+ * of that position, so cropping the image first would measure them wrong.
+ *
+ * @param {{width:number,height:number}} img
+ * @param {?number[]} rect [x, y, w, h] in pixels, top-left origin
+ * @returns {Int32Array} byte offsets into the RGBA buffer
+ */
+function pixelIndex(img, rect) {
+  const { width: W, height: H } = img;
+  if (!rect) {
+    const idx = new Int32Array(W * H);
+    for (let i = 0; i < idx.length; i++) idx[i] = i * 4;
+    return idx;
+  }
+  const x0 = Math.max(0, rect[0] | 0), y0 = Math.max(0, rect[1] | 0);
+  const x1 = Math.min(W, x0 + (rect[2] | 0)), y1 = Math.min(H, y0 + (rect[3] | 0));
+  const idx = new Int32Array(Math.max(0, (x1 - x0) * (y1 - y0)));
+  let k = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) idx[k++] = (y * W + x) * 4;
+  return idx;
+}
+
+function hist256(data, idx, ch) {
   const h = new Float64Array(256);
-  for (let p = ch, i = 0; i < n; i++, p += 4) h[data[p]]++;
+  for (let i = 0; i < idx.length; i++) h[data[idx[i] + ch]]++;
   return h;
 }
 
@@ -274,23 +300,26 @@ function hq(h, n, f) {
   return 255;
 }
 
-function describe(data, n) {
-  const H = [hist256(data, n, 0), hist256(data, n, 1), hist256(data, n, 2)];
-  const lum = new Float64Array(256);
+function describe(data, idx) {
+  const n = idx.length;
+  const H = [hist256(data, idx, 0), hist256(data, idx, 1), hist256(data, idx, 2)];
   let zeroAll = 0, sat255 = 0;
   // darkest-1% colour: collect by luma rank using a luma histogram
   const lumH = new Float64Array(256);
-  for (let p = 0, i = 0; i < n; i++, p += 4) {
+  let mR = 0, mG = 0, mB = 0;
+  for (let i = 0; i < n; i++) {
+    const p = idx[i];
     const l = Math.round(LUMA(data[p], data[p + 1], data[p + 2]));
     lumH[l < 0 ? 0 : l > 255 ? 255 : l]++;
+    mR += data[p]; mG += data[p + 1]; mB += data[p + 2];
     if (data[p] === 0 && data[p + 1] === 0 && data[p + 2] === 0) zeroAll++;
     if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) sat255++;
   }
-  lum.set(lumH);
   // mean RGB of the darkest 1% by luma
   const cut = hq(lumH, n, 0.01);
   let dn = 0, dR = 0, dG = 0, dB = 0;
-  for (let p = 0, i = 0; i < n; i++, p += 4) {
+  for (let i = 0; i < n; i++) {
+    const p = idx[i];
     if (LUMA(data[p], data[p + 1], data[p + 2]) <= cut) {
       dn++; dR += data[p]; dG += data[p + 1]; dB += data[p + 2];
     }
@@ -314,6 +343,14 @@ function describe(data, n) {
     b8: (100 * lumH.slice(0, 8).reduce((a, b) => a + b, 0)) / n,
     b16: (100 * lumH.slice(0, 16).reduce((a, b) => a + b, 0)) / n,
     b24: (100 * lumH.slice(0, 24).reduce((a, b) => a + b, 0)) / n,
+    // The HIGH end, which is the half of the histogram this project kept
+    // measuring by its clip fraction alone. `at-255` says nothing about whether
+    // a frame HAS highlights: a scene whose brightest large surface is display
+    // 150 clips nowhere and still has no white point.
+    t160: (100 * lumH.slice(160, 256).reduce((a, b) => a + b, 0)) / n,
+    t192: (100 * lumH.slice(192, 256).reduce((a, b) => a + b, 0)) / n,
+    t224: (100 * lumH.slice(224, 256).reduce((a, b) => a + b, 0)) / n,
+    meanRGB: [mR / n, mG / n, mB / n],
   };
 }
 
@@ -330,6 +367,10 @@ function report(tag, s) {
     `   per-ch p1  R ${String(r.p01).padStart(3)} G ${String(g.p01).padStart(3)} B ${String(b.p01).padStart(3)}`);
   console.log(`  ${''.padEnd(11)} SHOULDER 230-254 ${(r.shoulder + g.shoulder + b.shoulder).toFixed(3)}%` +
     `  at-255 R ${r.full.toFixed(3)} G ${g.full.toFixed(3)} B ${b.full.toFixed(3)}  any-255 ${s.sat255.toFixed(3)}%`);
+  const m = s.meanRGB;
+  console.log(`  ${''.padEnd(11)} HIGH  >160 ${s.t160.toFixed(2)}%  >192 ${s.t192.toFixed(2)}%` +
+    `  >224 ${s.t224.toFixed(2)}%   mean RGB ${m.map((v) => v.toFixed(1).padStart(6)).join('')}` +
+    `  RANGE p1-p99 ${p[7] - p[1]}`);
 }
 
 function lowHist(s) {
@@ -508,6 +549,21 @@ const has = (name) => argv.includes(`--${name}`);
 
 const outDir = flag('out') ? resolve(ROOT, flag('out')) : null;
 const mapSpecs = argv.reduce((acc, a, i) => (a === '--map' ? [...acc, argv[i + 1]] : acc), []);
+// `--rect name:x,y,w,h` (repeatable) reports the same statistics over a screen
+// rectangle as well as over the whole frame. The whole-frame numbers on a
+// gameplay capture are contaminated by the HUD — a DOM overlay in the
+// screenshot, and the only thing in the shot that reaches code 255 — so the
+// frame's real white point cannot be read without one of these.
+const rectSpecs = argv.reduce((acc, a, i) => {
+  if (a !== '--rect') return acc;
+  const v = argv[i + 1] || '';
+  const [name, nums] = v.includes(':') ? v.split(':') : ['rect', v];
+  const r = nums.split(',').map(Number);
+  if (r.length !== 4 || r.some((x) => !Number.isFinite(x))) {
+    throw new Error(`--rect wants name:x,y,w,h, got '${v}'`);
+  }
+  return [...acc, { name, rect: r }];
+}, []);
 const vigParams = flag('vig') ? flag('vig').split(',').map(Number)
   : [SHIPPED.vignette, SHIPPED.vignetteSmooth];
 // `--dmg uDamage[,pulse]` states what the low-AP/hit rim was doing WHEN THE
@@ -577,18 +633,24 @@ for (const f of files) {
   const path = resolve(ROOT, f);
   let img;
   try { img = readPng(path); } catch (e) { console.log(`\n=== ${f} — SKIPPED (${e.message})`); continue; }
-  const n = img.width * img.height;
   console.log(`\n=== ${f}  ${img.width}x${img.height} ===`);
-  const base = describe(img.data, n);
-  report('shipped', base);
-  if (has('hist')) lowHist(base);
+  const zones = [{ name: 'frame', idx: pixelIndex(img, null) },
+    ...rectSpecs.map((r) => ({ name: r.name, idx: pixelIndex(img, r.rect) }))];
+  for (const z of zones) {
+    if (z.name !== 'frame') console.log(`  [${z.name}] n=${z.idx.length}`);
+    const base = describe(img.data, z.idx);
+    report(z.name === 'frame' ? 'shipped' : 'shipped/' + z.name, base);
+    if (has('hist') && z.name === 'frame') lowHist(base);
+  }
 
   for (const cand of cands) {
     const { out, clipLo, clipHi } = transform(img, cand, vigParams, dmgParams);
-    const s = describe(out, n);
     console.log(`  -- candidate: ${describeCand(cand)}`);
-    report('candidate', s);
-    if (has('hist')) lowHist(s);
+    for (const z of zones) {
+      const s = describe(out, z.idx);
+      report(z.name === 'frame' ? 'candidate' : 'cand/' + z.name, s);
+      if (has('hist') && z.name === 'frame') lowHist(s);
+    }
     if (cand._grade) {
       console.log(`  ${''.padEnd(11)} CLIPPED IN THE CAPTURE (magnitude under-estimated here):` +
         ` lo ${clipLo.toFixed(2)}%  hi ${clipHi.toFixed(2)}%`);

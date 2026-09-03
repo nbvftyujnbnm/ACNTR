@@ -273,6 +273,42 @@ export class Debug {
     return this;
   }
 
+  /**
+   * Tap a key for exactly one frame — the EDGE, not the hold.
+   *
+   * `holdKeys` adds to `input.keys`, which is what `input.down()` reads. Every
+   * one-shot binding in this game is written against `input.hit()`, which
+   * reads `input.pressed` — a completely different set, cleared by
+   * `endFrame()` every frame. So before this existed NO pose or probe could
+   * exercise a `hit()` binding at all, and a test that pressed a key with
+   * `holdKeys` reported "nothing happened" for a binding that was perfectly
+   * correct. That is not a small gap: mute, the garage toggle and every other
+   * discrete action in the game are `hit()` bindings, which is a large part of
+   * why they have gone unverified.
+   *
+   * One frame only, because `pressed` models a keydown edge: holding it across
+   * several frames would fire a one-shot action repeatedly and test something
+   * the real input layer can never produce.
+   */
+  tapKeys(codes, stepDt = 1 / 60) {
+    const input = window.__ACNTR__?.input || this.game.input;
+    if (!input?.pressed) return this;
+    const list = Array.isArray(codes) ? codes : [codes];
+    for (const c of list) { input.pressed.add(c); input.keys.add(c); }
+    const e = this.game.engine;
+    const prevScale = e.timeScale;
+    e.timeScale = 1;
+    for (const fn of e._updaters) fn(stepDt, e.clock.elapsed, stepDt);
+    for (const fn of e._lateUpdaters) fn(stepDt, e.clock.elapsed, stepDt);
+    e.clock.elapsed += stepDt;
+    e.timeScale = prevScale;
+    // `endFrame()` has almost certainly cleared `pressed` already during the
+    // frame above; these deletes are belt and braces for a state whose update
+    // path returns before reaching it.
+    for (const c of list) { input.keys.delete(c); input.pressed.delete(c); }
+    return this;
+  }
+
   releaseKeys(codes) {
     const input = window.__ACNTR__?.input || this.game.input;
     if (!input?.keys) return this;

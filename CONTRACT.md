@@ -1801,3 +1801,35 @@ two of the silhouette metrics were wrong on their first outing.
   `_distantButtes` already argues exactly this; believe it.
   METHOD: sample the pixels before believing a hue story, and sample them in
   the frame the complaint is actually about.
+- 2026-09-03 [physics] THE TWO PHYSICS BUGS FLAGGED FROM OTHER MODULES ARE
+  ALREADY FIXED — do not re-fix them. `Physics.raycast` rejects a non-finite
+  or non-positive `maxDist`, a null/NaN origin and a NaN direction at the top
+  and returns null (commit aa24bf3), and `Physics.floorHeight(x, z, fromY,
+  opts)` exists and casts DOWN from a height the caller supplies, with
+  `groundHeight`'s doc comment now saying loudly that it returns the TOP of the
+  column and pointing at the new method. Both were still listed as open in a
+  briefing written after they landed. WORTH GENERALISING: a defect recorded in
+  a shared file outlives its own fix unless the fix is recorded next to it, and
+  the cost of the stale entry is a whole agent-session spent re-deriving
+  something that is already true.
+- 2026-09-03 [world] THE DISTANT BUTTES ARE 19 LUMA **DARKER** THAN THE SKY,
+  NOT BRIGHTER, AND THEY STILL READ AS PALE CUT-OUTS. Measured on
+  `shots/L42/cliff.png` over a 120x90 patch of the big butte and the sky either
+  side of it:
+      butte  rgb(139,136,137)  luma 136.4  sd 2.05  range 133..140
+      sky    rgb(168,154,139)  luma 155.8  sd 4.14
+  Two things follow and they are both worth having.
+  (1) THE EYE IS WRONG ABOUT THE VALUE. In the frame the buttes look like pale
+  paper laid over a darker sky; they are in fact the darker of the two. What
+  makes them read pale is CHROMA: butte R-B is 2, sky R-B is 29, so a neutral
+  cool patch sits inside a warm field and simultaneous contrast does the rest.
+  Anyone about to "bring the buttes down" is about to make the frame worse.
+  (2) THE FLATNESS IS NOT A FIGURE OF SPEECH. sd 2.05 with a seven-code-value
+  total range across the whole visible face, against sd 7.29 on the cliff ring
+  face at half the distance and sd 16.3 on its crest. The vertex ramp
+  `_distantButtes` builds (0.44..0.9 of shade, plus beds, scree and a
+  crest-to-toe term) is real in the buffer and arrives as ~2 code values after
+  a 92-95% veil. NOTHING PAINTED ON THAT SURFACE CAN SURVIVE. The silhouette is
+  the only channel left with full contrast, because an edge between the butte
+  and the sky carries the whole 19 luma however veiled the interior is.
+  So the work goes into the OUTLINE and into OVERLAP, not into interior value.

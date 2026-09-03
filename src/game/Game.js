@@ -315,8 +315,56 @@ export class Game {
     for (const p of this._plumes) p.handle.set(true, p.main ? level : level * 0.5);
   }
 
+  /**
+   * Global audio keys. M mutes, minus and equals move the master volume.
+   *
+   * `AudioDirector` has had `setVolume`, `setMuted` and `toggleMute` — and a
+   * `_saveSettings` that persists them — for as long as it has existed, and
+   * NOTHING CALLED ANY OF THEM. `setVolume` had no caller anywhere in src/,
+   * and `setMuted` had exactly one: `toggleMute`, which itself had none. Four
+   * thousand lines of audio with no way for a player to turn it down.
+   *
+   * The implementation was fine, which is what made it invisible: a probe
+   * confirms the context is running, every bus is connected, the gains are
+   * sane, and a mute round-trips correctly. Only the binding was missing, and
+   * a screenshot cannot show that a key does nothing.
+   *
+   * Handled at the TOP of the update, before any state branch, deliberately.
+   * The garage and non-playing branches both call `input.endFrame()` and
+   * return, which clears the pressed set, so a check placed in lateUpdate
+   * would never see the key in those states — and the garage is exactly where
+   * someone reaches for the mute.
+   */
+  _audioKeys() {
+    const a = this.audio;
+    const input = this.input;
+    if (!a || !input?.hit) return;
+
+    // `'mission:log'` as a literal, matching every other emitter — there is no
+    // EV constant for it, and the HUD subscribes to the string.
+    if (input.hit('KeyM')) {
+      const muted = a.toggleMute();
+      bus.emit('mission:log', { text: muted ? 'AUDIO MUTED' : 'AUDIO RESTORED' });
+    }
+
+    // Minus / Equals rather than the bracket keys: they carry the volume
+    // glyphs on the physical keyboard, and Equals is where a player reaches
+    // for "louder" without holding shift for the plus.
+    const step = (d) => {
+      const next = Math.round(Math.min(1.5, Math.max(0, a.getVolume('master') + d)) * 100) / 100;
+      a.setVolume('master', next);
+      // Un-mute on a deliberate volume change: pressing "louder" and hearing
+      // nothing because mute is still set is the worst version of this.
+      if (a.isMuted() && d > 0) a.setMuted(false);
+      bus.emit('mission:log', { text: `MASTER VOLUME :: ${Math.round(next * 100)}%` });
+    };
+    if (input.hit('Minus')) step(-0.1);
+    if (input.hit('Equal')) step(0.1);
+  }
+
   _registerLoop() {
     this.engine.addUpdate((dt, t) => {
+      this._audioKeys();
       if (this.state === 'garage') {
         this.garage.update(dt, t);
         this.sky.update(dt, t);
