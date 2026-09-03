@@ -76,7 +76,17 @@ buffer loop loopStart loopEnd playbackRate onended numberOfChannels duration
 pan positionX positionY positionZ orientationX orientationY orientationZ
 coneInnerAngle coneOuterAngle coneOuterGain refDistance rolloffFactor maxDistance
 distanceModel panningModel
+listener setOrientation setPosition forwardX forwardY forwardZ upX upY upZ
+userActivation hasBeenActive closest matches contains
+texture depthTexture elements random shadowMap isLineSegments props
 `.trim().split(/\s+/).filter(Boolean));
+
+// KNOWN LIMITATION, and the main source of what is left: a computed key is
+// invisible to a text scan. `arms[`${p}ShoulderMount`] = mount` assigns
+// lShoulderMount and rShoulderMount, and nothing here can see either name, so
+// MechRig's perfectly correct `b.lShoulderMount` reads look unassigned. Any
+// finding on a name that looks like a prefix plus a suffix is probably this.
+// A finding is a question; go and read the assignment site before believing it.
 
 const files = [];
 (function walk(dir) {
@@ -141,20 +151,47 @@ for (const [, s] of stripped) {
   for (const m of s.matchAll(/\.([A-Za-z_$][\w$]*)\s*(?:[-+*/|&^]|\?\?|\|\||&&)?=(?!=)/g)) assigned.add(m[1]);
   // `foo:` in an object literal or class field
   for (const m of s.matchAll(/(?:^|[{,(\s])([A-Za-z_$][\w$]*)\s*:/gm)) assigned.add(m[1]);
-  // shorthand `{ foo, bar }` — both a literal and a destructure
-  for (const m of s.matchAll(/[{,]\s*([A-Za-z_$][\w$]*)\s*[,}]/g)) assigned.add(m[1]);
+  // Shorthand `{ foo, bar }` — both a literal and a destructure.
+  // LOOKBEHIND AND LOOKAHEAD, not consumed delimiters. `[{,]\s*(\w+)\s*[,}]`
+  // eats the comma that separates two entries, so in `{ root, hips, pelvis }`
+  // the match for `root` consumes the comma `hips` needs and every alternate
+  // name is missed. That reported `hips` — which is right there in the bones
+  // literal — as never assigned.
+  for (const m of s.matchAll(/(?<=[{,])\s*([A-Za-z_$][\w$]*)\s*(?=[,}])/g)) assigned.add(m[1]);
   // class methods, getters, `foo(` declarations, and `foo =` class fields
   for (const m of s.matchAll(/(?:^|\s)(?:get|set|async)?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) assigned.add(m[1]);
   for (const m of s.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*=(?!=)/gm)) assigned.add(m[1]);
   // `Object.assign(x, { ... })` and spreads are covered by the literal rule.
 }
 
-// Pass 2: every read.
+// Pass 2: reads that are DATA-FIELD reads.
+//
+// Two filters carry all the signal here, and without them this reports 910
+// library methods for every one real defect — which is worse than useless,
+// because a checker nobody can read is a checker nobody runs.
+//
+//  - Skip anything called as a method (`.copy(`, `.round(`, `.random(`). A
+//    missing method throws "is not a function", which is loud and immediate;
+//    the bug worth hunting is a missing DATA field, which reads as undefined
+//    and only explodes one dereference later, somewhere else.
+//  - Skip capitalised names (`.Vector3`, `.DoubleSide`) — namespace and enum
+//    access into a library this scan cannot see.
+//
+// Note also that the property is matched WITHOUT a negative lookahead for
+// `=`. The obvious `\.(\w+)(?!\s*=)` silently backtracks: given `.value =`
+// it tries `value`, the lookahead rejects it, and it settles on `valu` with
+// the lookahead satisfied by the `e`. That produced 148 phantom reads of a
+// property called `valu`. Match the name first, then inspect what follows.
 for (const [f, s] of stripped) {
   const lines = s.split('\n');
   for (let ln = 0; ln < lines.length; ln++) {
-    for (const m of lines[ln].matchAll(/\.([A-Za-z_$][\w$]*)(?!\s*(?:[-+*/|&^]|\?\?|\|\||&&)?=(?!=))/g)) {
+    const line = lines[ln];
+    for (const m of line.matchAll(/\.([A-Za-z_$][\w$]*)/g)) {
       const name = m[1];
+      const after = line.slice(m.index + m[0].length);
+      if (/^\s*\(/.test(after)) continue;                       // method call
+      if (/^\s*(?:[-+*/%|&^]|\?\?|\|\||&&)?=(?!=)/.test(after)) continue; // assignment
+      if (/^[A-Z]/.test(name)) continue;                        // namespace / enum
       if (KNOWN.has(name)) continue;
       if (!reads.has(name)) reads.set(name, []);
       reads.get(name).push({ file: relative(ROOT, f), line: ln + 1 });
