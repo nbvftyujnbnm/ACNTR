@@ -55,7 +55,12 @@
   debug.step(0.25);
   const g = game.garage;
   const cursor = () => {
-    for (const k of ['sel', 'selected', '_sel', 'index', '_index', 'cursor', '_cursor', 'slotIndex']) {
+    // `selIndex` is the real field. An earlier version of this list omitted
+    // it and reported the arrow keys as unjudgeable for a cursor that was
+    // moving perfectly well — the same failure mode as the garage probe that
+    // guessed `.part`/`.item` selectors and reported "0 rows" for a screen
+    // rendering all ten. Guessing a field name is a hypothesis, not a reading.
+    for (const k of ['selIndex', 'sel', 'selected', '_sel', 'index', '_index', 'cursor', '_cursor', 'slotIndex']) {
       if (typeof g?.[k] === 'number') return { field: k, v: g[k] };
     }
     return { field: null, v: null };
@@ -78,9 +83,45 @@
   // point is to catch a binding that is inert, not to pin the implementation.
   const snapshot = () => {
     const panel = document.getElementById('ui-root')?.querySelector('[class*="garage"]');
-    return panel ? panel.innerHTML.length + '|' + (panel.textContent || '').length : 'no-panel';
+    // CONTENT, not length. KeyF cycles the sort label through 'SORT: TIER',
+    // 'SORT: NAME', 'SORT: RARITY' — and the first two are the same LENGTH, so
+    // a length-based snapshot reported the key as inert when it was working.
+    // Hash the actual text instead.
+    if (!panel) return 'no-panel';
+    const t = (panel.textContent || '') + '\u0000' + panel.innerHTML.length;
+    let h = 5381;
+    for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+    return 'h' + h.toString(36);
   };
-  for (const [key, what] of [['Tab', 'switches the filter'], ['KeyF', 'acts on the filter row'], ['Enter', 'equips the selection']]) {
+  // Enter FIRST, and asserted on the LOADOUT rather than on the panel.
+  // Ordering matters: run it after Tab and KeyF and the filter has moved to a
+  // category holding none of the starter parts, so `_rows` is empty and the
+  // test measures its own setup rather than the binding. Asserting on the
+  // panel had the same problem from the other end — the selection can land on
+  // a part that is already equipped — in which case a correct equip changes nothing on screen and
+  // the test is measuring its own setup. Read the slot instead, and skip
+  // honestly when there is nothing to prove.
+  {
+    const rows = g?._rows || [];
+    const part = rows[g?.selIndex]?.part;
+    const slot = part?.slot;
+    const before = slot ? (game.loadout?.slots?.[slot]?.name ?? null) : null;
+    if (!part) {
+      note('Enter', 'garage', 'equips the selection', null,
+           `no selectable row (rows ${rows.length}, selIndex ${g?.selIndex})`);
+    } else if (before === part.name) {
+      note('Enter', 'garage', 'equips the selection', null,
+           `selection "${part.name}" is already equipped in ${slot} — nothing to prove`);
+    } else {
+      debug.tapKeys(['Enter']);
+      debug.step(0.2);
+      const after = slot ? (game.loadout?.slots?.[slot]?.name ?? null) : null;
+      note('Enter', 'garage', 'equips the selection', after === part.name,
+           `${slot}: ${before} -> ${after}`);
+    }
+  }
+
+  for (const [key, what] of [['Tab', 'switches the filter'], ['KeyF', 'cycles the sort']]) {
     const before = snapshot();
     debug.tapKeys([key]);
     debug.step(0.2);

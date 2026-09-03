@@ -1921,3 +1921,30 @@ two of the silhouette metrics were wrong on their first outing.
   capture this project has graded was shot through it.
   `EV.QUICK_BOOST` also bumps the same `hit` accumulator (+0.16), so BOOSTING
   paints a damage-coloured rim as well.
+- 2026-09-03 [tools/ui] EVERY KEY BINDING IN THE GAME IS VERIFIED WORKING —
+  13 of 13, `tools/probes/bindings.js`, re-runnable. KeyG opens the garage
+  from play (the one that matters most: this is a LOOTER shooter, and if that
+  key is dead every part the player collects is unreachable), Escape closes
+  it, ArrowUp/Down move the selection, Enter equips it, Tab filters, KeyF
+  sorts, and M / Minus / Equal drive audio in BOTH the playing and garage
+  states.
+  Note KeyG is bound in `HUD.update`, not in Game — its own comment says
+  "Game may also map G", which Game does not. Nothing is wrong with it, but
+  that is not where anyone would look.
+  THE SWEEP PRODUCED THREE FALSE ALARMS BEFORE IT PRODUCED A RESULT, all the
+  same mistake in different clothes — asserting on a proxy instead of on the
+  thing:
+    * `KeyF` reported inert because the snapshot compared TEXT LENGTH, and
+      the sort label cycles "SORT: TIER" -> "SORT: NAME", which is the same
+      length. Hash the content, never its length.
+    * The arrow keys reported unjudgeable because the cursor field guess list
+      omitted `selIndex`, the actual field.
+    * `Enter` reported inert because it ran AFTER Tab had moved the filter to
+      a category holding none of the starter parts, so `_rows` was empty and
+      the test was measuring its own setup. It now runs first and asserts on
+      `loadout.slots[slot]`, not on the rendered panel.
+  Same family as the garage probe that guessed `.part` / `.item` selectors and
+  reported "0 clickable rows" for a screen drawing all ten slots. THE RULE: a
+  guessed selector, field name, or length proxy is a HYPOTHESIS. When a probe
+  says a feature is dead, verify the probe before believing it — three times
+  now the probe was wrong and the feature was fine.
