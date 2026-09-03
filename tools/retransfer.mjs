@@ -151,11 +151,37 @@ function unGrade(c, g, vig) {
   for (let i = 0; i < 3; i++) c[i] = (c[i] - g.lift[i]) / (1 - g.lift[i]);
 }
 
-/** Re-apply the same chain with (possibly different) parameters. */
-function reGrade(c, g, vig) {
+const applyLift = (c, g) => {
   for (let i = 0; i < 3; i++) c[i] = g.lift[i] + (1 - g.lift[i]) * clamp01(c[i]);
+};
+const applySat = (c, g) => {
   const l = LUMA(c[0], c[1], c[2]);
   for (let i = 0; i < 3; i++) c[i] = clamp01(l + (c[i] - l) * g.saturation);
+};
+
+/**
+ * Re-apply the chain with (possibly different) parameters, and optionally in a
+ * different ORDER.
+ *
+ *   'shipped'  lift -> saturation -> split -> vignette   (what FINAL_FRAG does)
+ *   'liftlast' saturation -> split -> vignette -> lift
+ *
+ * The second exists because the black floor's own comment claims it is applied
+ * "AFTER the contrast so nothing downstream can crush it" — and split toning
+ * and the vignette are both downstream and both crush it. Under 'shipped' the
+ * real per-channel floor is `lift + splitShadow` scaled by the vignette, which
+ * is NEGATIVE in red; under 'liftlast' it is exactly `lift`.
+ */
+function reGrade(c, g, vig) {
+  if (g.order === 'liftlast') {
+    applySat(c, g);
+    applySplit(c, g);
+    if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
+    applyLift(c, g);
+    return;
+  }
+  applyLift(c, g);
+  applySat(c, g);
   applySplit(c, g);
   if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
 }
