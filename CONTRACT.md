@@ -1948,3 +1948,13 @@ two of the silhouette metrics were wrong on their first outing.
   guessed selector, field name, or length proxy is a HYPOTHESIS. When a probe
   says a feature is dead, verify the probe before believing it — three times
   now the probe was wrong and the feature was fine.
+- 2026-09-03 [ai] THE MISSION LOOP WORKS END TO END — measured, so nobody
+  re-derives it. `tools/probes/waves.js` starts the encounter, kills each wave
+  through the damage system (the same path a player's shots take, so the death
+  bookkeeping the director depends on actually runs) and watches the phase
+  machine. Result: idle -> spawning -> fighting -> breather across all five
+  waves, reaching `complete` in 44.8 simulated seconds and 17 kills, with no
+  step errors. The HUD's "WAVE 01" really can become 05.
+  The probe is bounded in SIMULATED time and reports a stuck director as
+  stuck rather than hanging, so it is safe to re-run as a regression check
+  after any change to Encounters, EnemyManager or DamageSystem.
