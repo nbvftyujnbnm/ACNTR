@@ -1612,3 +1612,23 @@ two of the silhouette metrics were wrong on their first outing.
   image when an image and a metric disagree — the corollary is that a
   measurement run is the wrong first move when LOOKING at the right region
   answers the question outright.
+- 2026-09-03 [tools] A GREEN `vite build` DOES NOT MEAN THE GAME BOOTS, and
+  the standing gate has been treated as if it did. Measured: a tree whose
+  `Level.build()` threw `ReferenceError: bedTint is not defined` on the first
+  frame built cleanly and reported success. Vite resolves imports and parses
+  syntax; it never executes a function body, so every runtime error inside one
+  sails straight through.
+  This matters more here than in a normal repo because several agents share
+  one branch. A commit that builds but does not boot blocks everyone at once,
+  and it surfaces at the END of whoever's next 100-second capture, attributed
+  to whatever they happened to be editing.
+  `node tools/smoke.mjs` boots the page and asserts `__ACNTR_READY__` in about
+  20-30 s, printing `__ACNTR_ERROR__` and the real stack on failure; it also
+  fails a scene that reaches ready with almost nothing in it, which has
+  happened here too. Exit 0 booted, 1 failed, 3 server would not start, so it
+  chains: `node tools/lint-glsl.mjs && node tools/smoke.mjs && git commit`.
+  Use that as the gate from now on, not `vite build` alone.
+  ITS OWN FAILURE PATH IS TESTED, by breaking a file on purpose and confirming
+  a non-zero exit — worth doing for any checker, since a checker that silently
+  passes everything is indistinguishable from a working one right up until it
+  matters.
