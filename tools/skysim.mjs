@@ -214,12 +214,16 @@ export function skyRadiance(V, u, t) {
   bp[0] += t * 0.010;
   const bn = fbm3_3(bp);
   const strat = smoothstep(u.bandLo, u.bandHi, bn);
-  const low = strat * Math.exp(-Math.max(up, 0) * u.bandFalloff);
-  const high = smoothstep(u.bandHiLo, u.bandHiHi, hn) * u.bandHiAmp
+  // Two altitude profiles on ONE stratum field. The 26:1 squash is the scale
+  // that reads as layering at a hero framing's elevations (~50 px bands); the
+  // 16:1 field the sun veil uses is 120-200 px up there, which is a gradient,
+  // not a layer. So the upper deck is a REACH change, not a second field.
+  const low = Math.exp(-Math.max(up, 0) * u.bandFalloff);
+  const high = u.bandHiAmp
     * Math.exp(-Math.max(up, 0) * u.bandHiFall)
     * smoothstep(u.bandHiIn0, u.bandHiIn1, up)
     * (1 - smoothstep(u.bandHiOut0, u.bandHiOut1, up));
-  const bandMask = (low + high) * smoothstep(-0.14, 0.01, up);
+  const bandMask = strat * (low + high) * smoothstep(-0.14, 0.01, up);
   const sunw = Math.pow(Math.max(mu, 0), 3.0) * sunUp;
   const bandCol = [
     mix(u.horizon[0] * 1.22, u.sunTint[0] * 1.7, sunw),
