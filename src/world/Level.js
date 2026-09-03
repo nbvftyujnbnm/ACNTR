@@ -798,6 +798,7 @@ export class Level {
     const H_SPUR = harmonics(rng, [2, 3, 5, 8], 1.0);         // buttresses in plan
     const H_GULLY = harmonics(rng, [7, 11, 17, 24], 0.8);     // erosion channels
     const H_CHUTE = harmonics(rng, [8, 13, 21, 29], 0.75);    // drainage down the face
+    const H_CTOP = harmonics(rng, [7, 11, 19], 0.8);          // how high each chute heads
     const H_CLIFF = harmonics(rng, [2, 3, 6], 1.0);           // sheer .. eroded
     const H_TONE = harmonics(rng, [2, 4, 7], 1.0);            // slow value drift
     const H_SLIDE = harmonics(rng, [2, 3, 5], 1.0);           // breaks the UV repeat
@@ -884,7 +885,12 @@ export class Level {
        * still well clear of the 5-columns-per-feature floor the strata Nyquist
        * amendment sets.
        */
-      const chuteA = clamp(Math.max(0, -angField(t, H_CHUTE) - 0.16) * 2.1, 0, 1);
+      const chuteA = clamp(Math.max(0, -angField(t, H_CHUTE) - 0.14) * 2.4, 0, 1);
+      // Where each chute HEADS. Without this every chute ran from the same
+      // height and the set of them was as periodic as the beds had been; with
+      // it some bite in just under the rim and others only reach the middle of
+      // the face, so the bedding is truncated at a different height each time.
+      const chuteTop = 0.56 + 0.42 * (0.5 + 0.5 * angField(t, H_CTOP));
       // Scree stands at its angle of repose (~34 deg), so the apron's RUN follows
       // from the height it has to cover. A fixed radial run gave an 11-degree
       // ramp under a short eroded section and a 48-degree one under a tall
@@ -915,7 +921,17 @@ export class Level {
           // A chute is a channel, so it is deepest where the water has been
           // running longest — low and mid face — and dies out near the crest,
           // which has no catchment above it.
-          chute = chuteA * (1 - smoothstep(0.66, 0.99, f)) * smoothstep(0.0, 0.14, f);
+          // The die-out height is `chuteTop` rather than a fixed 0.99. Every
+          // chute heading at the same height was itself a periodic feature —
+          // the exact defect the chutes exist to break — so the set of them
+          // read as one more evenly-ruled band. The fade keeps its 0.33 width,
+          // so at chuteTop = 0.99 this is the original 0.66..0.99 curve.
+          // Both edges stay ordered (chuteTop spans 0.56..0.98, so the low
+          // edge spans 0.23..0.65), which matters: a reversed-edge smoothstep
+          // is UNDEFINED in GLSL and returns 0 everywhere on the common
+          // driver, and this same expression is mirrored in the terrain
+          // shader.
+          chute = chuteA * (1 - smoothstep(chuteTop - 0.33, chuteTop, f)) * smoothstep(0.0, 0.14, f);
           // Beds are buried at the toe by their own scree and roll over at the
           // crest, so the relief fades in and out rather than ending on a step.
           // A chute WASHES THE BEDDING OUT: inside one there is no bench and no

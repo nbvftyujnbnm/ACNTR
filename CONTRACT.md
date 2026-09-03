@@ -1662,3 +1662,87 @@ two of the silhouette metrics were wrong on their first outing.
   chance-free entry point — `LootSystem.dropAt` skips the roll entirely, so it
   isolates "materialising a pickup is broken" from "you were unlucky". Test
   both, and report them as separate lines.
+- 2026-09-03 [combat] **`ProjectileManager._acquireTrail` WAS CALLED AND NEVER
+  DEFINED**, so no missile in this project has ever flown with a trail. The
+  call sits at the end of `spawn()`'s `if (def.trail)` block with no try/catch,
+  which means the round threw `this._acquireTrail is not a function` BEFORE
+  `this.live[this.liveCount++] = p` — its pool slot was already taken and
+  never returned, and the exception unwound out through the weapon's fire
+  path. That is all four missile types in `Weapons.js` plus both shells, and
+  `acMissile` / `bossSwarm` / every arcing shell in `ai/Archetypes.js`.
+  WHY IT SURVIVED SO LONG: review poses fire with `debug.fireAll()`, and the
+  player's shoulder racks are `requiresLock`, so the player half never
+  reached the line; the enemy half did, but a thrown spawn just means one
+  fewer projectile and there is nothing in a frame, a draw-call count or a
+  console log that says a missile is missing. Diagnosed in one probe by
+  calling `spawn` twice with defs identical apart from the `trail` block and
+  printing the exception (`tools/probes/tracer.js`).
+  Generalises the "validate at the boundary" rule this file already carries:
+  A METHOD THAT DOES NOT EXIST IS NOT A SYNTAX ERROR IN JS. It is a runtime
+  throw on a path that may be rare, and if that path is inside a system whose
+  failure mode is "slightly less happens", nobody notices. Worth a sweep of
+  the same shape as the NEVER-CALLED-SETTER one, in the other direction:
+      grep -ohP 'this\._[a-zA-Z]\w*(?=\()' src/**/*.js | sort -u
+  and check each has a definition in its own class.
+- 2026-09-03 [combat/ai] **A HEX COLOUR CANNOT BLOOM.** `Color.setHex` decodes
+  sRGB into the LINEAR working space under ColorManagement, so its brightest
+  channel is exactly 1.0 by construction — and `Pipeline.params.bloom.threshold`
+  is 1.90 SCENE-LINEAR. Anything whose colour arrives as a hex is therefore
+  below the prefilter and physically cannot spill light, whatever it looks
+  like in the source. Measured on the live scene: an enemy tracer's instance
+  colour read (1.00, 0.45, 0.10) and moved the frame by 24 code values, while
+  a player motor flare (an HDR array in `Weapons.js`, x1.6) moved it by 198.
+  EVERY weapon in `ai/Archetypes.js` and EVERY telegraph colour is a hex, so
+  the entire enemy half of a firefight was un-bloomable LDR paint — which is
+  most of what "no bloom or halo on any emissive" was in the review frames.
+  `ProjectileManager.spawn` now treats "peak channel <= 1" as *this is a hue,
+  not a radiance* and lifts it to `HDR_HUE_GAIN` (3.2) before the per-material
+  gain; `Telegraphs` applies its gain in the shader. If you author a colour
+  for anything additive, write it as an HDR array — a hex is a hue.
+- 2026-09-03 [combat/ai] **THE RED ARCS IN THE COMBAT FRAME ARE NOT TRACERS.**
+  Two review passes attributed them to `ProjectileManager`; they are
+  `Telegraphs` (aim lasers and ballistic-arc warnings), which lives in
+  `src/ai/EnemyManager.js`. Established by A/B rather than by argument: hiding
+  each projectile InstancedMesh in turn accounted for every other bright
+  element in the frame and left the arcs untouched.
+  While you are in there: the same A/B named the OTHER two things in that
+  frame. The "flat salmon lozenge" is `_im.flare` (the motor glow) and the
+  "solid near-black tapered streak" is `_im.missile` — a lit PBR body which,
+  because every enemy weapon def omits `width` and `length` and the fallbacks
+  were a tracer's (0.1 x 3), drew as a 3 m 30:1 dark splinter reading 6,8,24
+  against a 239,195,161 sky. Body dimensions now derive from the round's own
+  `radius`.
+  THE LESSON IS THE ONE ABOUT PRINTING COORDINATES, one level up: when a
+  frame contains an element you cannot name, do not reason about which system
+  "probably" draws it — hide the candidates one at a time and read the
+  framebuffer. `tools/probes/tracer.js` does this and reports changed-pixel
+  counts, whether the mesh brightens or DARKENS the frame, and the before/after
+  colour at the biggest delta. "Darkens" is by itself a complete diagnosis for
+  anything claiming to be additive: `dst + src*a` cannot go down.
+- 2026-09-03 [combat] SOLID GEOMETRY WEARING A `MeshBasicMaterial` IS THE
+  DEFAULT-THREE.JS LOOK, and it was on every projectile, every beam and every
+  telegraph. One flat colour across a hard silhouette has no cross-section, no
+  falloff and no core, so it reads as vector art no matter how bright it is.
+  The fix that works for tubes and blobs alike is `|N·V|`: it is 1 where the
+  surface faces the lens and 0 at the silhouette, so `pow(|N·V|, k)` dissolves
+  the edge and concentrates the middle. TWO exponents on that one term give
+  the tight-hot-core / wide-soft-skirt shape REVIEW.md demands, from a single
+  draw. `projectileVert`/`projectileFrag` (instanced, with a head-bright axial
+  profile and a vertex-stage tail pinch so a tracer is a wedge, not a bar) and
+  `telegraphVert`/`telegraphFrag` (non-instanced, +Y axis, marching dashes) in
+  `vfxShaders.js`. Note the axis conventions differ and are load-bearing:
+  projectile tubes are built about +Z because `_draw` aims them with
+  `setFromUnitVectors(UNIT_Z, dir)`; telegraph lines are about +Y because
+  `Telegraphs.line` uses `setFromUnitVectors(UP, dir)`.
+  Also: a 6-sided cylinder quantises a per-fragment `|N·V|` into visible
+  facets. Everything on this path is now 12-sided, and the flare/plasma
+  icosahedron went to detail 2 — its normals were already analytic, but a glow
+  that runs blown-out shows its POLYGON where the clipped core ends.
+- 2026-09-03 [combat] `ProjectileManager._fxTrail` DELETED — it had no caller
+  anywhere in `src` or `tools`, and called two VFX methods with the wrong
+  signatures: `v.trail(pos, dir, color, width)` against `trail(target, opts)`,
+  so the direction vector arrived as the options object and every weapon's
+  authored trail colour and width were silently replaced by the default
+  preset; and `v.smoke(pos, number)` against `smoke(pos, opts)`. Dead code
+  that looks like the working path is worse than no code: it is where the next
+  person goes to find out why trail colours do not apply.
