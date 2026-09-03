@@ -21,6 +21,14 @@ import { Garage } from '../ui/Garage.js';
 import { AudioDirector } from '../audio/AudioDirector.js';
 import { installDebug } from './Debug.js';
 
+// Where the player's build and salvage live between sessions. The version is
+// checked on load so a save written against a different part schema is
+// ignored outright rather than half-applied — `Loadout.fromJSON` drops parts
+// it does not recognise, but a wholesale format change is better restarted
+// than salvaged.
+const SAVE_KEY = 'acntr.save.v1';
+const SAVE_VERSION = 1;
+
 /**
  * Game wires every subsystem together and owns update order.
  *
@@ -63,6 +71,9 @@ export class Game {
     await this.mechFactory.init();
 
     this.loadout = new Loadout();
+    // Restore the player's build and salvage BEFORE the mech is fabricated,
+    // so the parts they are actually wearing are the ones that get built.
+    this._restoreLoadout();
     this.player = this.mechFactory.buildPlayer(this.loadout);
     this.scene.add(this.player.root);
 
@@ -119,6 +130,7 @@ export class Game {
 
     this._wire();
     this._registerLoop();
+    this._wireSave();
     this.debug = installDebug(this);
 
     this.state = 'playing';
@@ -313,6 +325,83 @@ export class Game {
     // orientation and pushed the plume through the mech's own body, where the
     // depth test ate it.
     for (const p of this._plumes) p.handle.set(true, p.main ? level : level * 0.5);
+  }
+
+  /**
+   * Persist the build and the salvage the player is carrying.
+   *
+   * `Loadout` has had `toJSON` and `fromJSON` — the latter carefully written
+   * to drop unknown parts rather than throw — since it was written, and
+   * NOTHING CALLED EITHER. Every part collected and every swap made in the
+   * garage was discarded on reload. In a LOOTER that is not a missing
+   * convenience, it is the progression: the drop tables, the rarity tiers and
+   * the whole garage exist to accumulate something, and nothing accumulated
+   * past a refresh.
+   *
+   * Same shape as the audio bindings and the loot pickup's missing `body`
+   * node: the hard part was written and the one line that reaches it was not.
+   *
+   * Everything here is defensive. `localStorage` throws outright in a private
+   * context or with site data blocked, a half-written value parses to
+   * garbage, and a schema change makes an old payload wrong rather than
+   * merely absent — none of which is a reason to refuse to start the game. A
+   * failed restore just leaves the starter build in place.
+   */
+  _restoreLoadout() {
+    let raw = null;
+    try {
+      raw = window.localStorage?.getItem(SAVE_KEY) ?? null;
+    } catch {
+      return false; // storage unavailable — starter build, no complaint
+    }
+    if (!raw) return false;
+    try {
+      const data = JSON.parse(raw);
+      // Version the payload so an old save from a different part schema is
+      // ignored rather than half-applied. `fromJSON` drops unknown parts, but
+      // a wholesale format change is better restarted than salvaged.
+      if (!data || data.v !== SAVE_VERSION || !data.loadout) return false;
+      return !!this.loadout.fromJSON(data.loadout);
+    } catch {
+      return false;
+    }
+  }
+
+  _saveLoadout() {
+    try {
+      window.localStorage?.setItem(SAVE_KEY, JSON.stringify({
+        v: SAVE_VERSION,
+        savedAt: Date.now(),
+        loadout: this.loadout.toJSON(),
+      }));
+      return true;
+    } catch {
+      return false; // quota, private mode, blocked site data
+    }
+  }
+
+  /**
+   * Save whenever the build changes or salvage is collected.
+   *
+   * Coalesced onto a timer because both events can fire several times in a
+   * frame — a wave's worth of drops collected together, or a garage swap that
+   * recomputes — and serialising the whole inventory on each one is wasted
+   * work during exactly the moments the frame is busiest.
+   */
+  _wireSave() {
+    let pending = 0;
+    const schedule = () => {
+      if (pending) return;
+      pending = setTimeout(() => { pending = 0; this._saveLoadout(); }, 400);
+    };
+    this._offSave = [
+      bus.on(EV.BUILD_CHANGED, schedule),
+      bus.on(EV.LOOT_PICKUP, schedule),
+    ];
+    // A tab closed mid-mission should not lose the salvage from that mission.
+    this._onHide = () => { if (document.visibilityState === 'hidden') this._saveLoadout(); };
+    document.addEventListener('visibilitychange', this._onHide);
+    window.addEventListener('pagehide', () => this._saveLoadout());
   }
 
   /**

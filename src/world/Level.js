@@ -1253,6 +1253,20 @@ export class Level {
         const squash = 0.42 + rng() * 0.58;
         const turn = rng() * TAU;
         const cq = Math.cos(turn), sq = Math.sin(turn);
+        /*
+         * TILT. Every cap in the previous capture was dead level, and a row of
+         * exactly horizontal tops reads as machined however ragged the rest of
+         * the outline is — a mesa group sits on strata that were tipped long
+         * before they eroded, so its rims lean and no two lean the same way.
+         * A shear would not do: a shear maps a horizontal plane to a horizontal
+         * plane, so it leans the tower and leaves the cap flat. This is a real
+         * (small-angle) rotation about the two horizontal axes.
+         * Anchored to the toe by `frac`, because a tilt applied to the base ring
+         * lifts one side of it clear of the plain and shows sky underneath — the
+         * same failure mode the cap's own closure amendment records.
+         */
+        const tiltA = (rng() - 0.5) * 0.19;
+        const tiltB = (rng() - 0.5) * 0.19;
 
         // Highest plan order is 17 against 64 columns — 3.8 columns per lobe,
         // which is coarse enough to survive the mesh and fine enough to put
@@ -1303,8 +1317,15 @@ export class Level {
             // a twentieth of its own radiance, so the risk that bought the
             // taper has mostly gone and the outline needs the buttresses back.
             const rr = r * PROF[p][0] * (1 + 0.31 * planN * (1 - 0.50 * frac));
-            const y = baseY + h * frac * hs;
-            const lx = ca * rr, lz = sa * rr * squash;
+            const hl = h * frac * hs;
+            const lx0 = ca * rr, lz0 = sa * rr * squash;
+            // Small-angle rotation about X then Z, ramped in off the toe.
+            const tw = smoothstep(0.0, 0.26, frac);
+            const tA = tiltA * tw, tB = tiltB * tw;
+            const lz = lz0 + tA * hl;
+            const hy = hl - tA * lz0 + tB * lx0;
+            const lx = lx0 - tB * hl;
+            const y = baseY + hy;
             const k = a * NP + p;
             pos[k * 3] = cx + lx * cq - lz * sq;
             pos[k * 3 + 1] = y;

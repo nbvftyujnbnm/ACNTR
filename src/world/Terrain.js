@@ -560,7 +560,19 @@ export class Terrain {
        * hits two pixels per cycle at about 1.5 km, so the long fade below is
        * there to stop the far plateau reading busy, not to stop it sparkling.
        */
-      uRipple: { value: new THREE.Vector4(1.70, 0.62, opts.rippleRelief ?? 0.18, opts.rippleAlbedo ?? 0.052) },
+      /*
+       * MEASURED AND CUT BY THREE: 0.18 of relief rendered as crocodile skin,
+       * not as sand (shots/L44). The arithmetic that says why is worth keeping.
+       * At a 13.5-degree sun, N.L on level ground is sin(13.5) = 0.233, and a
+       * normal tilted by d changes it to sin(13.5 + d) — so the term is at its
+       * MOST sensitive exactly here, and a tilt that would be unremarkable
+       * under a high sun swings the surface from self-shadowed to twice as
+       * bright. 0.18 against the wave's 1.56 peak is 16 degrees of flank, which
+       * takes N.L from -0.04 to 0.48: black to double. 0.06 is 5.3 degrees and
+       * lands +/-35% of the base, which is a corrugation you read as texture
+       * rather than as a pattern painted on the ground.
+       */
+      uRipple: { value: new THREE.Vector4(1.70, 0.95, opts.rippleRelief ?? 0.060, opts.rippleAlbedo ?? 0.052) },
       // Prevailing wind, radians in the XZ plane. Ripple crests run across it.
       uWind: { value: opts.windAngle ?? 0.72 },
     };
@@ -712,7 +724,7 @@ export class Terrain {
            vec2 acRipDir = mix( acWind, acFall, clamp( acGHL * 3.4, 0.0, 0.78 ) );
            // A slow rotation on top, so even a dead-flat pan does not carry one
            // rigid direction from end to end.
-           float acRipRot = ( acMacro2 - 0.5 ) * 0.85;
+           float acRipRot = ( acMacro2 - 0.5 ) * 0.40;
            float acRC = cos( acRipRot ), acRS = sin( acRipRot );
            acRipDir = normalize( vec2( acRipDir.x * acRC - acRipDir.y * acRS,
                                        acRipDir.x * acRS + acRipDir.y * acRC ) + 1e-6 );
@@ -721,7 +733,11 @@ export class Terrain {
            // The 2.3 m grit tap doubles as a phase warp, so the crest lines
            // wander by a fraction of a wavelength instead of ruling straight
            // across the frame. No extra fetch.
-           float acWarp = ( acD1 * acInv - 1.0 ) * 1.7;
+           // 0.5 rad, not 1.7. A warp near a quarter of a cycle stops the
+           // crests being crests: the two trains and the warp together broke
+           // the field into a lattice of blobs, which is what a ripple field
+           // must not look like. The crest line has to stay a LINE.
+           float acWarp = ( acD1 * acInv - 1.0 ) * 0.50;
            float acPh = dot( acWP.xz, acRipDir ) * ( acTwoPi / uRipple.x ) + acWarp;
            // Secondary train, turned about 20 deg off the primary and shorter.
            vec2 acRipDir2 = normalize( acRipDir + vec2( -acRipDir.y, acRipDir.x ) * 0.36 );
@@ -732,7 +748,7 @@ export class Terrain {
            // patchily by the macro field — half the plateau is scoured bare.
            // The far fade is about visual noise, not aliasing: at 1.7 m the
            // Nyquist limit is a kilometre and a half away.
-           float acRipMask = acFlat * acWDust * smoothstep( 0.30, 0.66, acMacro2 );
+           float acRipMask = acFlat * acWDust * smoothstep( 0.22, 0.78, acMacro2 );
            float acRipFar = 1.0 - smoothstep( 150.0, 420.0, acDist );
            float acRipK = acRipMask * acRipFar;
            // A crest is winnowed of fines and reads paler than the trough that
@@ -780,7 +796,7 @@ export class Terrain {
            vec2 acDN1 = texture2D( tGroundNrm, acDUV * ( acSD * uDetail.x ) ).xy * 2.0 - 1.0;
            vec2 acDN2 = texture2D( tGroundNrm, acDUV2 * ( acSD * uDetail.y ) ).xy * 2.0 - 1.0;
            vec2 acDN = ( acDN1 * 0.70 + acDN2 * 0.52 )
-                     * ( uDetail.w * acFlat * ( 1.0 + 0.85 * acNear ) );
+                     * ( uDetail.w * acFlat * ( 1.0 + 0.50 * acNear ) );
            acWorldN = normalize( acWorldN + vec3( acDN.x, 0.0, acDN.y ) );
 
            // Ripple relief. The normal perturbation is the SLOPE of the ripple,
@@ -791,10 +807,10 @@ export class Terrain {
            // uRipple.z at 0.18 buys about 16 degrees of flank — plenty against
            // a 13-degree sun, where N.L on level ground is only 0.22 and every
            // degree of tilt is worth a lot of it.
-           float acRipS  = cos( acPh )  + 0.56 * cos( 2.0 * acPh );
-           float acRipS2 = cos( acPh2 ) + 0.56 * cos( 2.0 * acPh2 );
+           float acRipS  = cos( acPh )  + 0.35 * cos( 2.0 * acPh );
+           float acRipS2 = cos( acPh2 ) + 0.35 * cos( 2.0 * acPh2 );
            vec2 acRipN = acRipDir * ( acRipS * uRipple.z )
-                       + acRipDir2 * ( acRipS2 * uRipple.z * 0.42 );
+                       + acRipDir2 * ( acRipS2 * uRipple.z * 0.30 );
            acRipN *= acRipK;
            acWorldN = normalize( acWorldN + vec3( acRipN.x, 0.0, acRipN.y ) );`
         )
@@ -815,7 +831,7 @@ export class Terrain {
     };
 
     // keep the program cache from collapsing this with a stock standard material
-    mat.customProgramCacheKey = () => 'acntr-terrain-splat-v2';
+    mat.customProgramCacheKey = () => 'acntr-terrain-splat-v3';
 
     this._materials.push(mat);
     return mat;
