@@ -1264,9 +1264,27 @@ export class Level {
          * Anchored to the toe by `frac`, because a tilt applied to the base ring
          * lifts one side of it clear of the plain and shows sky underneath — the
          * same failure mode the cap's own closure amendment records.
+         *
+         * SAMPLED AS A DIP AZIMUTH AND A MAGNITUDE, not as two independent
+         * uniforms. Two uniforms on [-a, a] put the JOINT magnitude near zero
+         * far more often than either axis is near zero — about a fifth of the
+         * ring came out under a degree and a half of lean, which is visually
+         * level, and a group in which some caps lean and some do not reads as
+         * a mistake rather than as geology. An azimuth plus a magnitude with a
+         * floor guarantees every cap is tipped and no two the same way.
+         *
+         * The magnitude is BUDGETED against the same "no cap below the camera"
+         * constraint the height floor below enforces. A dip drops one side of
+         * the rim by about `dip * 0.95 r`, so a butte that cannot afford that
+         * drop out of its own relief gets less of it, and the floor is raised
+         * by exactly the drop that is left.
          */
-        const tiltA = (rng() - 0.5) * 0.19;
-        const tiltB = (rng() - 0.5) * 0.19;
+        const dipAz = rng() * TAU;
+        const dipRoom = Math.max(0, h * 0.92 - 112);
+        const dipMag = Math.min(0.055 + rng() * 0.115, dipRoom / (r * 0.95));
+        const tiltA = Math.cos(dipAz) * dipMag;
+        const tiltB = Math.sin(dipAz) * dipMag;
+        const capFloorM = 112 + dipMag * r * 0.95;
 
         // Highest plan order is 17 against 64 columns — 3.8 columns per lobe,
         // which is coarse enough to survive the mesh and fine enough to put
@@ -1303,7 +1321,7 @@ export class Level {
            * so a 300 m butte can still be cut nearly twice as deep as a 150 m
            * one, which is what keeps the clefts from all looking the same size.
            */
-          const hs = Math.max(112 / h, (1 + 0.19 * angField(t, H_CROWN)) * (1 - cleft * 0.38));
+          const hs = Math.max(capFloorM / h, (1 + 0.19 * angField(t, H_CROWN)) * (1 - cleft * 0.38));
           const tone = angField(t, H_TONE);
           for (let p = 0; p < NP; p++) {
             const frac = PROF[p][1];

@@ -943,8 +943,29 @@ export function blockhouse(b, mats, o) {
 }
 
 /**
- * Vertical containment tank: banded shell, dished head, spiral access stair,
- * top railing and a nest of process pipework.
+ * Vertical containment tank: banded shell, DOMED (not hemispherical) roof with
+ * radial plate seams, spiral access stair, roof railing and process pipework.
+ *
+ * THE ROOF WAS A HEMISPHERE AND THAT IS WHY THESE READ AS "UNTEXTURED GREY
+ * BLOBS". A `phi: PI/2` dome of the shell's own radius puts a smooth ball of
+ * height `r` on top of a cylinder of height `h`; on the tank farm's 12-16 m
+ * radii that is a third to a half of the whole silhouette given over to one
+ * unbroken surface with exactly one shading gradient across it, and no map can
+ * survive that — the plate texture is there, it is just a 30 m sphere's worth
+ * of low-contrast mottle under a 90% veil.
+ *
+ * A real welded storage tank has a SHALLOW dished roof: the roof plate is
+ * pressed to a radius of roughly 1.5x the tank diameter's half-width, so the
+ * rise is about a third of the shell radius rather than equal to it, and it
+ * meets the shell at a hard compression ring. That single change moves the
+ * dome from "half the shape" to "a lid", and everything the eye needs then
+ * lands on the two horizontal lines at the eaves and on the radial plate seams
+ * that run from the crown to the rim.
+ *
+ * The seams are CHORDED for the reason `sphereTank` records: the batch cannot
+ * build a curved member, and a straight one across the whole 40 degree arc sags
+ * into the shell and disappears. Three chords hold the sag under 1% of the roof
+ * radius so a bead stands proud the whole way down the lit side.
  */
 export function tank(b, mats, o) {
   const {
@@ -954,13 +975,46 @@ export function tank(b, mats, o) {
 
   b.box(mats.concrete, r * 2.4, 1.2, r * 2.4, 0, 0.6, 0, 0, { chamfer: 0.25, tint });
   b.tube(body, r, h, 0, h * 0.5 + 1.0, 0, seg, { tint });
-  b.dome(body, r, 0, h + 1.0, 0, seg, { phi: Math.PI * 0.5, tint });
+
+  // --- dished roof --------------------------------------------------------
+  const eaves = h + 1.0;             // shell / roof joint
+  const KR = 1.55;                   // roof radius as a multiple of shell radius
+  const RR = r * KR;
+  const PHI = Math.asin(1 / KR);     // polar half-angle that lands the rim on r
+  const cosP = Math.cos(PHI);
+  const roofC = eaves - RR * cosP;   // centre of the roof plate's sphere
+  const crown = roofC + RR;          // apex, = eaves + 0.366 r
+  b.dome(body, RR, 0, roofC, 0, seg, { phi: PHI, tint });
+
+  // Radial plate seams, crown to rim. The one place a lid this shallow can
+  // still put line work, and they converge on the crown so they read as a roof
+  // rather than as stripes.
+  const seams = Math.max(8, Math.round(seg * 0.55));
+  const beadT = Math.max(0.15, r * 0.017);
+  for (let i = 0; i < seams; i++) {
+    const a = (i / seams) * TAU + 0.13;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const ct = GeoBatch.tint(tint, 0.92 + ((i * 0.6180339887 + 0.31) % 1) * 0.14);
+    for (let s = 0; s < 3; s++) {
+      const t0 = PHI * (0.14 + 0.86 * (s / 3)), t1 = PHI * (0.14 + 0.86 * ((s + 1) / 3));
+      const k = 1.008;
+      b.strut(trim,
+        ca * RR * k * Math.sin(t0), roofC + RR * k * Math.cos(t0), sa * RR * k * Math.sin(t0),
+        ca * RR * k * Math.sin(t1), roofC + RR * k * Math.cos(t1), sa * RR * k * Math.sin(t1),
+        beadT, { tint: ct });
+    }
+  }
+
   // weld bands
   const bands = Math.max(2, Math.round(h / 5));
   for (let i = 1; i < bands; i++) {
     b.tube(trim, r + 0.14, 0.34, 0, 1.0 + (i / bands) * h, 0, seg, { tint });
   }
   b.tube(trim, r + 0.28, 0.9, 0, 1.5, 0, seg, { tint });
+  // Wind girder and compression ring: the two hard horizontals that say "the
+  // lid stops here". Without them the roof and the shell are one silhouette.
+  b.tube(trim, r + 0.62, 0.42, 0, eaves - 2.4, 0, seg, { tint });
+  b.tube(dark, r + 0.34, 0.75, 0, eaves - 0.25, 0, seg, { tint });
 
   // spiral stair
   const turns = 1.15;
@@ -974,13 +1028,47 @@ export function tank(b, mats, o) {
       b.box(dark, 0.09, 1.05, 0.09, Math.cos(a) * (r + 1.62), y + 0.55, Math.sin(a) * (r + 1.62), -a, { tint });
     }
   }
-  // top deck
-  b.tube(dark, r * 0.55, 0.16, 0, h + 1.0 + r * 0.86, 0, 14, { tint });
+  // Perimeter handrail, ON the eaves where a real one stands. It used to float
+  // at a fixed 0.6 m above the joint regardless of how the roof met it.
   const rr = r + 0.55;
   for (let i = 0; i < seg; i++) {
     const a0 = (i / seg) * TAU, a1 = ((i + 1) / seg) * TAU;
-    b.box(dark, 0.09, 1.1, 0.09, Math.cos(a0) * rr, h + 1.6, Math.sin(a0) * rr, 0, { tint });
-    b.strut(dark, Math.cos(a0) * rr, h + 2.1, Math.sin(a0) * rr, Math.cos(a1) * rr, h + 2.1, Math.sin(a1) * rr, 0.08, { tint });
+    b.box(dark, 0.09, 1.1, 0.09, Math.cos(a0) * rr, eaves + 0.6, Math.sin(a0) * rr, 0, { tint });
+    b.strut(dark, Math.cos(a0) * rr, eaves + 1.1, Math.sin(a0) * rr, Math.cos(a1) * rr, eaves + 1.1, Math.sin(a1) * rr, 0.08, { tint });
+  }
+
+  // Crown works: manway collar, a railed crown platform and a vent stack. On a
+  // shallow lid the crown is the one part still facing the sky, so it is where
+  // the frame will look — it cannot be an empty plate.
+  const cpr = r * 0.26;
+  b.tube(dark, cpr, 0.22, 0, crown + 0.10, 0, 14, { tint });
+  for (let i = 0; i < 6; i++) {
+    const a0 = (i / 6) * TAU, a1 = ((i + 1) / 6) * TAU;
+    railing(b, dark, Math.cos(a0) * cpr, Math.sin(a0) * cpr,
+      Math.cos(a1) * cpr, Math.sin(a1) * cpr, crown + 0.21, 1.0, tint);
+  }
+  b.tube(dark, 0.62, 2.6, 0, crown + 1.4, 0, 10, { tint });
+  b.tube(trim, 0.78, 0.30, 0, crown + 2.6, 0, 10, { tint });
+
+  // Roof nozzles and a float-gauge box, scattered on the lid at mid-radius.
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU + 0.9;
+    const rad = r * (0.44 + 0.16 * ((i * 0.6180339887) % 1));
+    const t = Math.asin(clamp(rad / RR, -1, 1));
+    const sy = roofC + RR * Math.cos(t);
+    const nx = Math.cos(a) * rad, nz = Math.sin(a) * rad;
+    b.tube(dark, 0.34, 1.5, nx, sy + 0.55, nz, 8, { tint });
+    if (i === 1) b.box(dark, 1.5, 1.3, 1.1, nx, sy + 0.75, nz, a, { chamfer: 0.12, tint });
+  }
+
+  // Stair head: the spiral has to arrive somewhere, and a gooseneck landing off
+  // the eaves is a silhouette break exactly where the two masses meet.
+  {
+    const a = TAU * 1.15 % TAU;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    b.box(dark, 2.2, 0.16, 1.5, ca * (r + 0.9), eaves + 0.08, sa * (r + 0.9), -a, { tint });
+    railing(b, dark, ca * (r + 1.7) - sa * 0.8, sa * (r + 1.7) + ca * 0.8,
+      ca * (r + 1.7) + sa * 0.8, sa * (r + 1.7) - ca * 0.8, eaves + 0.16, 1.05, tint);
   }
 
   // process pipework off one side
@@ -990,14 +1078,19 @@ export function tank(b, mats, o) {
   b.pipe(dark, px * (r + 7), h * 0.72, pz * (r + 7), px * (r + 7), 2.2, pz * (r + 7), 0.55, 10, { tint });
   b.tube(dark, 0.75, 1.2, px * (r + 7), h * 0.72, pz * (r + 7), 10, { tint });
   b.box(dark, 1.8, 2.4, 1.8, px * (r + 7), 3.0, pz * (r + 7), pa, { tint });
+  // A shell downcomer: one vertical line on an otherwise all-horizontal shell.
+  {
+    const da = pa + 2.1, dx = Math.cos(da) * (r + 0.55), dz = Math.sin(da) * (r + 0.55);
+    b.pipe(dark, dx, eaves - 0.6, dz, dx, 2.4, dz, 0.34, 8, { tint });
+    for (let i = 0; i < 3; i++) {
+      b.box(trim, 0.8, 0.34, 0.5, dx, 4.0 + i * (h - 6) / 2.6, dz, da, { tint });
+    }
+  }
 
-  // top-of-tank hardware
-  b.tube(dark, 1.1, 2.2, r * 0.35, h + r * 0.72, 0, 12, { tint });
-  b.tube(trim, 1.3, 0.28, r * 0.35, h + r * 0.72 + 1.2, 0, 12, { tint });
-  b.box(glow, 0.44, 0.44, 0.44, 0, h + r * 0.9 + 0.4, 0, 0, { tint: 0xff2410 });
+  b.box(glow, 0.44, 0.44, 0.44, 0, crown + 2.9, 0, 0, { tint: 0xff2410 });
   placard(b, trim, px * (r + 0.35), h * 0.42, pz * (r + 0.35), 3.0, 1.7, pa + Math.PI * 0.5, tint);
 
-  return { r, h: h + 1.0 + r * 0.9, roofY: h + 1.0 };
+  return { r, h: crown + 3.1, roofY: eaves };
 }
 
 /**
