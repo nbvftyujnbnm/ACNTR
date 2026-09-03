@@ -2470,6 +2470,69 @@ export class Level {
       return true;
     }, null, false);
 
+    /*
+     * NATURAL SCATTER. Everything above this point is man-made and
+     * rectilinear, and the ground between it is bare — which is why the near
+     * field reads as the least detailed thing in a frame it dominates. A
+     * 30 m-wide patch of this plateau contains, today, one uniform stipple from
+     * the terrain map and nothing else: no object with a silhouette, no contact
+     * shadow, nothing at the 0.3-3 m scale that says how big the mech is.
+     *
+     * IN DRIFTS, NOT UNIFORMLY. A constant-density scatter is the desert
+     * equivalent of an evenly-spaced butte ring — every stone an isolated
+     * island, no read of wind or water having put it there. Two sinusoid pairs
+     * at 350 m and 140 m give a lag-deposit mask; where it is low the ground
+     * stays genuinely bare, which is what makes the drifts read as drifts.
+     *
+     * Cost is one draw call each and about 330 k triangles for the pair, of
+     * which two thirds is the boulders' SHADOW submissions — a caster is
+     * re-submitted once per cascade, so it costs roughly 5x its own mesh, which
+     * is why the boulder is a 20-face icosahedron and not an 80-face one. The
+     * gravel does NOT cast at all: 22 000 casters would be the most expensive
+     * thing in the level for a 0.5 m stone whose own shadow is 2 m long, and
+     * its own faceting plus the terrain's shadow falling across it seat it.
+     */
+    const drift = (x, z) => 0.5
+      + 0.34 * Math.sin(x * 0.0181 + 1.7) * Math.sin(z * 0.0163 - 0.4)
+      + 0.16 * Math.sin(x * 0.0447 - 2.2) * Math.sin(z * 0.0521 + 1.1);
+
+    const mRock = propMat('rock', this._tex.dust,
+      { color: 0xb0a693, rough: 1.0, metal: 0.0, env: 0.42 });
+
+    const rocks = this._instance('rocks', S.boulderGeo(rng, 'rock', 1.4), mRock, 1900, rng, (r, out) => {
+      const a = r() * TAU, rad = 18 + Math.sqrt(r()) * 386;
+      const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+      if (r() > 0.20 + 0.80 * smoothstep(0.34, 0.68, drift(x, z))) return false;
+      out.x = x; out.z = z;
+      out.yaw = r() * TAU;
+      // Heavy-tailed size: mostly knee-high, a few the size of the mech's foot
+      // pod. A scatter with one size is a texture, not a landscape.
+      out.scale = 0.7 + r() * r() * 2.6;
+      out.tintPool = [0x9a8f7c, 0x8b8171, 0xa79883, 0x746a5d, 0xb0a48d];
+      out.w = 2.4; out.d = 2.4; out.h = 1.6;
+      return true;
+    }, null, false);
+    // Boulders at 1-3 m are the one natural thing big enough to throw a shadow
+    // a mech can read against, and at this sun that shadow is 4-12 m long.
+    rocks.castShadow = true;
+
+    this._instance('gravel', S.boulderGeo(rng, 'pebble', 0.7), mRock, 22000, rng, (r, out) => {
+      const a = r() * TAU, rad = 12 + Math.sqrt(r()) * 396;
+      const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+      // Tighter than the boulders': the density that makes a lag deposit read
+      // is one stone every 3-4 m, and 22 000 spread evenly over a 500 000 m2
+      // plateau is one every 23 m — a sprinkle. Concentrated, a drift runs one
+      // every 7 m and bare ground still keeps a fifth of that, so the near
+      // field is never EMPTY, only ever sparse.
+      if (r() > 0.18 + 0.82 * smoothstep(0.50, 0.74, drift(x, z))) return false;
+      out.x = x; out.z = z;
+      out.yaw = r() * TAU;
+      out.scale = 0.45 + r() * r() * 1.5;
+      out.tintPool = [0x9a8f7c, 0x877c6b, 0xa89a85, 0x6f665a];
+      out.w = 0.9; out.d = 0.9; out.h = 0.6;
+      return true;
+    }, null, false);
+
     this._instance('slag', S.debrisGeo(rng), mSteel, 200, rng, (r, out) => {
       const cl = clusters[Math.floor(r() * clusters.length)];
       const a = r() * TAU, rad = Math.sqrt(r()) * cl[2] * 0.9;
@@ -2499,12 +2562,15 @@ export class Level {
     const p = new THREE.Vector3();
     const s = new THREE.Vector3(1, 1, 1);
     const e = new THREE.Euler();
-    const out = { x: 0, z: 0, yaw: 0, stack: 0, tintPool: null, w: 1, d: 1, h: 1 };
+    const out = { x: 0, z: 0, yaw: 0, stack: 0, tintPool: null, w: 1, d: 1, h: 1, scale: 1 };
 
     let placed = 0;
     let guard = 0;
     while (placed < count && guard < count * 24) {
       guard++;
+      // Reset per sample: `out` is reused, so a sampler that leaves `scale`
+      // alone would silently inherit whatever the previous scatter set.
+      out.scale = 1;
       if (!sample(rng, out)) continue;
       const x = out.x, z = out.z;
       if (Math.hypot(x, z) > ARENA_R - 12) continue;
@@ -2519,7 +2585,7 @@ export class Level {
       e.set(tiltX, out.yaw, tiltZ, 'YXZ');
       q.setFromEuler(e);
       p.set(x, y + stackH, z);
-      const sc = 0.92 + rng() * 0.18;
+      const sc = out.scale * (0.92 + rng() * 0.18);
       s.set(sc, sc, sc);
       m.compose(p, q, s);
       im.setMatrixAt(placed, m);

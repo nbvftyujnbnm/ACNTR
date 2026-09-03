@@ -1684,6 +1684,64 @@ export function debrisGeo(rng, uv = 1.6) {
   return weld([g]);
 }
 
+/**
+ * Wind-scoured rock: an icosahedron pushed around by three sinusoid pairs and
+ * squashed on Y, then flat-shaded.
+ *
+ * WHY A DISPLACED POLYHEDRON AND NOT A CHAMFERED BOX. `debrisGeo` is a box and
+ * reads as poured concrete, which is right for rubble in a yard and wrong for
+ * the thing the near field is missing: this plateau has no NATURAL scatter at
+ * all, so every object within 30 m of the camera is man-made and rectilinear,
+ * and the ground between them is bare. A rock has to be irregular in plan or it
+ * joins the rubble.
+ *
+ * The displacement is a pure function of the vertex POSITION, which is what
+ * makes it safe on a non-indexed polyhedron: `PolyhedronGeometry` duplicates
+ * every shared corner once per face, and any displacement that varied per
+ * vertex INDEX would tear the hull into 20 loose triangles. Because it varies
+ * per position instead, duplicated corners move identically and the hull stays
+ * closed. `computeVertexNormals` on that non-indexed mesh then gives per-face
+ * normals for free, which is exactly the faceting a fractured rock wants — a
+ * smoothed one reads as a potato.
+ *
+ * The mass is lifted by less than its own half-height so the base is BURIED.
+ * At a 13.5 degree sun a rock resting exactly on the surface has a contact
+ * shadow the length of its own shadow and nothing under it, and reads as
+ * pasted on; sinking it 40% of the way removes the tell for free.
+ */
+export function boulderGeo(rng, grade = 'rock', uv = 1.1) {
+  /*
+   * THE GRADE IS A TRIANGLE BUDGET, and on a scatter the budget is what decides
+   * the DENSITY, which is the only thing the scatter is for. Measured on the
+   * ground pose: 620 shadow-casting boulders at 80 triangles each added 393 k
+   * triangles to the frame, not the 50 k the geometry implies — a caster is
+   * re-submitted once per shadow cascade, so anything that casts costs about
+   * 5x its own mesh. Dropping the boulder from a subdivided icosahedron (80) to
+   * a plain one (20) bought back 480 k triangles at 2-3 m, where the faceting
+   * is the point anyway, and paid for four times as many pebbles.
+   */
+  const g = grade === 'pebble' ? new THREE.OctahedronGeometry(1, 0)   // 8 tris
+    : grade === 'boulder' ? new THREE.IcosahedronGeometry(1, 1)       // 80 tris
+      : new THREE.IcosahedronGeometry(1, 0);                          // 20 tris
+  const p = g.attributes.position;
+  const ph = [];
+  for (let i = 0; i < 6; i++) ph.push(rng() * TAU);
+  const sx = 0.66 + rng() * 0.5;
+  const sy = 0.34 + rng() * 0.26;
+  const sz = 0.66 + rng() * 0.5;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const d = 1
+      + 0.22 * Math.sin(x * 2.7 + ph[0]) * Math.sin(z * 2.3 + ph[1])
+      + 0.14 * Math.sin(y * 4.1 + ph[2]) * Math.sin(x * 3.7 + ph[3])
+      + 0.09 * Math.sin(z * 6.3 + ph[4]) * Math.sin(y * 5.9 + ph[5]);
+    p.setXYZ(i, x * d * sx, y * d * sy, z * d * sz);
+  }
+  g.computeVertexNormals();
+  g.translate(0, sy * 0.60, 0);
+  return prep(g, uv);
+}
+
 /** Bent rebar bundle sticking out of a slab fragment. */
 export function rebarGeo(rng, uv = 1.2) {
   const parts = [];
