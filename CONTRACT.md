@@ -2114,3 +2114,90 @@ two of the silhouette metrics were wrong on their first outing.
   THE PATTERN, now four for four today: correct-looking arithmetic about a
   term is a HYPOTHESIS about the image. Measure the image before and after,
   not just the term.
+- 2026-09-03 [world] **THE "UNTEXTURED GREY DOMES" ARE `S.tank` ROOFS, NOT
+  `S.sphereTank`.** sphereTank was fixed for this complaint once already and
+  carries its own writeup, so the next person to read "the storage domes are
+  featureless" goes and looks at the wrong function. The shapes in the gameplay
+  frame's left third are cylinder-plus-hemisphere: `phi: PI/2` at the shell's
+  own radius, which on the tank farm's 12-16 m radii gives a smooth ball of
+  height `r` on a cylinder of height `h` and hands a third to a half of the
+  whole silhouette to one surface with exactly one shading gradient across it.
+  THE PLATE MAP IS ON IT. "It has no texture" and "the texture is applied" were
+  both true: 30 m of low-contrast mottle under a 90% veil is nothing.
+  A welded storage tank has a SHALLOW dished roof — plate pressed to about
+  1.55x the shell radius, so the rise is 0.37 r rather than 1.0 r, meeting the
+  shell at a compression ring. That turns the dome from half the shape into a
+  lid, and the detail then lands where it can be read: a wind girder and a
+  compression ring (two hard horizontals at the eaves), twelve chorded radial
+  plate seams converging on a railed crown, roof nozzles, a stair-head landing,
+  and one vertical downcomer on a shell that was otherwise all horizontals.
+  `tools/poses/tanks.js` frames the district (D_TANKS, 210 m standoff,
+  cross-lit); shots/L46/tanks.png is the after. GENERALISES: when a shape reads
+  as untextured, ask whether the SHAPE is one unbroken surface before you go
+  looking for the map, and confirm which builder drew it before editing one.
+- 2026-09-03 [world] **THE TERRAIN'S BASE `normalStrength` WAS THE CROCODILE
+  SKIN — 1.35, now 0.45.** MEASURED on shots/L48/ground.png, a 360x220 patch of
+  SUNLIT dune at 20-40 m: mean 70.9, sd 49.2, p1/p10/p50/p90/p99 =
+  5/14/65/139/165, 41.7% under code 40. Its tenth percentile (14) is BELOW the
+  tenth percentile of the deep-shadow ground beside it (15) — that is not
+  texture, it is holes. After: sd 30.4, p1 13, p10 24, under-40 22.9%, mean
+  essentially unchanged at 67.8.
+  **THE METHOD MATTERS MORE THAN THE NUMBER. Every relief argument in
+  Terrain.js reasons in "degrees of flank" from a coefficient, and the
+  magnitude that coefficient multiplies had never been measured.** Assuming
+  |xy| = 1 made the near-field detail term look like 48 degrees, so it was cut
+  4.8x first — and a fresh capture moved the dune's sd by 0.6 of a code value.
+  NEGATIVE RESULT. `tools/probes/dustmap.js` reads the forge's canvas directly:
+      dust normal |xy|  mean 0.224  p90 0.338  p99 0.416
+      dust albedo       sRGB p1..p99 = 46..62, sd 4.4  (albedo cannot be it)
+  So the detail term was 9-10 degrees and the BASE triplanar term was 17
+  typical / 29 at p99. At a 13.5 degree sun N.L on level ground is sin(13.5) =
+  0.233, and 17 degrees is the difference between self-shadowed and twice base.
+  IF YOU TOUCH ANY RELIEF COEFFICIENT ON ANY SURFACE IN THIS PROJECT, measure
+  the map's |xy| first — the same reasoning applies to every normalScale in
+  Level._makeMaterials and on the mech.
+- 2026-09-03 [tools] `tools/probes/groundterms.js` A/Bs each perturbation term
+  in the terrain shader by zeroing its uniform and reading the framebuffer.
+  ITS OWN FIRST RUN IS THE LESSON: it placed the camera with
+  `debug.placePlayerInOpenGround`, which SCORES SPAWN POINTS and therefore
+  prefers megastructure decks (already recorded under the ground-pose
+  amendment), so it pointed the lens at a roof and reported all nine cases
+  identical to five significant figures — which reads exactly like "none of
+  these terms does anything". **A control case that cannot move is a broken
+  probe, not a finding.** Any A/B of this shape needs an `everything=0` case
+  and must fail loudly when it matches the baseline.
+- 2026-09-03 [world] THE PLATEAU HAD NO NATURAL SCATTER AT ALL. Every prop in
+  `_buildProps` was man-made and rectilinear and clustered on district pads, so
+  a 30 m patch of ground contained one uniform stipple and nothing else — no
+  silhouette, no contact shadow, nothing at the 0.3-3 m scale that says how big
+  the mech is. `S.boulderGeo` (a displaced, flat-shaded polyhedron) now feeds
+  two scatters: 1 900 boulders that cast, 22 000 pebbles that do not, placed in
+  DRIFTS by a two-sinusoid mask for the same reason the butte ring is
+  clustered — a constant-density scatter has no read of wind having put it
+  there. Two things worth carrying:
+  (1) THE DISPLACEMENT MUST BE A FUNCTION OF VERTEX POSITION, NOT INDEX.
+  `PolyhedronGeometry` is non-indexed and duplicates every shared corner once
+  per face; a per-index displacement tears the hull into loose triangles, a
+  per-position one moves the duplicates identically. `computeVertexNormals` on
+  the non-indexed result then gives per-face normals for free, which is the
+  faceting a fractured rock wants.
+  (2) **THE TRIANGLE BUDGET OF A SCATTER IS SET BY THE SHADOW CASCADES.**
+  Measured: 620 casting boulders at 80 triangles each added 393 k triangles to
+  the ground pose, not the 50 k the geometry implies — a caster is re-submitted
+  once per cascade, about 5x its own mesh. Dropping the boulder to a 20-face
+  icosahedron bought back 480 k and paid for four times as many pebbles. Ground
+  pose: 2.90 M -> 3.24 M triangles, 346 -> 352 draw calls.
+- 2026-09-03 [world] THE BUTTE CAP TILT WAS ALREADY IMPLEMENTED WHEN A BRIEFING
+  SAID IT WAS NOT — it landed in 2d2c22a at 10:44 and iter36 was shot at 16:05,
+  so the frame has it. Third instance today of a defect outliving its own fix in
+  a shared document. What the frame lacked was a tilt you could SEE: two
+  independent uniforms on [-a, a] put the JOINT magnitude near zero far more
+  often than either axis is near zero, so about a fifth of the ring came out
+  under 1.5 degrees of lean, and a group where some caps lean and some do not
+  reads as a mistake rather than as geology. Now sampled as a dip AZIMUTH plus a
+  magnitude with a floor. The magnitude is budgeted against the existing "no cap
+  below the vista camera" height floor rather than fighting it: a dip drops one
+  side of the rim by about `dip * 0.95 r`, a butte that cannot afford that out of
+  its own relief gets less dip, and the floor rises by whatever drop is left.
+  ANY future "make it more random" change to a two-axis quantity should be
+  sampled as direction + magnitude for the same reason.
