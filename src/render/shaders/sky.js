@@ -95,10 +95,56 @@ void main() {
   bp.y -= uTime * 0.018;
   bp.x += uTime * 0.010;
   float bn = fbm3_3( bp );
-  float strat = smoothstep( 0.40, 0.74, bn );
-  float bandMask = exp( - max( up, 0.0 ) * 7.5 ) * smoothstep( -0.14, 0.01, up );
+  float strat = smoothstep( 0.44, 0.72, bn );
+
+  // TWO ALTITUDE PROFILES ON ONE STRATUM FIELD, and the fact that it is one
+  // field is the measured part.
+  //
+  // The complaint this answers is "the near-horizon sky is flat", and the
+  // number behind it comes from tools/skysim.mjs, which evaluates this shader
+  // on the CPU over the vista frustum: the sky's stratification there measured
+  // 0.85 code values of standard deviation against a grain floor of about 2.0,
+  // i.e. the layers were half a code value under the noise the pipeline adds on
+  // purpose. Nothing about the transfer curve is to blame — a 9% radiance swing
+  // buys 5 code values anywhere in the sky's range, checked with
+  // tools/grade-model.mjs. The strata simply were not reaching.
+  //
+  // The exp( -up * 7.5 ) deck e-folds at 7.6 degrees and is down to 0.10 by 17.
+  // A hero
+  // framing's sky STARTS around 10 degrees (the terrain covers everything
+  // below it), so the entire visible sky sat in the tail of the one term that
+  // was supposed to give it structure, while the cloud deck above is held out
+  // below 24 degrees for the curtain reason recorded in CONTRACT.md. Between
+  // them was a band of sky with nothing in it at all.
+  //
+  // THE FIRST ATTEMPT USED THE SUN VEIL'S 16x FIELD as a second, coarser deck,
+  // on the theory that two thicknesses read as weather. MEASURED, and it is a
+  // dead end worth recording: at 16x squash and 17-21 degrees of elevation one
+  // band is 120-200 px tall in a 1080-line frame, so one or two of them fill
+  // the whole visible sky and arrive as a smooth GRADIENT. Traced down a single
+  // column it moved the display value by 10 codes monotonically over 120 px --
+  // brightness, not layering. The 26x field is 40-60 px up there, which is the
+  // scale that reads as a layer, so the fix is a REACH change on that field and
+  // not a second one.
+  //
+  // highDeck is therefore the same strat field, on a much slower altitude decay,
+  // faded IN above the dense deck (so the first 3.5 degrees stay exactly as
+  // tuned) and OUT before the cloud deck arrives. Falling edge written as
+  // 1 - smoothstep, because smoothstep with edge0 >= edge1 is undefined.
+  //
+  // MEASURED on the vista pose, stratification s.d. in the visible sky:
+  //   0.85 -> 2.49 code values, with the region's mean up only 3.2 (138.4 ->
+  //   141.6). The threshold pair went 0.40/0.74 -> 0.44/0.72, i.e. tighter and
+  //   still above the fbm's 0.5 mean: that makes the layers SPARSER and each
+  //   one stronger, which is both what clear air between strata looks like and
+  //   how the contrast is bought without lifting the whole sky.
+  float lowDeck  = exp( - max( up, 0.0 ) * 7.5 );
+  float highDeck = 1.10 * exp( - max( up, 0.0 ) * 2.2 )
+                 * smoothstep( 0.06, 0.26, up )
+                 * ( 1.0 - smoothstep( 0.30, 0.62, up ) );
+  float bandMask = strat * ( lowDeck + highDeck ) * smoothstep( -0.14, 0.01, up );
   vec3 bandCol = mix( uHorizon * 1.22, uSunTint * 1.7, pow( max( mu, 0.0 ), 3.0 ) * sunUp );
-  sky = mix( sky, bandCol, clamp( strat * bandMask * uBandStrength, 0.0, 0.9 ) );
+  sky = mix( sky, bandCol, clamp( bandMask * uBandStrength, 0.0, 0.9 ) );
 
   // ---- high dust silhouetted across the sun's glow -----------------------
   // The band above dies out within ~8 degrees of the horizon, so it never

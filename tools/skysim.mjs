@@ -41,6 +41,19 @@ import { grade, shippedParams } from './grade-model.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SKY_JS = readFileSync(resolve(ROOT, 'src/render/Sky.js'), 'utf8');
+const SKY_FRAG_JS = readFileSync(resolve(ROOT, 'src/render/shaders/sky.js'), 'utf8');
+
+/**
+ * Pull the shader's own literals out of shaders/sky.js rather than restating
+ * them. The body below is still a hand transcription and can drift, but the
+ * NUMBERS a tuning session actually moves cannot: edit the shader, re-run the
+ * sim, and it is already testing the new values.
+ */
+function lit(re, what) {
+  const m = SKY_FRAG_JS.match(re);
+  if (!m) throw new Error(`skysim: could not read ${what} from shaders/sky.js`);
+  return m.slice(1).map(parseFloat);
+}
 
 /* --- shipped uniforms, read from Sky.js ---------------------------------- */
 function num(name) {
@@ -57,6 +70,13 @@ function col(name) {
 
 export function skyUniforms() {
   const elDeg = parseFloat(SKY_JS.match(/sunElevation:\s*([\d.]+)\s*\*/)[1]);
+  const cloudFade = lit(/cl \*= smoothstep\( ([\d.]+), ([\d.]+), up \)/, 'cloud fade');
+  const bandSquash = lit(/vec3 bp = V \* vec3\( [\d.]+, ([\d.]+), [\d.]+ \)/, 'band squash');
+  const stratEdge = lit(/float strat = smoothstep\( ([\d.]+), ([\d.]+), bn \)/, 'strat edges');
+  const lowDeck = lit(/float lowDeck\s*= exp\( - max\( up, 0\.0 \) \* ([\d.]+) \)/, 'lowDeck falloff');
+  const highDeck = lit(/float highDeck = ([\d.]+) \* exp\( - max\( up, 0\.0 \) \* ([\d.]+) \)/, 'highDeck');
+  const highIn = lit(/\* smoothstep\( ([\d.]+), ([\d.]+), up \)\s*\n\s*\* \( 1\.0 - smoothstep/, 'highDeck fade-in');
+  const highOut = lit(/\* \( 1\.0 - smoothstep\( ([\d.]+), ([\d.]+), up \) \);/, 'highDeck fade-out');
   return {
     sunElevation: elDeg * Math.PI / 180,
     sunAzimuth: num('sunAzimuth'),
@@ -78,23 +98,24 @@ export function skyUniforms() {
     sunDisc: col('sunDisc'),
     cloudDark: col('cloudDark'),
     cloudLit: col('cloudLit'),
-    // shader constants that are literals in sky.js, exposed so they can be swept
-    cloudFadeLo: 0.03,
-    cloudFadeHi: 0.40,
-    bandSquash: 26.0,
-    bandFalloff: 7.5,
-    bandLo: 0.40,
-    bandHi: 0.74,
-    // upper stratum deck — see the band block in skyRadiance
-    bandHiAmp: 0.0,
-    bandHiFall: 2.2,
-    bandHiIn0: 0.02,
-    bandHiIn1: 0.14,
-    bandHiOut0: 0.30,
-    bandHiOut1: 0.62,
-    bandHiLo: 0.36,
-    bandHiHi: 0.66,
-    // how much of the sun-side extinction veil survives away from the sun
+    // shader literals, read back out of shaders/sky.js so a sweep starts from
+    // whatever is actually shipped. Override any of them with --set name=value.
+    cloudFadeLo: cloudFade[0],
+    cloudFadeHi: cloudFade[1],
+    bandSquash: bandSquash[0],
+    bandFalloff: lowDeck[0],
+    bandLo: stratEdge[0],
+    bandHi: stratEdge[1],
+    bandHiAmp: highDeck[0],
+    bandHiFall: highDeck[1],
+    bandHiIn0: highIn[0],
+    bandHiIn1: highIn[1],
+    bandHiOut0: highOut[0],
+    bandHiOut1: highOut[1],
+    // how much of the sun-side extinction veil survives away from the sun.
+    // A MEASURED DEAD END kept as a knob: sweeping it 0 -> 0.45 moved the
+    // vista's sky by under one code value, because the frame centre is only
+    // 39 degrees off the sun and already carries 71% of the veil.
     veilFloor: 0.0,
   };
 }
