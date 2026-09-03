@@ -1869,3 +1869,55 @@ two of the silhouette metrics were wrong on their first outing.
   same before and after firing sound events. That measurement is
   INCONCLUSIVE about voice activity, not negative — do not read it as "audio
   events do nothing".
+- 2026-09-03 [render/tools] **THE GAMEPLAY FRAME'S PROBLEM IS ITS WHITE POINT,
+  NOT ITS BLACK POINT** — measured, because "global contrast is low" had been
+  restated four times without anyone saying which end was missing.
+  `tools/retransfer.mjs` now takes `--rect name:x,y,w,h` (repeatable) and
+  reports the same statistics over a screen rectangle as over the whole frame,
+  plus a HIGH line (>160 / >192 / >224, mean RGB, p1-p99 range) next to the
+  existing TOE line. The rect is a MEASUREMENT MASK, not a crop: the grade is
+  still inverted from each pixel's true screen position, because the vignette
+  and the damage rim are functions of that position and cropping first would
+  undo them at the wrong radius.
+  THE FIRST THING IT FOUND IS THAT THE HUD WAS IN EVERY NUMBER. The capture is
+  a page screenshot, so the DOM HUD is composited into the PNG, and it is the
+  only thing in the shot that reaches code 255 — the whole-frame `at-255` and
+  `SHOULDER` figures every previous grade decision was argued from are the HUD,
+  not the render. Use `--rect noHUD:0,120,1920,760` for anything about tone.
+  MEASURED on shots/iter34/gameplay.png, luma percentiles p1/p5/p50/p95/p99:
+      whole frame   15 / 24 / 104 / 145 / 156
+      3D only       20 / 29 / 108 / 145 / 155
+      sky patch    120 /124 / 134 / 146 / 151   (internal p1-p99 range: 31)
+      near ridge    79 / 88 / 111 / 128 / 133
+      deck          10 / 14 /  33 /  74 / 104
+  So the 3D frame spans 135 code values and 0.42% of it is above 160, 0.05%
+  above 192. The BLACK POINT IS FINE — the deck runs a quarter of its pixels
+  under 24 — and the frame has no highlight at all.
+  The transfer curve is not what is holding it down. `tools/grade-model.mjs`
+  says the shipped grade puts scene-linear 0.18 at code 132, 0.36 at 174, 0.72
+  at 213, and does not clip until 3.2 — a healthy 4.1 EV shoulder that nothing
+  in the frame is using. Inverting the measured pixels: the horizon sky is only
+  0.19 scene-linear and the near ridge 0.13, i.e. THE BRIGHTEST LARGE SURFACE IN
+  THE FRAME SITS AT MIDDLE GREY and the whole visible scene lives in the two
+  stops below it. That is a scene/exposure placement problem, not a curve shape
+  problem, and it is why every previous attempt to buy contrast with `contrast`
+  moved the frame by single code values.
+- 2026-09-03 [render] **THE RED EDGE IS THE DAMAGE RIM AT NEARLY FULL STRENGTH,
+  NOT THE VIGNETTE.** Three review passes have called for the vignette to be
+  softened. `params.vignette` is a NEUTRAL multiply (amount 0.26) and cannot
+  tint anything; the red belongs to `uDamage`, which FINAL_FRAG screen-blends
+  with `uDamageColor` (0.85, 0.06, 0.05).
+  MEASURED by sampling the sky along the top of shots/iter34/gameplay.png in
+  200x90 rects: R-G is 18.0 at the left edge and 13.2 at the right, against 1.6
+  to 4.7 anywhere in the middle third. Solved for the strength by undoing the
+  rim offline at a range of assumed values (`--dmg X --map 'damage=0'`): the
+  edge hue matches the middle only at `uDamage` ~0.85-0.95, i.e. the term was
+  PINNED AT ITS CEILING when the shot was taken.
+  It gets there legitimately, which is the actual defect. `_dyn.hit` takes +0.6
+  per `EV.PLAYER_HIT` up to a 1.2 cap and decays at 2.6/s, and `uDamage =
+  crit*0.55 + hit*0.65`, so two hits inside half a second pin the rim at 0.78
+  and four engaged enemies hold it there indefinitely. What is supposed to be a
+  hit FLASH is a red filter for the whole firefight — and every gameplay
+  capture this project has graded was shot through it.
+  `EV.QUICK_BOOST` also bumps the same `hit` accumulator (+0.16), so BOOSTING
+  paints a damage-coloured rim as well.
