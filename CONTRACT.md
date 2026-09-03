@@ -2063,3 +2063,32 @@ two of the silhouette metrics were wrong on their first outing.
   METHOD NOTE: the useful discriminator was not any of the theories, it was
   the CPU sim. "Is this pixel sky?" is answerable exactly and offline, and it
   turned a sky bug into a terrain bug before a single frame was captured.
+- 2026-09-03 [combat/vfx] THE EXPLOSION IS NOT A FLAT WHITE SPHERE, AND
+  DELAYING ITS SMOKE MAKES IT WORSE. Two wrong readings and one reverted
+  change, all recorded so nobody repeats them.
+  `tools/poses/explosion.js` is the tool that settled it: six detonations
+  fired at staggered times and frozen together, so one capture shows ages
+  0.05 / 0.15 / 0.30 / 0.50 / 0.80 / 1.20 s side by side. On a box that
+  renders at ~10 fps, no sequence of single-age captures can do this.
+  WRONG READING 1: "the explosion is a featureless white sphere." That frame
+  was the FLASH. `VFX.explosion` gives it a life of 0.06 and 0.105 s and one
+  frame here IS 100 ms, so the gameplay pose photographed the first tenth of
+  a 500 ms effect. The flash is white-hot by design. Same trap muzzle.js
+  documents; it has now cost two rounds.
+  WRONG READING 2: "the fire dies too fast and dark smoke buries it." The
+  rolling smoke does reach 0.78 alpha within 0.1-0.2 s (fadeIn 0.07 of a
+  1.4-3.0 s life) while the fireball is still hot, which reads like an
+  obvious occlusion bug. It is not. That smoke's `color0` is (0.34, 0.155,
+  0.065) — warm brown, "fire-lit at birth, cold soot at death" as its own
+  comment says — and IT IS WHAT CARRIES THE EXPLOSION'S COLOUR.
+  MEASURED, on warm-and-bright pixel counts per detonation box: raising
+  `fadeIn` to 0.30 (rolling) and 0.22 (lingering) took t=0.05 s from 3484 hot
+  pixels to 209, and t=0.15 s from 2799 to 12. A ~95% loss of the fire read.
+  Reverted.
+  SO: the fire you see in an explosion here is mostly LIT SMOKE, not the
+  additive core. Anything that delays, dims or thins the early smoke removes
+  the explosion. If the fireball phase needs to read longer, lengthen the
+  warm phase of the smoke's own colour ramp — do not get the smoke out of the
+  way.
+  METHOD: count warm-bright pixels in a box per age. Eyeballing the filmstrip
+  said the change had helped; the count said it had destroyed the effect.
