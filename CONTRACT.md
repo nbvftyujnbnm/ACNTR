@@ -1833,3 +1833,39 @@ two of the silhouette metrics were wrong on their first outing.
   the only channel left with full contrast, because an edge between the butte
   and the sky carries the whole 19 luma however veiled the interior is.
   So the work goes into the OUTLINE and into OVERLAP, not into interior value.
+- 2026-09-03 [tools] `debug.holdKeys` CANNOT TEST ANY `input.hit()` BINDING,
+  and that is why discrete actions have gone unverified. `holdKeys` adds to
+  `input.keys`, which is what `input.down()` reads. Every one-shot binding in
+  this game — mute, the garage toggle, every discrete action — is written
+  against `input.hit()`, which reads `input.pressed`, a different set that
+  `endFrame()` clears every frame. A test that "pressed" a key with
+  `holdKeys` therefore reported nothing happening for a binding that was
+  entirely correct, and nearly got a working feature rewritten.
+  Use `debug.tapKeys(codes)`. It injects the keydown EDGE, runs exactly one
+  frame, and cleans up. One frame is deliberate: holding `pressed` across
+  several frames fires a one-shot action repeatedly and tests something the
+  real input layer can never produce.
+- 2026-09-03 [audio] THE AUDIO SYSTEM WORKS AND NOTHING COULD REACH IT. Four
+  thousand lines across AudioDirector, Sfx, Synth and Music, with
+  `setVolume`, `setMuted`, `toggleMute` and a `_saveSettings` that persists
+  them — and `setVolume` had NO caller anywhere in src/, `setMuted` had
+  exactly one (`toggleMute`), and `toggleMute` had none. There was no way for
+  a player to mute the game or change its volume.
+  The implementation being fine is what made it invisible: a probe
+  (tools/probes/audio.js) confirms the AudioContext is running at 44.1 kHz,
+  every bus is connected with sane gains, and a mute round-trips correctly.
+  Only the binding was missing, and no screenshot can show that a key does
+  nothing.
+  Now bound in `Game._audioKeys`: M toggles mute, Minus and Equal move the
+  master volume in 0.1 steps, each with a mission-log line, and a volume-up
+  un-mutes so "louder" never returns silence.
+  HANDLED AT THE TOP OF `addUpdate`, BEFORE THE STATE BRANCHES — not in
+  lateUpdate. The garage and non-playing branches each call
+  `input.endFrame()` and return, which clears `pressed`, so a lateUpdate
+  check would never see the key in those states; and the garage is exactly
+  where someone reaches for the mute. Verified by tapping M while in the
+  garage state.
+  NOTE ON THE PROBE: `_voices` is a fixed 48-slot pool, so its length is the
+  same before and after firing sound events. That measurement is
+  INCONCLUSIVE about voice activity, not negative — do not read it as "audio
+  events do nothing".
