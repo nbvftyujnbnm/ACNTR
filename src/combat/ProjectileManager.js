@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { bus, EV } from '../core/EventBus.js';
 import { clamp, interceptPoint } from '../core/MathUtils.js';
 import { getDamageSystem } from './DamageSystem.js';
+import { projectileVert, projectileFrag } from './vfxShaders.js';
 
 /**
  * Pooled, instanced projectile simulation.
@@ -34,6 +35,13 @@ const CAP = {
   beam: 32,
   flare: 300, // engine glow for shells + missiles
 };
+/**
+ * Peak channel a projectile colour is lifted to when it arrives as a plain
+ * hue (a hex, or any triple whose brightest channel is <= 1). Sits clear of
+ * the bloom prefilter's 1.90 scene-linear threshold before the per-material
+ * `uGain` is applied on top, so the core blooms and the halo does not.
+ */
+const HDR_HUE_GAIN = 3.2;
 const MAX_PROJECTILES = 1024;
 const MAX_LIGHTS = 4;
 const MAX_HITS_PER_PROJECTILE = 6;
@@ -297,7 +305,7 @@ export class ProjectileManager {
     this._geo = {};
     this._mat = {};
     this._im = {};
-    this._counts = { tracer: 0, shell: 0, missile: 0, plasma: 0, field: 0, beam: 0, flare: 0 };
+    this._counts = { tracer: 0, tracerHalo: 0, shell: 0, missile: 0, plasma: 0, field: 0, beam: 0, flare: 0 };
     this._buildRenderables();
 
     // ---- lights ----------------------------------------------------------
@@ -320,9 +328,14 @@ export class ProjectileManager {
 
   _buildRenderables() {
     // Unit cylinders whose axis is +Z, so setFromUnitVectors(UNIT_Z, dir) aims them.
-    const cylZ = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
+    // 12 sides, not 6: the glow shader's falloff is `|N·V|` evaluated per
+    // fragment off an INTERPOLATED normal, so a 6-gon quantises the soft edge
+    // into visible facets — the same "hard polygon silhouette on something
+    // meant to be curved" that cost the plume shader a rewrite. Twelve costs
+    // nothing here; the whole tracer batch is one instanced draw.
+    const cylZ = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     cylZ.rotateX(Math.PI / 2);
-    const beamZ = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+    const beamZ = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     beamZ.rotateX(Math.PI / 2);
     const sphere = new THREE.IcosahedronGeometry(1, 1);
     const fieldGeo = new THREE.IcosahedronGeometry(1, 2);
@@ -334,29 +347,56 @@ export class ProjectileManager {
 
     this._geo = { cylZ, beamZ, sphere, fieldGeo, missileGeo, shellGeo };
 
-    const additive = (opacity) =>
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+    // Additive glow material. `MeshBasicMaterial` was the wrong tool: it
+    // shades a solid with ONE constant colour, so every round drew as a
+    // hard-edged lozenge of uniform brightness — a debug line, not ordnance.
+    // See the header comment on `projectileVert` for what the three uniforms
+    // buy. `uGain` sits ON TOP of the instance colour so a core can be pushed
+    // past the bloom prefilter (1.90 scene-linear) while its halo stays under.
+    const glow = ({ tube = 1, taper = 1, tailWidth = 0.22, headPow = 1.7,
+      tailGain = 0.05, softPow = 1.35, gain = 1, alpha = 1, width = 1 }) =>
+      new THREE.ShaderMaterial({
+        vertexShader: projectileVert,
+        fragmentShader: projectileFrag,
+        uniforms: {
+          uTube: { value: tube },
+          uTaper: { value: taper },
+          uTailWidth: { value: tailWidth },
+          uHeadPow: { value: headPow },
+          uTailGain: { value: tailGain },
+          uWidth: { value: width },
+          uSoftPow: { value: softPow },
+          uGain: { value: gain },
+          uAlpha: { value: alpha },
+        },
         transparent: true,
-        opacity,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        toneMapped: false, // HDR instance colours pass straight through so bloom catches them
+        depthTest: true,
         side: THREE.DoubleSide,
       });
 
-    this._mat.tracer = additive(0.95);
-    this._mat.plasma = additive(0.9);
-    this._mat.field = additive(0.16);
-    this._mat.beam = additive(1.0);
-    this._mat.flare = additive(0.85);
+    // Core: short bright wedge at the head. Halo: three times as wide, a fifth
+    // as bright, tapering over a longer tail — the "tight hot core, wide soft
+    // skirt" shape REVIEW.md asks of anything that blooms.
+    this._mat.tracer = glow({ gain: 1.9, softPow: 1.15, tailWidth: 0.16, headPow: 2.2 });
+    this._mat.tracerHalo = glow({ gain: 0.30, softPow: 0.55, tailWidth: 0.34, headPow: 1.1, width: 3.4, alpha: 0.9 });
+    this._mat.plasma = glow({ tube: 0, taper: 0, gain: 1.5, softPow: 1.5 });
+    this._mat.field = glow({ tube: 0, taper: 0, gain: 0.22, softPow: 0.7, alpha: 0.5 });
+    this._mat.beam = glow({ taper: 0, tailWidth: 1, gain: 1.7, softPow: 1.2 });
+    this._mat.flare = glow({ tube: 0, taper: 0, gain: 1.35, softPow: 1.25 });
+    // A motor body is a dark object against a bright sky, but a 3 m NEAR-BLACK
+    // needle (measured 6,8,24 against a 239,195,161 sky) reads as a hole
+    // punched in the frame. Lighter, rougher, with a warm emissive from the
+    // motor wash down its flank.
     this._mat.body = new THREE.MeshStandardMaterial({
-      color: 0x30343c,
+      color: 0x6a6f78,
       metalness: 1.0,
-      roughness: 0.42,
-      emissive: new THREE.Color(0x140b05),
+      roughness: 0.55,
+      emissive: new THREE.Color(0x2a1508),
     });
 
+    this._im.tracerHalo = this._mkInstanced(cylZ, this._mat.tracerHalo, CAP.tracer, 11, true);
     this._im.tracer = this._mkInstanced(cylZ, this._mat.tracer, CAP.tracer, 12, true);
     this._im.beam = this._mkInstanced(beamZ, this._mat.beam, CAP.beam, 13, true);
     this._im.plasma = this._mkInstanced(sphere, this._mat.plasma, CAP.plasma, 11, true);
@@ -503,8 +543,15 @@ export class ProjectileManager {
     p.type = def.type || 'kinetic';
     p.pulse = !!def.pulse;
     p.radius = def.radius || 0.15;
-    p.width = def.width || 0.1;
-    p.length = def.length || 3;
+    // Kind-aware fallbacks. A flat `width 0.1 / length 3` is fine for a tracer
+    // (which is a light, not an object) and absurd for a missile, where those
+    // numbers are the MESH: every enemy weapon def omits both, so every enemy
+    // missile drew as a 3 m x 0.1 m needle — a 30:1 dark splinter, measured at
+    // ~100 px of near-black against the sky in shots/iter32/gameplay.png. A
+    // body is sized off the round's own radius instead.
+    const solidBody = p.kind === 'missile' || p.kind === 'shell';
+    p.width = def.width || (solidBody ? Math.max(0.12, p.radius * 0.62) : 0.1);
+    p.length = def.length || (solidBody ? Math.max(0.9, p.radius * 5) : 3);
     p.gravity = def.gravity || 0;
     p.pierce = def.pierce || 0;
     p.hitCount = 0;
@@ -518,10 +565,24 @@ export class ProjectileManager {
     p.maxRange = def.range || 1400;
     p.fade = 1;
 
+    // A HEX COLOUR CANNOT BLOOM. `setHex` decodes into the linear working
+    // space, so its brightest channel is 1.0 by construction — and the bloom
+    // prefilter threshold is 1.90 scene-linear. Every enemy weapon in
+    // `ai/Archetypes.js` specifies its colour as a hex, which is why enemy
+    // ordnance rendered as flat LDR paint with no light spill at all while
+    // player weapons (authored as HDR arrays like `[7.0, 1.2, 2.4]`) glowed.
+    // Measured on the live scene: an enemy tracer's instance colour read
+    // (1.00, 0.45, 0.10) and moved the frame by 24 code values; the player's
+    // flare read (1.6, 0.31, 0.11) after its 1.6 multiplier and moved it by
+    // 198. Rather than rewrite another agent's weapon tables, the manager
+    // treats "max channel <= 1" as "this is a hue, not a radiance" and lifts
+    // it onto the emissive scale the additive materials are tuned for.
     const c = def.color;
     if (Array.isArray(c)) p.color.setRGB(c[0], c[1], c[2]);
     else if (typeof c === 'number') p.color.setHex(c);
     else p.color.setRGB(3, 2, 1);
+    const peak = Math.max(p.color.r, p.color.g, p.color.b);
+    if (peak > 1e-4 && peak <= 1.001) p.color.multiplyScalar(HDR_HUE_GAIN / peak);
 
     const sp = def.splash;
     const sc = def.splashScale || 1;
@@ -576,6 +637,62 @@ export class ProjectileManager {
     if (p.kind === 'beam') this._resolveBeam(p);
 
     return p;
+  }
+
+  /**
+   * Attach a persistent ribbon trail to a projectile.
+   *
+   * THIS METHOD DID NOT EXIST. `spawn()` has always called it — the call is
+   * inside `if (def.trail)` with no try/catch — so EVERY projectile carrying a
+   * trail block threw `this._acquireTrail is not a function` before it was
+   * pushed onto `this.live`. That is all four missile types and both shells:
+   * the round vanished from the pool (its slot was already taken), the
+   * exception unwound through the weapon's fire path, and no missile has ever
+   * flown with a smoke trail. It never showed up in a review frame because the
+   * capture poses fire through `debug.fireAll()`, and the player's shoulder
+   * racks need a lock; the enemy missiles that DO fly reach this line too and
+   * die at it. Found by calling `spawn` with and without a trail block from a
+   * probe and printing the exception.
+   *
+   * @param {Projectile} p
+   * @param {{color?:number[]|number, width?:number, type?:string, life?:number}} tr
+   */
+  _acquireTrail(p, tr) {
+    const v = this.vfx;
+    if (!v || typeof v.trail !== 'function') return;
+    // Pick the ribbon that matches the round: hot and additive for anything
+    // that flies flat and fast, thick unlit smoke for a motor that burns.
+    const type = tr.type
+      || (p.kind === 'missile' || p.kind === 'shell' ? 'missile'
+        : p.type === 'energy' ? 'plasma' : 'tracer');
+    // The smoke presets are alpha-blended, so their colours are reflectances
+    // and an LDR hue is exactly right. The additive presets are radiances:
+    // handing one a hex-derived colour caps it at 1.0 and it stops blooming,
+    // the same trap as the projectile colour above.
+    let col = p.trailColor;
+    if (type !== 'missile' && type !== 'debris') {
+      const peak = Math.max(col.r, col.g, col.b);
+      if (peak > 1e-4 && peak <= 1.001) {
+        col = _col.copy(col).multiplyScalar(HDR_HUE_GAIN * 1.4 / peak);
+      }
+    }
+    try {
+      const h = v.trail(null, {
+        type,
+        color: col,
+        width: p.trailWidth,
+        life: tr.life,
+      });
+      // `trail()` returns a NULL_TRAIL sentinel when the batch is exhausted;
+      // it is safe to drive but there is no point holding it.
+      if (h && !h.disposed) {
+        h.setPosition(p.pos);
+        p.trailHandle = h;
+        p.trail = true;
+      }
+    } catch (err) {
+      this._vfxBad.trail = true;
+    }
   }
 
   /** Spawn the lingering plasma field left behind by a detonation. */
@@ -641,6 +758,7 @@ export class ProjectileManager {
 
     const counts = this._counts;
     counts.tracer = 0;
+    counts.tracerHalo = 0;
     counts.shell = 0;
     counts.missile = 0;
     counts.plasma = 0;
@@ -1155,31 +1273,15 @@ export class ProjectileManager {
     }
   }
 
-  _fxTrail(p) {
-    const pay = this._trailPayload;
-    pay.position.copy(p.pos);
-    pay.direction.copy(p.dir);
-    pay.color.copy(p.trailColor);
-    pay.width = p.trailWidth;
-    pay.life = 0.55;
-    bus.emit('vfx:trail', pay);
-    const v = this.vfx;
-    if (!v) return;
-    if (v.trail && !this._vfxBad.trail) {
-      try {
-        v.trail(pay.position, pay.direction, pay.color, pay.width);
-      } catch (err) {
-        this._vfxBad.trail = true;
-      }
-    }
-    if (v.smoke && !this._vfxBad.smoke) {
-      try {
-        v.smoke(pay.position, pay.width);
-      } catch (err) {
-        this._vfxBad.smoke = true;
-      }
-    }
-  }
+  // `_fxTrail` used to live here. It was DEAD CODE (no caller anywhere in src
+  // or tools) that also called two VFX methods with the wrong signatures —
+  // `v.trail(pos, dir, color, width)` against `trail(target, opts)`, so the
+  // direction vector arrived as the options object and every weapon's authored
+  // trail colour and width were silently discarded in favour of the default
+  // preset; and `v.smoke(pos, number)` against `smoke(pos, opts)`. A dead
+  // method that looks like the working path is worse than no method: the
+  // ribbon work now happens in `_acquireTrail` (spawn) and `_stepMoving`
+  // (per-frame `trailHandle.setPosition`).
 
   // ================================================================== draw
 
@@ -1199,6 +1301,11 @@ export class ProjectileManager {
         const i = counts.tracer++;
         this._im.tracer.setMatrixAt(i, _m);
         this._setColor(this._im.tracer, i, p.color, 1);
+        // The halo shares the core's transform and widens in the shader, so
+        // the two can never drift apart or disagree about the round's length.
+        this._im.tracerHalo.setMatrixAt(i, _m);
+        this._setColor(this._im.tracerHalo, i, p.color, 1);
+        counts.tracerHalo = counts.tracer;
       }
       return;
     }
@@ -1217,14 +1324,21 @@ export class ProjectileManager {
       const burning = isShell || p.age >= p.hBoostDelay;
       if (burning && counts.flare < CAP.flare) {
         const flick = 0.75 + 0.25 * Math.sin(p.age * 90 + p.index);
-        const s = p.width * (isShell ? 1.5 : 2.1) * flick;
+        // Sized off the BODY, not off its width: what identifies ordnance in
+        // flight at 200 m is the motor, and a glow a fifth the length of the
+        // thing it is pushing reads as a bead stuck on a stick. The old
+        // `width * 2.1` gave a 0.21 m ball behind a 3 m body.
+        const s = Math.max(p.width * 2.4, p.length * (isShell ? 0.22 : 0.34)) * flick;
         _q.setFromUnitVectors(UNIT_Z, p.dir);
-        _mid.copy(p.pos).addScaledVector(p.dir, -p.length * 0.55);
-        _scl.set(s, s, s * 2.4);
+        _mid.copy(p.pos).addScaledVector(p.dir, -p.length * (0.5 + (isShell ? 0.1 : 0.22)));
+        _scl.set(s, s, s * 2.6);
         _m.compose(_mid, _q, _scl);
         const i = counts.flare++;
         this._im.flare.setMatrixAt(i, _m);
-        this._setColor(this._im.flare, i, p.trail ? p.trailColor : p.color, 1.6);
+        // The flare is the round's own emissive colour. `p.trailColor` is a
+        // SMOKE colour for anything with a missile ribbon (0.78 grey), so
+        // using it turned the motor glow into a dim grey blob.
+        this._setColor(this._im.flare, i, p.color, 1.6);
       }
       return;
     }
@@ -1303,6 +1417,7 @@ export class ProjectileManager {
 
   _flush(counts) {
     this._push(this._im.tracer, counts.tracer);
+    this._push(this._im.tracerHalo, counts.tracerHalo);
     this._push(this._im.shell, counts.shell);
     this._push(this._im.missile, counts.missile);
     this._push(this._im.plasma, counts.plasma);
@@ -1346,7 +1461,7 @@ export class ProjectileManager {
       l.intensity = 0;
     }
     const c = this._counts;
-    c.tracer = c.shell = c.missile = c.plasma = c.field = c.beam = c.flare = 0;
+    c.tracer = c.tracerHalo = c.shell = c.missile = c.plasma = c.field = c.beam = c.flare = 0;
     this._lightUsed = 0;
     this._flush(c);
   }

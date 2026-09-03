@@ -42,12 +42,42 @@
     })(),
   };
 
+  // ---- 0. does the SPAWN PATH work at all, independent of luck? ----------
+  // `mt` drops on a 0.48 chance roll, so a single kill that yields nothing is
+  // the drop table working, not a bug — a one-kill test very nearly got a
+  // healthy system reported as broken. Separate the two questions: call
+  // `dropAt` directly, which skips the chance roll entirely, so this stage
+  // fails ONLY if materialising a pickup is genuinely broken.
+  const here = debug.aheadOfPlayer(6, 0, new THREE.Vector3());
+  let directErr = null;
+  let direct = null;
+  try {
+    direct = loot?.dropAt?.(here);
+  } catch (err) {
+    directErr = String(err && err.stack ? err.stack : err).slice(0, 400);
+  }
+  out.directDropReturned = !!direct;
+  out.directDropError = directErr;
+  out.pickupsAfterDirectDrop = loot?._active?.length ?? null;
+  loot?.clear?.();
+
   // ---- 1. does a death emit a drop, and does a pickup appear? -------------
-  const spot = debug.aheadOfPlayer(18, 0, new THREE.Vector3());
-  const e = debug.spawnEnemyOnGround('mt', spot.x, spot.z, 1, 0);
+  // KILL A POPULATION, NOT ONE ENEMY. `mt` drops on a 0.48 roll, so a single
+  // kill yields nothing about half the time and a one-sample test cannot tell
+  // a broken drop from an unlucky one. Twelve kills makes a total miss a
+  // 0.52^12 = 0.03% event, so zero drops here really does mean broken.
+  const KILLS = 12;
+  const spawned = [];
+  for (let i = 0; i < KILLS; i++) {
+    const spot = debug.aheadOfPlayer(18 + (i % 4) * 6, ((i % 5) - 2) * 7, new THREE.Vector3());
+    const en = debug.spawnEnemyOnGround('mt', spot.x, spot.z, 1, 0);
+    if (en) spawned.push(en);
+  }
   debug.step(0.3);
-  out.enemySpawned = !!e;
+  const e = spawned[0] || null;
+  out.enemiesSpawnedForKilling = spawned.length;
   out.enemyPos = e?.root?.position?.toArray?.().map((n) => +n.toFixed(1)) ?? null;
+  out.expectedDropsFrom12Mts = '≈5.8 (0.48 chance × 12)';
 
   // Count pickups before, so a drop is measured as a DELTA — the level may
   // already contain loot and an absolute count would read as success.
@@ -64,20 +94,37 @@
   // a flag. A death that skips the damage system also skips whatever emits
   // the drop, which would make this probe agree with itself and prove
   // nothing.
-  const ent = e || (game.enemies?.list || [])[0];
-  if (ent) {
-    const hp = ent.stats?.apMax ?? ent.stats?.ap ?? 100000;
-    game.damage?.applyDamage?.(ent, { amount: hp * 4, type: 'kinetic', source: game.player.entity });
-    if (ent.alive !== false && ent.stats) {
-      // Fall back to draining AP directly if the damage system has a
-      // different entry point, and say so, so the result is not silently
-      // measuring a different thing than the game does.
-      out.usedDirectApDrain = true;
-      ent.stats.ap = 0;
-      ent.onDeath?.();
+  const targets = (game.enemies?.list || []).filter((x) => x && x.alive !== false);
+  const killErrors = [];
+  for (const ent of targets) {
+    try {
+      const hp = ent.stats?.apMax ?? ent.stats?.ap ?? 100000;
+      game.damage?.applyDamage?.(ent, { amount: hp * 4, type: 'kinetic', source: game.player.entity });
+      if (ent.alive !== false && ent.stats) {
+        // Fall back to draining AP directly if the damage system has a
+        // different entry point, and say so, so the result is not silently
+        // measuring a different thing than the game does.
+        out.usedDirectApDrain = true;
+        ent.stats.ap = 0;
+        ent.onDeath?.();
+      }
+    } catch (err) {
+      killErrors.push(String(err && err.stack ? err.stack : err).slice(0, 300));
     }
   }
-  debug.step(2.0);
+  out.killsAttempted = targets.length;
+  out.killErrors = killErrors.slice(0, 3);
+  // Step in slices and catch a throw from inside update(), so a crash in the
+  // loot animation path is reported here rather than killing the whole probe
+  // and taking every other answer with it.
+  let updateError = null;
+  for (let i = 0; i < 8; i++) {
+    try { debug.step(0.25); } catch (err) {
+      updateError = String(err && err.stack ? err.stack : err).slice(0, 500);
+      break;
+    }
+  }
+  out.updateError = updateError;
 
   out.dropEventsFired = dropEvents;
   out.enemyAliveAfter = ent ? ent.alive !== false : null;
