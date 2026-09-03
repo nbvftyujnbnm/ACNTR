@@ -1576,3 +1576,39 @@ two of the silhouette metrics were wrong on their first outing.
   the camera) had kept every gameplay capture empty, and an empty frame hides
   every composition problem in the game — there is nothing to be composed
   against. Fix what makes a frame representative BEFORE grading anything in it.
+- 2026-09-03 [combat/vfx] PROJECTILES DRAW OPAQUE WITH A NEAR-BLACK TRAIL —
+  a blend-state bug, not a brightness tuning problem. Each in-flight round is
+  a flat opaque salmon lozenge trailed by a solid near-black tapered streak
+  (shots/iter32/gameplay.png, `node tools/crop.mjs --png <it> --rect
+  150,470,520,140 --zoom 2`).
+  THE DIAGNOSTIC IS THE DARKNESS: additive blending computes dst + src*a and
+  can only ever brighten, so an additive tracer is mathematically incapable of
+  being darker than what is behind it. A black trail therefore proves the
+  material is drawing with normal/opaque blending, or additive with a colour
+  multiplied to ~0. No amount of brightness tuning fixes it until the blend
+  state is right. Worth checking the smoothstep trap in that path too — a
+  falling-edge `smoothstep(hi, lo, t)` along the trail's length parameter
+  would return 0 for every fragment and zero the colour exactly this way.
+  A GENERAL TEST WORTH REUSING: for any effect that is supposed to be
+  additive, ask whether it is ever DARKER than its background. If it is, the
+  blend mode is wrong, and that single observation skips the whole tuning
+  search.
+- 2026-09-03 [world] THE CLIFF STRATA ARE PRESENT AND VISIBLE — the defect is
+  that they are PERIODIC. An earlier round framed this as "absent, sub-pixel,
+  or present-but-unlit" and set out to measure which; with the camera pulled
+  back the beds read plainly as distinct dark grooves, so it is a fourth
+  thing none of those options covered.
+  What is actually wrong: the bands are perfectly parallel, uniformly spaced
+  and continuous across the whole ridge, curving in lockstep as it turns, so
+  they read as topographic contour lines rather than rock. Hard and soft
+  courses share one flat brown, so nothing but the groove distinguishes them.
+  There is no vertical erosion anywhere — no gullies, talus or chutes cutting
+  down across the bedding — and essentially no surface texture between
+  grooves. The fix is not "add strata" but "stop the strata being a periodic
+  function": vary thickness, colour and recess depth bed to bed, pinch beds
+  out, and cut the horizontal banding with vertical drainage.
+  METHOD NOTE: this was settled by cropping the capture at 2x
+  (`tools/crop.mjs`), not by a probe. The contract already says to believe the
+  image when an image and a metric disagree — the corollary is that a
+  measurement run is the wrong first move when LOOKING at the right region
+  answers the question outright.
