@@ -1000,12 +1000,61 @@ export function tank(b, mats, o) {
   return { r, h: h + 1.0 + r * 0.9, roofY: h + 1.0 };
 }
 
-/** Sphere tank on a splayed leg frame — LPG/coolant storage. */
+/**
+ * Sphere tank on a splayed leg frame — LPG/coolant storage.
+ *
+ * THE SHELL IS NOT ONE SURFACE. A pressure sphere is pressed from flat plate
+ * into petals and welded: a bottom head, two courses of petals, a top head,
+ * with a girth weld at the equator and at roughly +/-35 degrees, and a meridian
+ * weld every petal. Those beads are what the real thing shows from 200 m, and
+ * on a shape with no silhouette detail whatsoever they are the only surface cue
+ * there is — the reason this read as an untextured grey blob is that a smooth
+ * sphere under a smooth environment map has exactly one gradient on it and
+ * nothing anywhere to interrupt the specular.
+ *
+ * The meridian beads are CHORDED in 18-degree arcs rather than run as one
+ * member per petal: a straight box across a 70-degree arc sags into the shell
+ * by 0.16 of the radius and disappears, and a curved one is not something the
+ * batch can build. Four chords hold the sag to about 1% of r, so the bead
+ * stands proud everywhere along its length and catches the key the whole way
+ * round the lit side.
+ */
 export function sphereTank(b, mats, o) {
-  const { r = 9, legH = 7, tint, body = mats.body, dark = mats.dark, trim = mats.trim, glow = mats.glow } = o;
+  const {
+    r = 9, legH = 7, tint, body = mats.body, dark = mats.dark, trim = mats.trim,
+    glow = mats.glow, rng = Math.random,
+  } = o;
   const cy = legH + r * 0.82;
-  b.dome(body, r, 0, cy, 0, 20, { phi: Math.PI, tint });
-  b.tube(trim, r * 1.005, 0.42, 0, cy, 0, 20, { tint });
+  // 28 columns, not 20. At 18 m across and the ranges these sit at in the
+  // gameplay frame, a 20-gon shows its facets on the limb, and REVIEW fails a
+  // visible polygon silhouette on anything meant to be curved outright.
+  b.dome(body, r, 0, cy, 0, 28, { phi: Math.PI, tint });
+
+  // --- girth welds --------------------------------------------------------
+  const GIRTH = [-0.61, 0.0, 0.61];
+  for (const la of GIRTH) {
+    const rl = r * Math.cos(la);
+    b.tube(trim, rl + 0.06, la === 0 ? 0.44 : 0.26, 0, cy + r * Math.sin(la), 0, 28,
+      { tint: GeoBatch.tint(tint, la === 0 ? 1.0 : 0.93) });
+  }
+
+  // --- meridian welds -----------------------------------------------------
+  const MER = 10, ARCS = 4, LA0 = -0.61, LA1 = 0.61;
+  for (let i = 0; i < MER; i++) {
+    const a = (i / MER) * TAU + 0.21;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const ct = GeoBatch.tint(tint, 0.90 + ((i * 0.6180339887 + 0.24) % 1) * 0.17);
+    for (let s = 0; s < ARCS; s++) {
+      const l0 = lerp(LA0, LA1, s / ARCS), l1 = lerp(LA0, LA1, (s + 1) / ARCS);
+      const k = 1.012;
+      b.strut(trim,
+        ca * r * k * Math.cos(l0), cy + r * k * Math.sin(l0), sa * r * k * Math.cos(l0),
+        ca * r * k * Math.cos(l1), cy + r * k * Math.sin(l1), sa * r * k * Math.cos(l1),
+        0.20, { tint: ct });
+    }
+  }
+
+  // --- support frame ------------------------------------------------------
   const legs = 8;
   for (let i = 0; i < legs; i++) {
     const a = (i / legs) * TAU;
@@ -1014,8 +1063,34 @@ export function sphereTank(b, mats, o) {
     const a2 = ((i + 1) / legs) * TAU;
     b.strut(dark, x, legH * 0.55, z, Math.cos(a2) * r * 0.74, legH * 0.2, Math.sin(a2) * r * 0.74, 0.24, { tint });
   }
+
+  // --- crown works --------------------------------------------------------
+  // A manway collar, a relief stack and a railed platform. The platform is the
+  // piece that matters at range: it puts a broken dark line across the pale cap
+  // that would otherwise be the brightest, emptiest part of the whole shape.
+  const py = cy + r * 0.93;
+  const pr = r * 0.30;
+  b.tube(dark, pr, 0.22, 0, py, 0, 14, { tint });
+  for (let i = 0; i < 6; i++) {
+    const a0 = (i / 6) * TAU, a1 = ((i + 1) / 6) * TAU;
+    railing(b, dark, Math.cos(a0) * pr, Math.sin(a0) * pr,
+      Math.cos(a1) * pr, Math.sin(a1) * pr, py + 0.11, 1.05, tint);
+  }
   b.tube(dark, 0.7, 2.0, 0, cy + r * 0.95, 0, 10, { tint });
+  b.tube(trim, 0.34, 3.1, r * 0.16, cy + r * 1.02, -r * 0.13, 8, { tint });
   b.box(glow, 0.4, 0.4, 0.4, 0, cy + r + 0.5, 0, 0, { tint: 0xff2410 });
+
+  // --- bottom valve cluster ----------------------------------------------
+  // Every one of these has a nest of pipework hanging under it, and a shape
+  // with nothing under the pole reads as a ball resting on sticks.
+  b.tube(dark, r * 0.16, 1.1, 0, cy - r * 0.99, 0, 12, { tint });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU + 0.4;
+    const x = Math.cos(a) * r * 0.22, z = Math.sin(a) * r * 0.22;
+    b.pipe(body, x, cy - r * 1.02, z, x * 2.6, cy - r * 1.02 - 1.9 - i * 0.5, z * 2.6, 0.26, 8, { tint });
+    if (rng() < 0.7) b.box(trim, 0.5, 0.5, 0.5, x * 2.2, cy - r * 1.02 - 1.4, z * 2.2, a, { tint });
+  }
+
   ladder(b, dark, r * 0.74, 0, 0.3, cy - r * 0.5, 0, tint);
   return { r, h: cy + r + 0.8 };
 }

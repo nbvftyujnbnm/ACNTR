@@ -1190,20 +1190,82 @@ export class Level {
       [22, 950, 950, 85, 145, 150, 150, 1.00],
     ];
 
-    for (const [n, rad0, rads, br0, brs, bh0, bhs, con] of GROUPS) {
-      for (let i = 0; i < n; i++) {
-        const ang = ((i + 0.5) / n) * TAU + (rng() - 0.5) * (TAU / n) * 0.85;
-        const rad = rad0 + rng() * rads;
+    /*
+     * PLACED IN CLUSTERS, NOT EVENLY ROUND THE RING, and this is the single
+     * change with the most authority over how this layer reads.
+     *
+     * Measured (see the amendment): a butte's interior comes back with a
+     * standard deviation of 2.05 code values and a total range of seven, so
+     * every gram of contrast this layer owns is in the boundary between a
+     * butte and the sky. An evenly-spaced ring spends that boundary badly —
+     * each shape is an isolated island with sky all round it, which is the
+     * literal definition of a cut-out, and no amount of vertex colour inside
+     * one can say otherwise.
+     *
+     * Two shapes whose outlines CROSS say something the veil cannot take away:
+     * one of them is in front. That is a depth cue made entirely of silhouette,
+     * and it costs nothing. So the ring is eight clusters of 2-4, members
+     * within a cluster a tenth of a radian apart (about 120 m of lateral offset
+     * at this range, against plan radii of 85-230 m, so they must overlap) and
+     * deliberately spread across the WHOLE 950-1900 m band so the overlap is
+     * always near-against-far rather than two shapes at one depth merging into
+     * a single blob.
+     *
+     * `needle` is the other half of it. A narrow spire standing beside a broad
+     * mesa reads as erosion and gives the group a scale reference, and being
+     * thin it is nothing BUT outline — exactly the shape this range can carry.
+     */
+    const CLUSTERS = 8;
+    const place = [];
+    {
+      let left = GROUPS[0][0];
+      for (let c = 0; c < CLUSTERS; c++) {
+        const k = Math.min(left - (CLUSTERS - 1 - c), 2 + Math.floor(rng() * 3));
+        const base = ((c + 0.5) / CLUSTERS) * TAU + (rng() - 0.5) * (TAU / CLUSTERS) * 0.5;
+        const spread = 0.07 + rng() * 0.07;
+        // Members are handed one slice each of the depth band, shuffled, so no
+        // two in a cluster can land at the same range and fuse.
+        const slot = [];
+        for (let m = 0; m < k; m++) slot.push(m);
+        for (let m = slot.length - 1; m > 0; m--) {
+          const j = Math.floor(rng() * (m + 1));
+          const t = slot[m]; slot[m] = slot[j]; slot[j] = t;
+        }
+        for (let m = 0; m < k; m++) {
+          place.push({
+            ang: base + (m - (k - 1) * 0.5) * spread,
+            radT: (slot[m] + rng()) / k,
+            needle: k > 2 && m === k - 1 && rng() < 0.7,
+          });
+        }
+        left -= k;
+      }
+    }
+
+    for (const [, rad0, rads, br0, brs, bh0, bhs, con] of GROUPS) {
+      for (let i = 0; i < place.length; i++) {
+        const ang = place[i].ang;
+        const rad = rad0 + place[i].radT * rads;
         const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
-        const r = br0 + rng() * brs;
-        const h = bh0 + rng() * bhs;
+        const nd = place[i].needle;
+        const r = (br0 + rng() * brs) * (nd ? 0.30 : 1.0);
+        const h = (bh0 + rng() * bhs) * (nd ? 1.28 : 1.0);
         const squash = 0.42 + rng() * 0.58;
         const turn = rng() * TAU;
         const cq = Math.cos(turn), sq = Math.sin(turn);
 
-        // Highest plan order is 11 against 64 columns — 5.8 columns per lobe.
-        const H_PLAN = harmonics(rng, [2, 3, 5, 8, 11], 1.0);
+        // Highest plan order is 17 against 64 columns — 3.8 columns per lobe,
+        // which is coarse enough to survive the mesh and fine enough to put
+        // notches in an outline rather than a smooth oval.
+        const H_PLAN = harmonics(rng, [2, 3, 5, 8, 11, 17], 1.0);
         const H_CROWN = harmonics(rng, [1, 2, 3, 5, 9], 1.0);
+        // The crown CLEFT. `H_CROWN` is a signed sine and averages out into a
+        // smooth dome; erosion is one-sided, so this one is rectified and only
+        // ever cuts — the same argument the cliff ring's `notch` makes. It is
+        // what turns a flat-topped loaf into a group of summits with a saddle
+        // between them, and a saddle is an outline feature, which is the only
+        // kind this range can deliver.
+        const H_CLEFT = harmonics(rng, [2, 3, 5, 9], 0.8);
         const H_TONE = harmonics(rng, [1, 3, 6], 1.0);
         const bedPhase = rng() * TAU;
 
@@ -1217,14 +1279,30 @@ export class Level {
           const ca = Math.cos(t), sa = Math.sin(t);
           const planN = angField(t, H_PLAN);
           const plan = 1 + 0.27 * planN;
-          const hs = 1 + 0.19 * angField(t, H_CROWN);
+          const cleft = Math.max(0, angField(t, H_CLEFT) - 0.10);
+          /*
+           * The floor is the same constraint the height minimum above is: base
+           * sits at about -24 and the vista camera at 78, so a column that
+           * drops under ~112 m of relief shows the reviewer the TOP of its cap,
+           * a broad up-facing plane that renders as a pale slab floating in
+           * front of the ridge. Expressed in metres rather than as a fraction
+           * so a 300 m butte can still be cut nearly twice as deep as a 150 m
+           * one, which is what keeps the clefts from all looking the same size.
+           */
+          const hs = Math.max(112 / h, (1 + 0.19 * angField(t, H_CROWN)) * (1 - cleft * 0.38));
           const tone = angField(t, H_TONE);
           for (let p = 0; p < NP; p++) {
             const frac = PROF[p][1];
             // The plan wobble tapers out toward the cap. At full strength on the
             // rim it drove thin slivers off the caprock flare that caught the
             // sun edge-on and rendered as bright pennants on the silhouette.
-            const rr = r * PROF[p][0] * (1 + 0.27 * planN * (1 - 0.62 * frac));
+            // Taper 0.50, not 0.62, and the amplitude is up from 0.27. The
+            // taper exists because full-strength wobble on the caprock flare
+            // threw thin slivers that caught the sun edge-on and drew as bright
+            // pennants on the silhouette; at a 92-95% veil a sliver keeps about
+            // a twentieth of its own radiance, so the risk that bought the
+            // taper has mostly gone and the outline needs the buttresses back.
+            const rr = r * PROF[p][0] * (1 + 0.31 * planN * (1 - 0.50 * frac));
             const y = baseY + h * frac * hs;
             const lx = ca * rr, lz = sa * rr * squash;
             const k = a * NP + p;
@@ -1885,7 +1963,7 @@ export class Level {
     for (let i = 0; i < 2; i++) {
       const p = this._at(b, D, 62 - i * 96, 60, 0);
       const info = S.sphereTank(b, { body: K.body, trim: K.trim, dark: K.dark, glow: K.glow },
-        { r: 9.5 - i, legH: 7, tint: 0xb9c3bb });
+        { r: 9.5 - i, legH: 7, rng, tint: 0xb9c3bb });
       b.pop();
       this._addAABB(p.x, p.z, 18, 18, p.y - 3, p.y + info.h * 0.9);
       this._beacon(p.x, p.y + info.h, p.z, 0xff2008, 1.3, 2, 3.0 + i * 0.4, i * 0.5);

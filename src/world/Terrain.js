@@ -815,7 +815,7 @@ export class Terrain {
     };
 
     // keep the program cache from collapsing this with a stock standard material
-    mat.customProgramCacheKey = () => 'acntr-terrain-splat-v1';
+    mat.customProgramCacheKey = () => 'acntr-terrain-splat-v2';
 
     this._materials.push(mat);
     return mat;
