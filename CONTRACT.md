@@ -1991,3 +1991,21 @@ two of the silhouette metrics were wrong on their first outing.
   Commit your own files by explicit path (`git add src/game/Game.js ...`) and
   commit them PROMPTLY — on this branch an unstaged file is not private, it is
   just unattributed.
+- 2026-09-03 [combat/vfx] CORRECTION TO A DIAGNOSIS I GAVE THE VFX AGENT: THE
+  EXPLOSION CORE IS NOT CLIPPED. I described it as "fully clipped to white
+  across a large disc" from looking at the frame. Measured on
+  shots/iter36/gameplay.png: ZERO pixels have all three channels >= 250, and
+  only 0.45% of the frame reaches >= 235. iter35 was 0.22%, iter33 0.00%. So
+  the highlight is bright and growing but it is not blowing out, and tuning
+  the core down is the WRONG fix.
+  What is actually wrong is COMPOSITION, not exposure. The flash is centred on
+  the player mech and its bloom skirt is wide, so a small unclipped core hides
+  the subject behind a large soft veil. The levers are the skirt's RADIUS and
+  its falloff, and where the effect sits relative to the mech — not the core's
+  brightness.
+  THE METHOD ERROR IS THE POINT: "it looks blown out" and "it is blown out"
+  are different claims, and only one of them is checkable. A histogram or a
+  clipped-pixel count answers it in seconds. This is the same trap as the
+  butte hue story earlier today — an impression from a full-size frame, stated
+  as a measurement, that the numbers then refuted. Count the pixels before
+  telling anyone what to change.
