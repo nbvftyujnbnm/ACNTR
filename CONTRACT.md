@@ -2092,3 +2092,25 @@ two of the silhouette metrics were wrong on their first outing.
   way.
   METHOD: count warm-bright pixels in a box per age. Eyeballing the filmstrip
   said the change had helped; the count said it had destroyed the effect.
+- 2026-09-03 [world] CORRECTION: CUTTING `uDetail.w` DID NOT FIX THE BIMODAL
+  GROUND. The reasoning behind it is sound arithmetic — 0.62 of relief, times
+  the near boost and tap weights, reaches 1.13 of xz offset, which is 48
+  degrees of flank, and at a 13.5 degree sun that swings a fragment from
+  self-shadowed to three times base. It was committed with that arithmetic
+  written up as the cause. The follow-up measurement says otherwise: cutting
+  the near-field relief by 4.8x moved the statistic by HALF A CODE VALUE, and
+  zeroing EVERY term that perturbs the normal — base triplanar strength, both
+  detail relief taps, both ripple trains — moves it five percentage points out
+  of forty-six.
+  So the lit ground's bimodality is NOT a lighting or normal term. That leaves
+  the dust map's own albedo, which is directly readable: the forge writes to a
+  canvas, so the bytes can be measured without rendering anything
+  (`tools/probes/dustmap.js`), and `tools/probes/groundterms.js` hides the
+  candidates one at a time and reads the framebuffer.
+  The change itself is kept — 48 degrees of flank on flat sand is wrong on its
+  own terms, and 0.13 still breaks the shading terminator off the 5 m quads,
+  which is all that layer needs to do. But it is NOT the fix for the crocodile
+  skin, and the next person must not assume that problem is solved.
+  THE PATTERN, now four for four today: correct-looking arithmetic about a
+  term is a HYPOTHESIS about the image. Measure the image before and after,
+  not just the term.
