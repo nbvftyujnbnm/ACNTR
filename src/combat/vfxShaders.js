@@ -632,10 +632,11 @@ void main() {
 export const projectileVert = /* glsl */ `
 ${COMMON}
 
+uniform float uTube;       // 1 = unit cylinder about +Z, 0 = unit sphere
+uniform float uTaper;      // 0..1 how strongly the head-bright profile applies
 uniform float uTailWidth;  // radius multiplier at the tail (1 = no pinch)
 uniform float uHeadPow;    // axial profile exponent
 uniform float uTailGain;   // brightness floor at the tail
-uniform float uAxial;      // 1 = tube (taper along +Z), 0 = blob (no taper)
 uniform float uWidth;      // extra radial scale — the halo instance runs wide
 
 varying vec3 vCol;
@@ -646,22 +647,26 @@ varying float vProfile;
 void main() {
   // Geometry contract: the tube is a unit cylinder about +Z spanning z -0.5
   // (tail) .. +0.5 (head); a blob is a unit sphere. "a" is 1 at the head.
-  float a = clamp(position.z + 0.5, 0.0, 1.0);
-  float axialT = mix(1.0, a, uAxial);
-  float widthMul = mix(1.0, mix(uTailWidth, 1.0, axialT), uAxial) * uWidth;
+  float a = mix(1.0, clamp(position.z + 0.5, 0.0, 1.0), uTaper);
+  float widthMul = mix(uTailWidth, 1.0, a) * uWidth;
 
   vec3 local = vec3(position.xy * widthMul, position.z);
-  vec4 wp = modelMatrix * instanceMatrix * vec4(local, 1.0);
+  mat4 mi = modelMatrix * instanceMatrix;
+  vec4 wp = mi * vec4(local, 1.0);
 
-  // Normals must survive the non-uniform instance scale (a tracer is 30x
-  // longer than it is wide), or |N·V| collapses toward the axis and the tube
-  // shades as a flat ribbon.
-  mat3 nm = mat3(modelMatrix * instanceMatrix);
-  vec3 n = normalize(nm * vec3(normalize(vec3(position.xy, 0.0) + vec3(0.0, 0.0, 1e-6)) * vec3(1.0, 1.0, 0.0) + vec3(0.0, 0.0, uAxial < 0.5 ? position.z : 0.0)));
-  vNrmW = mix(normalize(nm * normalize(position)), n, uAxial);
+  // A tube's normal is radial (z component zero); a blob's is its own
+  // direction. Both go to world space through the INSTANCE matrix, because a
+  // tracer's scale is 30:1 along its axis. For the tube the two live
+  // components share one scale factor, so the plain basis normalises to the
+  // right direction; the blob's scale is near-uniform and the small
+  // inverse-transpose error is invisible inside a soft glow.
+  vec3 nLocal = uTube > 0.5
+    ? vec3(normalize(position.xy + vec2(1e-5, 0.0)), 0.0)
+    : normalize(position + vec3(1e-5));
+  vNrmW = normalize(mat3(mi) * nLocal);
   vViewW = cameraPosition - wp.xyz;
 
-  vProfile = mix(1.0, mix(uTailGain, 1.0, pow(axialT, uHeadPow)), uAxial);
+  vProfile = mix(uTailGain, 1.0, pow(a, uHeadPow));
   vCol = instanceColor;
 
   gl_Position = projectionMatrix * viewMatrix * wp;

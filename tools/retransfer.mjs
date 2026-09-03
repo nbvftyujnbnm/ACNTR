@@ -11,14 +11,11 @@
  * WHY THIS IS EXACT, and where it stops being exact.
  *
  * FINAL_FRAG computes a display-referred colour `disp`, then writes
- * `agxToLinear(disp)` and lets three's `colorspace_fragment` apply the sRGB
- * OETF. So the shipped 8-bit output is
- *
- *     code = 255 * OETF( disp ^ 2.2 )
- *
- * That map is strictly monotonic per channel, so it INVERTS exactly:
- *
- *     disp = ( EOTF( code / 255 ) ) ^ (1 / 2.2)
+ * `displayToLinear(disp)` and lets three's `colorspace_fragment` apply the sRGB
+ * OETF. Those two have CANCELLED since 2026-09-02, so the shipped 8-bit output
+ * is simply `code = 255 * disp` and the inverse is `disp = code / 255`. Before
+ * that commit the write was `pow(disp, 2.2)` and the shipped map was
+ * `code = 255 * OETF(disp^2.2)`; pass `--from 2.2` for an older capture.
  *
  * Every capture in `shots/` can therefore be taken back to the display value
  * the grade actually produced, a candidate change applied there, and the frame
@@ -26,10 +23,13 @@
  * the Contract Amendments warn about (A/B MEASUREMENT RIG): this is the SAME
  * frame, not a second one.
  *
- * The grade stages between the tonemap and the encode are also invertible, so
- * `lift`, `saturation`, `splitShadow`/`splitHighlight` and `gain` can each be
- * re-applied to an existing capture. See `unGrade()` for the exact chain and
- * for which step is solved iteratively.
+ * EVERY STAGE FROM THE SCENE RADIANCE DOWN IS INVERTIBLE, so the whole grade
+ * can be re-applied to an existing capture: `gain`, `gamma`, `contrast`,
+ * `lift`, `saturation`, split toning, the vignette and the damage rim below the
+ * tonemap, and `exposure` plus the AgX `look` (slope / offset / power /
+ * saturation) above it — see `agxInverse()` in tools/grade-model.mjs. What
+ * CANNOT be evaluated here is anything that is not a function of the pixel's
+ * own final colour: bloom, CA, sharpen, TAA, and every lighting parameter.
  *
  * THE LIMITS, which matter and are reported rather than hidden:
  *  - 8-bit quantisation. The shipped encode CRUSHES the toe, so many distinct
@@ -524,8 +524,9 @@ const files = argv.filter((a, i) => !a.startsWith('--') && !skip.has(i));
 if (!files.length) {
   console.error('usage: node tools/retransfer.mjs <png ...> [--map SPEC]... [--out DIR]' +
     ' [--hist] [--vig a,s] [--from 2.2|srgb]\n' +
-    "  SPEC keys: encode lift gain gamma contrast split splitHi bal sat vig vigSmooth order\n" +
-    "  e.g. --map 'contrast=1.40;lift=0.014,0.016,0.026'");
+    "  SPEC keys: encode exposure agx slope power lift gain gamma contrast\n" +
+    "             split splitHi bal sat vig vigSmooth damage order\n" +
+    "  e.g. --map 'slope=1.45;power=1.12'   --map 'damage=0'");
   process.exit(1);
 }
 if (outDir) mkdirSync(outDir, { recursive: true });
@@ -535,6 +536,31 @@ if (outDir) mkdirSync(outDir, { recursive: true });
 // statistic comes out wrong. Must run before parseMap, which snapshots SHIPPED.
 const fromEncode = flag('from');
 if (fromEncode) SHIPPED.encode = fromEncode === 'srgb' ? 'srgb' : Number(fromEncode);
+
+// SHIPPED must describe the build the CAPTURE was taken with. It is a literal
+// rather than a read of Pipeline.js on purpose — the pipeline moves on and old
+// shots do not — but a silent disagreement makes every number here wrong, so
+// say so loudly and let the operator decide.
+try {
+  const live = shippedParams();
+  const drift = [];
+  const cmp = (k, a, b) => { if (String(a) !== String(b)) drift.push(`${k}: capture ${a} vs Pipeline.js ${b}`); };
+  cmp('exposure', SHIPPED.exposure, live.exposure);
+  cmp('agxLook', SHIPPED.agxLook, live.agxLook);
+  cmp('lift', SHIPPED.lift, live.lift);
+  cmp('gain', SHIPPED.gain, live.gain);
+  cmp('contrast', SHIPPED.contrast, live.contrast);
+  cmp('saturation', SHIPPED.saturation, live.saturation);
+  cmp('splitShadow', SHIPPED.splitShadow, live.splitShadow);
+  if (drift.length) {
+    console.error('WARNING: retransfer SHIPPED disagrees with src/render/Pipeline.js.');
+    console.error('  Fine if these captures predate the change; wrong if they do not.');
+    for (const d of drift) console.error('  ' + d);
+    console.error('');
+  }
+} catch (e) {
+  console.error('WARNING: could not read Pipeline.js to check for drift — ' + e.message);
+}
 
 const cands = mapSpecs.map(parseMap);
 
