@@ -530,6 +530,39 @@ export class Terrain {
        */
       uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.62) },
       uGroundMean: { value: 0.5 },
+      /*
+       * WIND RIPPLES. x/y are the two ripple wavelengths in METRES, z the
+       * relief amplitude (added straight to the world normal's xz, so 0.18
+       * against the wave's 1.55 peak is about 16 degrees of flank), w the
+       * albedo swing between a winnowed crest and a fines-filled trough.
+       *
+       * This is the one cue the ground had none of: EVERY term above it is
+       * isotropic. The dust map, its macro, its aggregate and its grit are all
+       * blobby noise sampled without direction, so the surface reads as
+       * sandblasted concrete rather than as sand — there is nothing anywhere on
+       * it that points. Aeolian ripples are the opposite: a strongly
+       * anisotropic corrugation whose crests run along the contours of whatever
+       * they are lying on, which is exactly the structure a 13-degree sun can
+       * throw shade off.
+       *
+       * PERIODIC ON PURPOSE, and the distinction matters because the cliff
+       * strata were just torn out for being periodic. Bedding is a stack of
+       * different rocks and reads wrong when every course is identical; a
+       * ripple field IS a wave train, and a real one is regular to within a
+       * few per cent. What keeps it from reading as corduroy is that its
+       * DIRECTION is a field, not a constant (see acRipDir), so the crests bend
+       * across every dune flank they cross.
+       *
+       * ANALYTIC, so unlike the texture taps it does not mip away — which is
+       * the whole reason it works at 15-40 m where the 0.61 m grit tap has
+       * already collapsed to the map mean. The aliasing limit that usually
+       * forbids a closed-form term at this scale is not close: a 1.7 m period
+       * hits two pixels per cycle at about 1.5 km, so the long fade below is
+       * there to stop the far plateau reading busy, not to stop it sparkling.
+       */
+      uRipple: { value: new THREE.Vector4(1.70, 0.62, opts.rippleRelief ?? 0.18, opts.rippleAlbedo ?? 0.052) },
+      // Prevailing wind, radians in the XZ plane. Ripple crests run across it.
+      uWind: { value: opts.windAngle ?? 0.72 },
     };
     u.uGroundMean.value = textureMeanLuma(ground.map);
     mat.userData.uniforms = u;
@@ -569,6 +602,8 @@ export class Terrain {
            uniform vec3 uPadTint;
            uniform vec4 uScales;
            uniform vec4 uDetail;
+           uniform vec4 uRipple;
+           uniform float uWind;
            uniform float uGroundMean;
            uniform float uNrmStrength;
            varying vec3 vWPos;
@@ -641,6 +676,69 @@ export class Terrain {
            // the point where a lit dune starts throwing white specks.
            acAlb *= clamp( 1.0 + acDet * uDetail.z, 0.58, 1.32 );
 
+           float acDist = length( acWP - cameraPosition );
+           // Grit is the finest thing on the ground and the first to mip out,
+           // so it is given back its authority over the range where the screen
+           // can still resolve it. 22-70 m is a long ramp on purpose: a short
+           // one puts a visible disc of detail around the camera that slides
+           // with the player.
+           float acNear = 1.0 - smoothstep( 22.0, 70.0, acDist );
+
+           // --- mid-scale material break ------------------------------------
+           // The macro taps sit at 190 m and 70 m and the dust tile's own
+           // features at about 2 m, so the ground carried NOTHING between 2 and
+           // 70 m: no pale alkali pan, no oxidised patch, nothing to tell one
+           // part of a dune field from another at the range a gameplay camera
+           // spends its pixels on. A third tap of the same map at 34 m, on the
+           // blue channel so it cannot correlate with the other two, drives a
+           // warm/cool patchwork. The two ends are chosen to average to a gain
+           // of ~1 per channel so this cannot shift the terrain's overall cast.
+           float acMeso = texture2D( tGroundMap, acWP.xz * ( uScales.w * 5.6 ) ).b;
+           acAlb *= mix( vec3( 1.07, 1.00, 0.90 ), vec3( 0.94, 0.99, 1.09 ),
+                         smoothstep( 0.34, 0.70, acMeso ) );
+
+           // --- wind ripples -------------------------------------------------
+           // Direction is a FIELD, which is what stops a wave train reading as
+           // corduroy. On level ground the ripples run across the prevailing
+           // wind; on anything with a slope they swing round to run across the
+           // fall line, because that is what a ripple field does on a dune
+           // flank. The length guard matters: normalize() of the horizontal
+           // part of an exactly-up normal is a divide by zero, and one NaN
+           // fragment here would spread through the whole normal.
+           vec2 acWind = vec2( cos( uWind ), sin( uWind ) );
+           vec2 acGH = acGN.xz;
+           float acGHL = length( acGH );
+           vec2 acFall = acGHL > 1e-3 ? acGH / acGHL : acWind;
+           vec2 acRipDir = mix( acWind, acFall, clamp( acGHL * 3.4, 0.0, 0.78 ) );
+           // A slow rotation on top, so even a dead-flat pan does not carry one
+           // rigid direction from end to end.
+           float acRipRot = ( acMacro2 - 0.5 ) * 0.85;
+           float acRC = cos( acRipRot ), acRS = sin( acRipRot );
+           acRipDir = normalize( vec2( acRipDir.x * acRC - acRipDir.y * acRS,
+                                       acRipDir.x * acRS + acRipDir.y * acRC ) + 1e-6 );
+
+           float acTwoPi = 6.28318531;
+           // The 2.3 m grit tap doubles as a phase warp, so the crest lines
+           // wander by a fraction of a wavelength instead of ruling straight
+           // across the frame. No extra fetch.
+           float acWarp = ( acD1 * acInv - 1.0 ) * 1.7;
+           float acPh = dot( acWP.xz, acRipDir ) * ( acTwoPi / uRipple.x ) + acWarp;
+           // Secondary train, turned about 20 deg off the primary and shorter.
+           vec2 acRipDir2 = normalize( acRipDir + vec2( -acRipDir.y, acRipDir.x ) * 0.36 );
+           float acPh2 = dot( acWP.xz, acRipDir2 ) * ( acTwoPi / uRipple.y ) + acWarp * 0.6;
+
+           // Ripples only form in loose sand, so they are masked off the pads
+           // and the riverbed gravel, off anything too steep to hold a bed, and
+           // patchily by the macro field — half the plateau is scoured bare.
+           // The far fade is about visual noise, not aliasing: at 1.7 m the
+           // Nyquist limit is a kilometre and a half away.
+           float acRipMask = acFlat * acWDust * smoothstep( 0.30, 0.66, acMacro2 );
+           float acRipFar = 1.0 - smoothstep( 150.0, 420.0, acDist );
+           float acRipK = acRipMask * acRipFar;
+           // A crest is winnowed of fines and reads paler than the trough that
+           // collected them. Height is sin(phase), so this is in phase with it.
+           acAlb *= 1.0 + sin( acPh ) * uRipple.w * acRipK;
+
            diffuseColor.rgb *= acAlb;
 
            // roughness: dry dust is very rough, wet-stained concrete less so
@@ -681,8 +779,24 @@ export class Terrain {
            // is the same gate the albedo half uses.
            vec2 acDN1 = texture2D( tGroundNrm, acDUV * ( acSD * uDetail.x ) ).xy * 2.0 - 1.0;
            vec2 acDN2 = texture2D( tGroundNrm, acDUV2 * ( acSD * uDetail.y ) ).xy * 2.0 - 1.0;
-           vec2 acDN = ( acDN1 * 0.70 + acDN2 * 0.52 ) * ( uDetail.w * acFlat );
-           acWorldN = normalize( acWorldN + vec3( acDN.x, 0.0, acDN.y ) );`
+           vec2 acDN = ( acDN1 * 0.70 + acDN2 * 0.52 )
+                     * ( uDetail.w * acFlat * ( 1.0 + 0.85 * acNear ) );
+           acWorldN = normalize( acWorldN + vec3( acDN.x, 0.0, acDN.y ) );
+
+           // Ripple relief. The normal perturbation is the SLOPE of the ripple,
+           // i.e. the derivative of its height, so the wave that is added here
+           // is the derivative of sin(ph) + 0.28*sin(2*ph): a cosine with a
+           // second harmonic, which makes the lee face steeper than the stoss
+           // face the way a real ripple is. Peak of that shape is 1.56, so
+           // uRipple.z at 0.18 buys about 16 degrees of flank — plenty against
+           // a 13-degree sun, where N.L on level ground is only 0.22 and every
+           // degree of tilt is worth a lot of it.
+           float acRipS  = cos( acPh )  + 0.56 * cos( 2.0 * acPh );
+           float acRipS2 = cos( acPh2 ) + 0.56 * cos( 2.0 * acPh2 );
+           vec2 acRipN = acRipDir * ( acRipS * uRipple.z )
+                       + acRipDir2 * ( acRipS2 * uRipple.z * 0.42 );
+           acRipN *= acRipK;
+           acWorldN = normalize( acWorldN + vec3( acRipN.x, 0.0, acRipN.y ) );`
         )
         .replace(
           '#include <roughnessmap_fragment>',

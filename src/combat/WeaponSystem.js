@@ -420,11 +420,25 @@ export class WeaponSystem {
     const range = def?.range || 900;
     let solved = false;
 
-    if (tg && !this._aimBad.lead && typeof tg.getLeadPoint === 'function') {
+    // CONTRACT SIGNATURE: `getLeadPoint(entity, projectileSpeed, out)`. This
+    // called it as `(speed, out)`, so `entity` arrived as a NUMBER, the method's
+    // own `if (!entity?.root) return o.set(0, 0, 0)` guard fired, and it handed
+    // back its INTERNAL vector — never touching the `out` we pass on as the aim
+    // point. The finite-check below then declared the shot SOLVED, so `_aim` was
+    // never written by anything and kept its initial value. Measured: with the
+    // mech at (-198, 65.6, -8) every slot fired along (0.94, -0.34, 0.05), which
+    // is exactly `normalize((0,0,0) - muzzle)` — EVERY PLAYER WEAPON WAS AIMING
+    // AT THE WORLD ORIGIN, whatever the camera was pointing at.
+    // A lead solution only means anything when there IS a target, so gate on one
+    // instead of trusting a returned vector to say so.
+    const lead = ctx.target || tg?.target || null;
+    if (lead && tg && !this._aimBad.lead && typeof tg.getLeadPoint === 'function') {
       try {
-        const r = tg.getLeadPoint(speed, out);
-        if (r && isFinite(r.x)) solved = true;
-        else if (isFinite(out.x) && out.lengthSq() > 0) solved = true;
+        const r = tg.getLeadPoint(lead, speed, out);
+        if (r && isFinite(r.x)) {
+          if (r !== out) out.copy(r);
+          solved = true;
+        }
       } catch (err) {
         this._aimBad.lead = true;
       }
