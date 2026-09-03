@@ -416,13 +416,16 @@ export class VFX {
     const cr = _c0.r, cg = _c0.g, cb = _c0.b;
 
     // 1 — hot near-white core. Tiny, brief, extremely bright.
+    //
+    // THE ONE PART THAT IS MEANT TO CLIP. Everything below it is sized and
+    // graded so that it does NOT: see the note on the flare.
     let p = ps.begin(BATCH_ADD);
     p.pos.copy(pos).addScaledVector(_dir, 0.12 * s);
     p.life = 0.042;
-    p.size0 = 0.55 * s; p.size1 = 1.15 * s;
+    p.size0 = 0.30 * s; p.size1 = 0.62 * s;
     p.tile = TILE.CORE;
-    hdr(p.color0, lerp(cr, 1, 0.72), lerp(cg, 1, 0.7), lerp(cb, 1, 0.62), 26);
-    hdr(p.color1, cr, cg * 0.8, cb * 0.5, 5);
+    hdr(p.color0, lerp(cr, 1, 0.72), lerp(cg, 1, 0.7), lerp(cb, 1, 0.62), 17);
+    hdr(p.color1, cr, cg * 0.8, cb * 0.5, 3.5);
     p.alpha0 = 1; p.alpha1 = 0.4;
     p.fadeIn = 0; p.alphaCurve = 1.4; p.sizeCurve = 0.45;
     p.rot = Math.random() * TAU;

@@ -1958,3 +1958,36 @@ two of the silhouette metrics were wrong on their first outing.
   The probe is bounded in SIMULATED time and reports a stuck director as
   stuck rather than hanging, so it is safe to re-run as a regression check
   after any change to Encounters, EnemyManager or DamageSystem.
+- 2026-09-03 [loot/game] THE BUILD AND SALVAGE NOW PERSIST. `Loadout.toJSON`
+  and `fromJSON` existed from the start — the latter carefully written to drop
+  unknown parts rather than throw — and NOTHING CALLED EITHER. Every part
+  collected and every garage swap was discarded on reload. In a LOOTER that is
+  not a missing convenience, it is the progression: the drop tables, the
+  rarity tiers and the whole garage exist to accumulate something, and nothing
+  accumulated past a refresh.
+  Third instance of the same shape today, after the loot pickup's missing
+  `body` node and the audio bindings: THE HARD PART WAS WRITTEN AND THE ONE
+  LINE THAT REACHES IT WAS NOT. When a subsystem looks finished, check who
+  calls it before checking whether it works.
+  Wired in `Game`: `_restoreLoadout()` runs BEFORE `buildPlayer` so the parts
+  the player is wearing are the ones fabricated; `_wireSave()` coalesces
+  BUILD_CHANGED and LOOT_PICKUP onto a 400 ms timer (both fire several times
+  in a frame — a wave's drops collected together, or a swap that recomputes)
+  and also saves on visibilitychange and pagehide so a tab closed mid-mission
+  keeps its salvage. Key `acntr.save.v1`, version-checked on load so a payload
+  from a different part schema is ignored rather than half-applied.
+  Every path is defensive: `localStorage` THROWS outright in a private context
+  or with site data blocked, and a half-written value parses to garbage.
+  Neither is a reason to refuse to start — a failed restore just leaves the
+  starter build.
+  VERIFIED ACROSS A REAL RELOAD, not in memory: equip a part through the
+  garage (rArm SCUDDER -> HAMMERHEAD), reload the page, and the slot still
+  reads HAMMERHEAD with the inventory count intact. An in-memory round trip
+  would have proven nothing, since the defect was that nothing ever wrote.
+- 2026-09-03 [process] AGENTS SHARING A BRANCH RUN `git add -A` AND WILL SWEEP
+  UP YOUR UNCOMMITTED WORK. The save wiring above was written here and landed
+  inside an agent's commit about a capture pose, under a message that does not
+  mention it. Nothing was lost, but the history now misdescribes itself.
+  Commit your own files by explicit path (`git add src/game/Game.js ...`) and
+  commit them PROMPTLY — on this branch an unstaged file is not private, it is
+  just unattributed.
