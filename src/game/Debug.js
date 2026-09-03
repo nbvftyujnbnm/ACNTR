@@ -735,16 +735,39 @@ export class Debug {
     return this.vfx('explosion', new THREE.Vector3(x, y, z), radius);
   }
 
-  /** Fire every weapon slot once, for muzzle-flash / tracer captures. */
+  /**
+   * Fire every weapon slot once, for muzzle-flash / tracer captures.
+   *
+   * `WeaponSystem.forceFire` hands each weapon the REAL per-slot context. The
+   * old body passed `{ force: true }` as the context, and `Weapon._shot` opens
+   * with `this._origin.copy(ctx.origin)` — undefined — so every single-shot
+   * weapon threw into the empty catch below and never fired. Only `burst` and
+   * `salvo` weapons worked, because those return from `tryFire` after queueing
+   * and the queue is drained by `update()` with the real context. The fallback
+   * is kept for a build where `forceFire` is missing, but it is the broken path.
+   * `fireCount()` reports how many actually committed.
+   */
   fireAll() {
-    const slots = this.game.weapons?.slots;
+    const ws = this.game.weapons;
+    if (!ws) return this;
+    if (typeof ws.forceFire === 'function') {
+      this._lastFireCount = ws.forceFire();
+      return this;
+    }
+    const slots = ws.slots;
     if (!slots) return this;
+    this._lastFireCount = null;
     for (const k of Object.keys(slots)) {
       try {
         slots[k]?.tryFire?.({ force: true });
       } catch { /* weapon may need a richer ctx */ }
     }
     return this;
+  }
+
+  /** How many weapons the last `fireAll()` actually committed to a shot. */
+  fireCount() {
+    return this._lastFireCount ?? null;
   }
 
   /** Drive HUD state for interface review. */

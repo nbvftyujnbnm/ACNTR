@@ -117,6 +117,7 @@
   }
   window.__POSE_NOTE__ = {
     diagnostic: 'simulation frozen 30 ms after the volley — not a running-game frame',
+    weaponsFired: debug.fireCount?.() ?? null,
     liveParticles: game.vfx?.liveParticles ?? null,
     muzzleOrigin: [+mz.x.toFixed(2), +mz.y.toFixed(2), +mz.z.toFixed(2)],
     fireDir: [+dir.x.toFixed(2), +dir.y.toFixed(2), +dir.z.toFixed(2)],

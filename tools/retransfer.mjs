@@ -619,6 +619,9 @@ try {
 }
 
 const cands = mapSpecs.map(parseMap);
+// Every candidate used to write the same filename, so a run with three --maps
+// left one file: the last one, silently.
+cands.forEach((c, i) => { c._tag = String(i + 1); });
 
 // The code mapping is the whole story for an encode-only candidate, so print it.
 for (const cand of cands) {
@@ -656,7 +659,7 @@ for (const f of files) {
         ` lo ${clipLo.toFixed(2)}%  hi ${clipHi.toFixed(2)}%`);
     }
     if (outDir) {
-      const nm = basename(f).replace(/\.png$/, '') + '_' +
+      const nm = basename(f).replace(/\.png$/, '') + '_c' + cand._tag + '_' +
         (cand.encode === 'srgb' ? 'srgb' : `e${cand.encode}`) + (cand._grade ? '_g' : '') + '.png';
       const p = resolve(outDir, nm);
       writePng(p, img.width, img.height, out);

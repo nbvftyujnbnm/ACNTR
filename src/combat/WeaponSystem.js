@@ -934,6 +934,53 @@ export class WeaponSystem {
 
   // ================================================================== misc
 
+  /**
+   * Fire a slot (or every slot) from a tool, using the REAL per-frame context.
+   *
+   * WHY THIS EXISTS: `debug.fireAll()` called `weapon.tryFire({ force: true })`,
+   * and `Weapon._shot` starts with `this._origin.copy(ctx.origin)` — so a
+   * context without an origin throws, inside a `try {} catch {}` that swallows
+   * it. Every single-shot weapon therefore fired NOTHING; only `burst`/`salvo`
+   * weapons appeared to work, because those return from `tryFire` after merely
+   * queueing, and the queue is drained later by `update()` with the real
+   * context. So every muzzle-flash, tracer and impact frame this project has
+   * ever captured was one bursting sidearm, and "the flash is weak" was partly
+   * "three of the four guns never went off".
+   *
+   * `this._ctx[slot]` is rebuilt every frame by `_prepareContext` whether or
+   * not the trigger is down, so it is always a valid muzzle transform and aim.
+   * Two things are forced, and a diagnostic must own up to both: the cooldown
+   * is cleared (the player could have been holding the trigger), and a
+   * lock-only weapon is handed `lockProgress = 1` (it could have had a lock).
+   *
+   * @param {string|null} slot one of SLOT_KEYS, or null for all of them
+   * @returns {number} how many weapons actually committed to a shot
+   */
+  forceFire(slot = null) {
+    const keys = slot ? [slot] : SLOT_KEYS;
+    let fired = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const w = this.slots[k];
+      const ctx = this._ctx[k];
+      if (!w || !ctx) continue;
+      ctx.pressed = true;
+      ctx.held = true;
+      ctx.released = false;
+      if (w.def?.requiresLock) ctx.lockProgress = 1;
+      w.cooldown = 0;
+      try {
+        if (w.tryFire(ctx)) fired++;
+      } catch (err) {
+        if (!this._forceBad) {
+          this._forceBad = true;
+          console.warn('[weapons] forceFire threw', err);
+        }
+      }
+    }
+    return fired;
+  }
+
   /** Restore ammo, heat and cooldowns across the build (mission restart / garage exit). */
   reset() {
     for (const k of SLOT_KEYS) this.slots[k]?.reset?.();
