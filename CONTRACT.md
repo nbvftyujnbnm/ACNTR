@@ -1632,3 +1632,33 @@ two of the silhouette metrics were wrong on their first outing.
   a non-zero exit — worth doing for any checker, since a checker that silently
   passes everything is indistinguishable from a working one right up until it
   matters.
+- 2026-09-03 [loot] PICKING UP ANY DROP CRASHED THE FRAME LOOP, because
+  `p.body` was read in three places and never assigned anywhere. The pickup
+  record is built in `_create` as
+  `{root, cage, core, bandA, bandB, shards, beam, decal, halo}` — no `body` —
+  while update()'s `collect` and `fade` branches both call
+  `p.body.scale.setScalar(...)`. So the instant a drop was collected or timed
+  out, "Cannot read properties of undefined (reading 'scale')" took the whole
+  update loop down. The LOOTER half of this looter shooter did not work at
+  all, and no amount of visual polish was ever going to reach it.
+  `_animate`'s own doc comment had described the missing node the whole time:
+  "body is the only scaled node; the beam, decal and halo hang off the
+  unscaled root so their world sizes stay purely rarity-driven and the
+  ground-anchoring maths stays in world units." The group was designed,
+  documented, and never built.
+  It cost a SECOND bug too. `spawnPart` compensated by scaling the ROOT, and
+  the beam and decal are positioned in world units off `groundY`
+  (`beam.position.y = groundY - root.position.y + beamH*0.5`), so on a scaled
+  root every rarity except `rare` (scale 1.0) anchored its light shaft and
+  scan ring off the ground — 0.82x for common, 1.42x for prototype. Building
+  `body` and scaling that instead fixes both at once.
+  MEASURED AFTER: 12 kills -> 12 drop events -> pickups spawn -> 3 collected
+  -> inventory 4 to 7 -> equip moves 10 derived stats, with no update error.
+- 2026-09-03 [method] DO NOT CONCLUDE A DROP IS BROKEN FROM ONE KILL. `mt`
+  drops on a 0.48 chance roll, so a single kill yields nothing about half the
+  time; a one-sample probe reported "0 pickups" and very nearly got a healthy
+  drop table written up as a bug. Any system with a probability gate needs
+  either a population (12 kills makes a total miss a 0.03% event) or a
+  chance-free entry point — `LootSystem.dropAt` skips the roll entirely, so it
+  isolates "materialising a pickup is broken" from "you were unlucky". Test
+  both, and report them as separate lines.
