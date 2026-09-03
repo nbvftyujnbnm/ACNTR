@@ -528,7 +528,34 @@ export class Terrain {
        * goes to 1 and the layer fades out on its own. A closed-form noise term
        * at 10 cm would alias into crawling speckle at 200 m instead.
        */
-      uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.62) },
+      /*
+       * uDetail.w — THE RELIEF HALF — WAS 0.62 AND IT IS THE CROCODILE SKIN.
+       * MEASURED on shots/L48/ground.png over a 360x220 patch of SUNLIT dune at
+       * 20-40 m:
+       *     mean 70.9  sd 49.2  p1/p10/p50/p90/p99 = 5 / 14 / 65 / 139 / 165
+       *     41.7% of it under code 40, 22.8% over 120
+       * A lit sand surface whose tenth percentile (14) is BELOW the tenth
+       * percentile of the deep-shadow ground beside it (15) is not textured, it
+       * is punched full of holes. 160 code values of range across flat sand.
+       *
+       * The arithmetic is the one `uRipple` already carries, applied to the
+       * wrong term. `acDN` adds the two detail normal taps STRAIGHT into the
+       * world normal's xz: at 0.62, times the (1 + 0.50 * acNear) near boost and
+       * the 0.70/0.52 tap weights, the xz offset reaches 1.13, which is
+       * atan(1.13) = 48 DEGREES of flank. At a 13.5 degree sun N.L on level
+       * ground is sin(13.5) = 0.233, so 48 degrees swings a fragment from
+       * fully self-shadowed to more than three times base — which is exactly
+       * the measured histogram. The ripples were cut to 0.06 for 5.3 degrees
+       * of flank while this term sat ten times higher on the same surface.
+       *
+       * 0.13 with a 0.35 near boost peaks at 0.21 of xz, about 12 degrees in
+       * the worst case and 4-6 typically: read as texture, not as a pattern.
+       * The layer still does the job its own comment claims — breaking the
+       * shading terminator off the 5 m mesh quads — because that only needs the
+       * normal to stop being constant across a quad, not to be thrown 48
+       * degrees.
+       */
+      uDetail: { value: new THREE.Vector4(5.7, 21.3, opts.detailContrast ?? 0.58, opts.detailRelief ?? 0.13) },
       uGroundMean: { value: 0.5 },
       /*
        * WIND RIPPLES. x/y are the two ripple wavelengths in METRES, z the
@@ -796,7 +823,7 @@ export class Terrain {
            vec2 acDN1 = texture2D( tGroundNrm, acDUV * ( acSD * uDetail.x ) ).xy * 2.0 - 1.0;
            vec2 acDN2 = texture2D( tGroundNrm, acDUV2 * ( acSD * uDetail.y ) ).xy * 2.0 - 1.0;
            vec2 acDN = ( acDN1 * 0.70 + acDN2 * 0.52 )
-                     * ( uDetail.w * acFlat * ( 1.0 + 0.50 * acNear ) );
+                     * ( uDetail.w * acFlat * ( 1.0 + 0.35 * acNear ) );
            acWorldN = normalize( acWorldN + vec3( acDN.x, 0.0, acDN.y ) );
 
            // Ripple relief. The normal perturbation is the SLOPE of the ripple,
