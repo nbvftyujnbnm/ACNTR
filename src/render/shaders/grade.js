@@ -96,13 +96,38 @@ void main() {
   vec3 l = texture2D( tSource, vUv + t * vec2( -1.0, -1.0 ) ).rgb;
   vec3 m = texture2D( tSource, vUv + t * vec2(  1.0, -1.0 ) ).rgb;
 
+  // THRESHOLD FIRST, THEN KARIS-AVERAGE. The order used to be the other way
+  // round and it is why nothing small ever bloomed.
+  //
+  // Karis weights each sample by 1/(1 + luma), so a lone hot texel among dark
+  // neighbours is suppressed several-fold. Applied BEFORE the highpass that
+  // suppression happens to the raw radiance, and the survivor is then asked
+  // whether it clears the threshold — which it no longer does. Worked through
+  // on a real emitter: a 4.19-linear muzzle core with three dark neighbours
+  // Karis-averages to 0.52, and 0.52 is under uThreshold, so the pass emits
+  // EXACTLY ZERO for it. Thresholding each tap first gives 2.29, and the Karis
+  // average of that against three zeros is 0.37 — still damped, as intended,
+  // but present.
+  //
+  // MEASURED with tools/bloomsim.mjs on shots/iter34/gameplay.png, at the same
+  // threshold of 1.90: bloom buffer mean 1.12e-2 -> 2.23e-2, and the area of
+  // the frame the pass lifts by two or more code values 3.26% -> 7.91%. The
+  // anti-firefly weighting is kept, it just now weights the highpass output;
+  // lowering uThreshold to reach the same emitters instead would have taken
+  // it to ~0.55, where the same tool measures the bloom touching 100% of the
+  // frame — the veiling glow REVIEW.md calls an automatic failure.
+  a = thresholdSoft( a ); b = thresholdSoft( b ); c = thresholdSoft( c );
+  d = thresholdSoft( d ); e = thresholdSoft( e ); f = thresholdSoft( f );
+  g = thresholdSoft( g ); h = thresholdSoft( h ); i = thresholdSoft( i );
+  j = thresholdSoft( j ); k = thresholdSoft( k ); l = thresholdSoft( l );
+  m = thresholdSoft( m );
+
   vec3 r  = karis( j, k, l, m ) * 0.5;
   r += karis( a, b, d, e ) * 0.125;
   r += karis( b, c, e, f ) * 0.125;
   r += karis( d, e, g, h ) * 0.125;
   r += karis( e, f, h, i ) * 0.125;
 
-  r = thresholdSoft( r );
   r = min( r, vec3( uClamp ) );
 
   gl_FragColor = vec4( max( r, vec3( 0.0 ) ), 1.0 );

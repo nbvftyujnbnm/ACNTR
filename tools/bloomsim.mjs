@@ -56,9 +56,9 @@ const SHIPPED_BLOOM = {
   strength: bnum('strength', 1.0), radius: bnum('radius', 1.35),
   clamp: bnum('clamp', 4), mipTaper: bnum('mipTaper', 0.74),
   mips: 6,
-  // 'karis' = the shipped order (Karis-average the quad, THEN threshold).
-  // 'threshold' = threshold each tap first, then Karis-average.
-  order: 'karis',
+  // 'threshold' = the shipped order since 2026-09-03 (threshold each tap, THEN
+  // Karis-average). 'karis' = the old order, kept so the change can be re-measured.
+  order: 'threshold',
 };
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);

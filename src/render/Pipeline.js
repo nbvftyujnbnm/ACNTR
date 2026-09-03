@@ -290,7 +290,7 @@ export class RenderPipeline {
     this._dyn = {
       crit: 0, critT: 0,
       speed: 0, speedT: 0,
-      hit: 0, scan: 0,
+      hit: 0, punch: 0, scan: 0,
       focus: this.params.dof.restFocus, focusT: this.params.dof.restFocus,
       exposureBias: 1,
     };
@@ -638,14 +638,18 @@ export class RenderPipeline {
       if (typeof s.aerialRamp === 'number') this._aerialRamp = s.aerialRamp;
     }));
     this._offs.push(bus.on(EV.PLAYER_HIT, () => {
-      this._dyn.hit = Math.min(1.2, this._dyn.hit + 0.6);
+      this._dyn.hit = Math.min(0.85, this._dyn.hit + 0.6);
       this._dyn.scan = Math.min(1, this._dyn.scan + 0.5);
     }));
     this._offs.push(bus.on(EV.STAGGER, (e) => {
       if (e && e.entity && e.entity.isPlayer) this._dyn.scan = 1;
     }));
+    // A quick boost is a LENS kick, not a wound. It used to bump `hit`, which
+    // drives the DAMAGE-COLOURED rim as well as the chromatic fringe — so
+    // boosting painted red into the frame corners. `punch` carries the fringe
+    // alone and decays faster, because a boost is over sooner than a hit.
     this._offs.push(bus.on(EV.QUICK_BOOST, () => {
-      this._dyn.hit = Math.min(1.2, this._dyn.hit + 0.16);
+      this._dyn.punch = Math.min(0.5, this._dyn.punch + 0.16);
     }));
     this._offs.push(bus.on(EV.GAME_OVER, () => { this._dyn.critT = 1; }));
   }
@@ -1004,7 +1008,15 @@ export class RenderPipeline {
     const fr = d.focusT / Math.max(d.focus, 1e-3);
     if (fr > 2.5 || fr < 0.4) d.focus = d.focusT;
     else d.focus = damp(d.focus, d.focusT, 3.2, step);
-    d.hit = Math.max(0, d.hit - step * 2.6);
+    // 2.6 -> 5.5, ceiling 1.2 -> 0.85 (see the EV.PLAYER_HIT handler). A single
+    // hit now reads for ~0.11 s, which is the 2-3 frame flash REVIEW.md asks
+    // for, and a second hit landing on top of the first can no longer stack the
+    // rim past 0.85. The ceiling matters more than the decay: under sustained
+    // fire the term converges to (bump * rate) / decay regardless of how fast a
+    // single flash falls, and it is the CONVERGED value that a still capture
+    // catches.
+    d.hit = Math.max(0, d.hit - step * 5.5);
+    d.punch = Math.max(0, d.punch - step * 6.0);
     d.scan = Math.max(0, d.scan - step * 1.8);
 
     const t = this._elapsed;
@@ -1053,9 +1065,18 @@ export class RenderPipeline {
     // means the worst case is not any of their design points, and 3.2 (9.1 px)
     // is the most this frame can carry before the fringe separates.
     f.uChromatic.value = Math.min(
-      3.2, p.chromatic.amount + d.crit * 1.25 + d.hit * 1.9 + d.speed * 0.95);
+      3.2, p.chromatic.amount + d.crit * 1.25 + (d.hit + d.punch) * 1.9 + d.speed * 0.95);
     f.uVignette.value = p.vignette.amount + d.crit * 0.10;
-    f.uDamage.value = clamp(d.crit * 0.55 + d.hit * 0.65, 0, 1);
+    // A FLASH, NOT A STATE. Measured on shots/iter34/gameplay.png: this term was
+    // sitting at ~0.85 in a routine combat frame, which put R-G at 18 code
+    // values along the frame edge against 2 in the middle — the "heavy red
+    // vignette" three reviews have blamed on `params.vignette`, which is a
+    // neutral multiply and cannot tint anything. It got there honestly: `hit`
+    // took +0.6 per PLAYER_HIT against a 1.2 ceiling and decayed at only
+    // 2.6/s, so two hits inside half a second pinned it and four engaged
+    // enemies held it there for the whole fight. See `_updateDynamics` for the
+    // ceiling and decay; the coefficient here is the other half of the trade.
+    f.uDamage.value = clamp(d.crit * 0.55 + d.hit * 0.52, 0, 1);
     f.uGrain.value = p.grain.amount * (1 + d.crit * 1.4);
     f.uScanline.value = p.scanline.amount + d.scan * 0.10 + d.crit * 0.02;
     f.uScanCount.value = p.scanline.count;
