@@ -383,9 +383,10 @@ function writePng(path, W, H, rgba) {
 
 function parseMap(spec) {
   const cand = { ...SHIPPED, lift: [...SHIPPED.lift], gain: [...SHIPPED.gain],
-    gamma: [...SHIPPED.gamma],
+    gamma: [...SHIPPED.gamma], agxLook: [...SHIPPED.agxLook],
     splitShadow: [...SHIPPED.splitShadow], splitHighlight: [...SHIPPED.splitHighlight] };
   let touchesGrade = false;
+  let touchesAgx = false;
   for (const part of spec.split(';').map((s) => s.trim()).filter(Boolean)) {
     const [k, v] = part.split('=');
     const nums = () => v.split(',').map(Number);
@@ -412,16 +413,21 @@ function parseMap(spec) {
       case 'order': cand.order = v; touchesGrade = true; break;
       default: throw new Error(
         `unknown map key '${k}' ` +
-        '(encode|lift|gain|gamma|contrast|split|splitHi|bal|sat|vig|vigSmooth|order)');
+        '(encode|exposure|agx|slope|power|lift|gain|gamma|contrast|split|splitHi|' +
+        'bal|sat|vig|vigSmooth|damage|order)');
     }
   }
   cand._grade = touchesGrade;
+  cand._agx = touchesAgx;
   return cand;
 }
 
 function describeCand(c) {
   const bits = [];
   if (c.encode !== SHIPPED.encode) bits.push(`encode ${SHIPPED.encode} -> ${c.encode}`);
+  if (c.exposure !== SHIPPED.exposure) bits.push(`exposure ${c.exposure}`);
+  if (String(c.agxLook) !== String(SHIPPED.agxLook)) bits.push(`agxLook ${c.agxLook}`);
+  if ((c.damage || 0) !== 0) bits.push(`damage ${c.damage}`);
   if (String(c.lift) !== String(SHIPPED.lift)) bits.push(`lift ${c.lift}`);
   if (String(c.gain) !== String(SHIPPED.gain)) bits.push(`gain ${c.gain}`);
   if (String(c.gamma) !== String(SHIPPED.gamma)) bits.push(`gamma ${c.gamma}`);
@@ -504,6 +510,13 @@ const outDir = flag('out') ? resolve(ROOT, flag('out')) : null;
 const mapSpecs = argv.reduce((acc, a, i) => (a === '--map' ? [...acc, argv[i + 1]] : acc), []);
 const vigParams = flag('vig') ? flag('vig').split(',').map(Number)
   : [SHIPPED.vignette, SHIPPED.vignetteSmooth];
+// `--dmg uDamage[,pulse]` states what the low-AP/hit rim was doing WHEN THE
+// CAPTURE WAS TAKEN, which nothing in the PNG records. Read it off
+// tools/probes/tonebloom.js (`redRim.uDamage`) or a pose note. Default 0: with
+// no rim to undo, a candidate that adds one still works.
+const dmgParams = flag('dmg')
+  ? (() => { const a = flag('dmg').split(',').map(Number); return [a[0], a.length > 1 ? a[1] : 0.86]; })()
+  : [0, 0.86];
 const skip = new Set();
 for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) skip.add(i + 1);
 const files = argv.filter((a, i) => !a.startsWith('--') && !skip.has(i));
@@ -545,7 +558,7 @@ for (const f of files) {
   if (has('hist')) lowHist(base);
 
   for (const cand of cands) {
-    const { out, clipLo, clipHi } = transform(img, cand, vigParams);
+    const { out, clipLo, clipHi } = transform(img, cand, vigParams, dmgParams);
     const s = describe(out, n);
     console.log(`  -- candidate: ${describeCand(cand)}`);
     report('candidate', s);

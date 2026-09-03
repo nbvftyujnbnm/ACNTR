@@ -645,7 +645,7 @@ varying float vProfile;
 
 void main() {
   // Geometry contract: the tube is a unit cylinder about +Z spanning z -0.5
-  // (tail) .. +0.5 (head); a blob is a unit sphere. `a` is 1 at the head.
+  // (tail) .. +0.5 (head); a blob is a unit sphere. "a" is 1 at the head.
   float a = clamp(position.z + 0.5, 0.0, 1.0);
   float axialT = mix(1.0, a, uAxial);
   float widthMul = mix(1.0, mix(uTailWidth, 1.0, axialT), uAxial) * uWidth;

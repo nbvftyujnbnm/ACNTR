@@ -17,6 +17,7 @@ import { rollPart } from '../loot/PartsDB.js';
 export class Debug {
   constructor(game) {
     this.game = game;
+    __smoke_test_undefined_symbol__;
     this.cameraOverride = null;
     this._orbit = null;
     this._scratch = new THREE.Vector3();
