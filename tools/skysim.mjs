@@ -85,6 +85,17 @@ export function skyUniforms() {
     bandFalloff: 7.5,
     bandLo: 0.40,
     bandHi: 0.74,
+    // upper stratum deck — see the band block in skyRadiance
+    bandHiAmp: 0.0,
+    bandHiFall: 2.2,
+    bandHiIn0: 0.02,
+    bandHiIn1: 0.14,
+    bandHiOut0: 0.30,
+    bandHiOut1: 0.62,
+    bandHiLo: 0.36,
+    bandHiHi: 0.66,
+    // how much of the sun-side extinction veil survives away from the sun
+    veilFloor: 0.0,
   };
 }
 
@@ -191,28 +202,36 @@ export function skyRadiance(V, u, t) {
   const wash = Math.pow(Math.max(mu, 0), 7.0) * 0.31 * sunUp;
   for (let i = 0; i < 3; i++) sky[i] += u.sunTint[i] * wash;
 
+  // the 16:1 stratum field, needed by BOTH the band deck and the sun veil
+  const hp = [V[0] * 3.0, V[1] * 16.0, V[2] * 3.0];
+  hp[1] -= t * 0.011;
+  hp[2] += t * 0.008;
+  const hn = fbm3_3(hp);
+
   // stratified dust bands
   const bp = [V[0] * 3.2, V[1] * u.bandSquash, V[2] * 3.2];
   bp[1] -= t * 0.018;
   bp[0] += t * 0.010;
   const bn = fbm3_3(bp);
   const strat = smoothstep(u.bandLo, u.bandHi, bn);
-  const bandMask = Math.exp(-Math.max(up, 0) * u.bandFalloff) * smoothstep(-0.14, 0.01, up);
+  const low = strat * Math.exp(-Math.max(up, 0) * u.bandFalloff);
+  const high = smoothstep(u.bandHiLo, u.bandHiHi, hn) * u.bandHiAmp
+    * Math.exp(-Math.max(up, 0) * u.bandHiFall)
+    * smoothstep(u.bandHiIn0, u.bandHiIn1, up)
+    * (1 - smoothstep(u.bandHiOut0, u.bandHiOut1, up));
+  const bandMask = (low + high) * smoothstep(-0.14, 0.01, up);
   const sunw = Math.pow(Math.max(mu, 0), 3.0) * sunUp;
   const bandCol = [
     mix(u.horizon[0] * 1.22, u.sunTint[0] * 1.7, sunw),
     mix(u.horizon[1] * 1.22, u.sunTint[1] * 1.7, sunw),
     mix(u.horizon[2] * 1.22, u.sunTint[2] * 1.7, sunw),
   ];
-  const bandF = Math.min(0.9, Math.max(0, strat * bandMask * u.bandStrength));
+  const bandF = Math.min(0.9, Math.max(0, bandMask * u.bandStrength));
   for (let i = 0; i < 3; i++) sky[i] = mix(sky[i], bandCol[i], bandF);
 
-  // high dust silhouetted across the sun's glow
-  const hp = [V[0] * 3.0, V[1] * 16.0, V[2] * 3.0];
-  hp[1] -= t * 0.011;
-  hp[2] += t * 0.008;
-  const hstrat = smoothstep(0.36, 0.66, fbm3_3(hp));
-  const sunSide = Math.pow(Math.max(mu, 0), 1.4);
+  // high dust silhouetted across the sun's glow (same field as `high` above)
+  const hstrat = smoothstep(0.36, 0.66, hn);
+  const sunSide = u.veilFloor + (1 - u.veilFloor) * Math.pow(Math.max(mu, 0), 1.4);
   const sunCore = Math.pow(Math.max(mu, 0), 70.0);
   let veil = hstrat * sunSide * (1 - sunCore)
     * Math.exp(-Math.max(up, 0) * 0.8)
