@@ -53,6 +53,7 @@ import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { readPng } from './png.mjs';
+import { agxDisplay, agxInverse, shippedParams } from './grade-model.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -62,6 +63,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * meaningful relative to the values the capture was actually shot with.
  * ------------------------------------------------------------------------ */
 const SHIPPED = {
+  exposure: 0.662,
+  agxLook: [1.13, 0.0, 0.94, 0.88],
   lift: [0.022, 0.025, 0.038],
   gain: [1.035, 1.0, 0.950],
   gamma: [1.0, 1.0, 1.0],
@@ -182,7 +185,25 @@ function unSplit(c, g) {
  * `luma(out) == luma(in)` by construction, so the pivot is read straight off
  * the output.
  */
-function unGrade(c, g, vig) {
+/**
+ * The low-AP / hit rim, and its inverse. FINAL_FRAG applies it AFTER the
+ * vignette as `disp += C * dv * (1 - disp)`, a screen blend, so it inverts per
+ * channel as `(disp - C*dv) / (1 - C*dv)`. `dv` already carries uDamage and the
+ * pulse; the caller supplies them because a still cannot state the sine's phase.
+ */
+const DAMAGE_COLOR = [0.85, 0.06, 0.05];
+const applyDamage = (c, dv) => {
+  for (let i = 0; i < 3; i++) c[i] += DAMAGE_COLOR[i] * dv * (1 - c[i]);
+};
+const unDamage = (c, dv) => {
+  for (let i = 0; i < 3; i++) {
+    const k = DAMAGE_COLOR[i] * dv;
+    if (k > 1e-6) c[i] = (c[i] - k) / (1 - k);
+  }
+};
+
+function unGrade(c, g, vig, dv) {
+  if (dv > 1e-6) unDamage(c, dv);
   if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] /= vig;
   unSplit(c, g);
   const l = LUMA(c[0], c[1], c[2]);
@@ -216,7 +237,7 @@ const applySat = (c, g) => {
  * real per-channel floor is `lift + splitShadow` scaled by the vignette, which
  * is NEGATIVE in red; under 'liftlast' it is exactly `lift`.
  */
-function reGrade(c, g, vig) {
+function reGrade(c, g, vig, dv) {
   for (let i = 0; i < 3; i++) {
     c[i] = Math.pow(Math.max(c[i] * g.gain[i], 0), 1 / Math.max(g.gamma[i], 0.01));
   }
@@ -228,12 +249,13 @@ function reGrade(c, g, vig) {
     applySplit(c, g);
     if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
     applyLift(c, g);
-    return;
+  } else {
+    applyLift(c, g);
+    applySat(c, g);
+    applySplit(c, g);
+    if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
   }
-  applyLift(c, g);
-  applySat(c, g);
-  applySplit(c, g);
-  if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
+  if (dv > 1e-6) applyDamage(c, dv);
 }
 
 /* --- statistics ----------------------------------------------------------- */
@@ -370,6 +392,13 @@ function parseMap(spec) {
     const tri = () => (v.includes(',') ? nums() : [Number(v), Number(v), Number(v)]);
     switch (k) {
       case 'encode': cand.encode = v === 'srgb' ? 'srgb' : Number(v); break;
+      case 'exposure': cand.exposure = Number(v); touchesGrade = true; touchesAgx = true; break;
+      case 'agx': cand.agxLook = nums(); touchesGrade = true; touchesAgx = true; break;
+      case 'slope': cand.agxLook = [Number(v), cand.agxLook[1], cand.agxLook[2], cand.agxLook[3]];
+        touchesGrade = true; touchesAgx = true; break;
+      case 'power': cand.agxLook = [cand.agxLook[0], cand.agxLook[1], Number(v), cand.agxLook[3]];
+        touchesGrade = true; touchesAgx = true; break;
+      case 'damage': cand.damage = Number(v); touchesGrade = true; break;
       case 'lift': cand.lift = tri(); touchesGrade = true; break;
       case 'gain': cand.gain = tri(); touchesGrade = true; break;
       case 'gamma': cand.gamma = tri(); touchesGrade = true; break;
@@ -409,12 +438,16 @@ function describeCand(c) {
 
 /* --- transform ------------------------------------------------------------ */
 
-function transform(img, cand, vigParams) {
+function transform(img, cand, vigParams, dmgParams) {
   const { width: W, height: H, data } = img;
   const out = new Uint8Array(data.length);
   const c = [0, 0, 0];
   let clipLo = 0, clipHi = 0;
   const [vA, vS] = vigParams;
+  const [dmgShipped, dmgPulse] = dmgParams;
+  // A change above the tonemap needs the scene radiance back, which costs an
+  // AgX inversion per pixel — so only pay for it when the candidate asks.
+  const deep = cand._agx;
   for (let y = 0; y < H; y++) {
     const dy = (y + 0.5) / H - 0.5;
     for (let x = 0; x < W; x++) {
@@ -424,6 +457,9 @@ function transform(img, cand, vigParams) {
       const vig = 1 - vA * smoothstep(Math.min(vS, 0.98), 1, rEdge);
       const vigC = 1 - cand.vignette *
         smoothstep(Math.min(cand.vignetteSmooth, 0.98), 1, rEdge);
+      // FINAL_FRAG: dv = smoothstep(0.60, 1.02, rEdge)^2 * uDamage * pulse.
+      const dr = smoothstep(0.60, 1.02, rEdge);
+      const dmgRamp = dr * dr;
 
       c[0] = codeToDisp(data[p], SHIPPED.encode);
       c[1] = codeToDisp(data[p + 1], SHIPPED.encode);
@@ -434,8 +470,16 @@ function transform(img, cand, vigParams) {
         // value; count it so the caveat is quantified rather than assumed away.
         if (data[p] === 0 || data[p + 1] === 0 || data[p + 2] === 0) clipLo++;
         if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) clipHi++;
-        unGrade(c, SHIPPED, vig);
-        reGrade(c, cand, vigC);
+        const dvS = dmgShipped > 1e-6 ? dmgShipped * dmgPulse * dmgRamp : 0;
+        const dvC = cand.damage > 1e-6 ? cand.damage * dmgPulse * dmgRamp : 0;
+        unGrade(c, SHIPPED, vig, dvS);
+        if (deep) {
+          const lin = agxInverse(c, SHIPPED.agxLook);
+          for (let i = 0; i < 3; i++) lin[i] *= cand.exposure / SHIPPED.exposure;
+          const d2 = agxDisplay(lin, cand.agxLook);
+          c[0] = d2[0]; c[1] = d2[1]; c[2] = d2[2];
+        }
+        reGrade(c, cand, vigC, dvC);
       }
 
       out[p] = dispToCode(clamp01(c[0]), cand.encode);

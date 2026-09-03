@@ -163,7 +163,7 @@ function angField(t, h) {
 
 /**
  * Sampling schedule for a cliff face, shared by the mesa ring and the buttes.
- * One row per profile ring, as `[s, relief, tint]`:
+ * One row per profile ring, as `[s, relief, sky, albedo]`:
  *
  *  - `s`      position along the face, 0 at the toe of the scree, 1 at the crest;
  *  - `relief` radial displacement in units of the bed amplitude, POSITIVE
@@ -171,49 +171,101 @@ function angField(t, h) {
  *             (a hard bed standing out). Callers map the sign onto radius —
  *             recessed is a larger radius on a ring seen from inside and a
  *             smaller one on a butte seen from outside;
- *  - `tint`   vertex-shade multiplier for that ring.
+ *  - `sky`    fraction of the hemisphere this ring can see, 0..1. See below —
+ *             on this surface it is the ONLY lighting channel there is;
+ *  - `albedo` rock colour multiplier for the course, near 1.
  *
  * Rings are deliberately NOT spread evenly. An even ramp is what produces a
  * smooth cone, and a smooth cone under a 13-degree sun is one coherent normal —
  * a flat pale cut-out, whatever is done to its texture or its colour. The talus
  * gets an even ramp because it really is a cone; the cliff band above it is
  * divided into `beds` and each bed spends its four rings exactly where the
- * surface turns:
+ * surface turns: an OVERHANG (down-facing, roofed by the hard course above), the
+ * LIP just under it, a near-vertical RISER, and a BENCH cut back into the soft
+ * course at roughly the angle of repose.
  *
- *   u 0.000 -> 0.085  OVERHANG. The hard bed projects over the soft one under
- *                     it, so this step is a near-horizontal DOWN-facing
- *                     surface. At a 13-degree sun it receives no key and almost
- *                     no sky, which makes it the one hard dark horizontal line
- *                     a landform can still draw from 700-1400 m away — the cue
- *                     that reads as SEDIMENTARY ROCK rather than as a dune.
- *   u 0.085 -> 0.130  the lip: freshly broken rock, the lightest band.
- *   u 0.130 -> 0.700  RISER, within about 3 degrees of vertical.
- *   u 0.700 -> 1.000  BENCH cut back into the soft bed at roughly the angle of
- *                     repose, so it faces the sky and collects dust.
+ * TWO THINGS THIS FUNCTION EXISTS TO GET RIGHT, both of them measured.
  *
- * The schedule is indexed by RING and is therefore identical in every column,
- * which is what makes it aliasing-proof: nothing in it has a phase that can
- * step from column to column (see the amendment on the strata Nyquist bug).
+ * (1) `sky`, NOT a tint. `tools/probes/beds.js` walks one column of the ring
+ * from the arena camera and reports every ring's N.L against the real sun:
+ * the whole visible face runs **-0.15 to -0.89**. The mesa ring is a revolve
+ * seen from INSIDE, so the half of it in front of the sun has its inner face
+ * turned away from the key and receives, exactly, zero of it. Every scrap of
+ * relief authored here therefore modulates nothing, and the face is lit by the
+ * hemisphere alone. Ambient is very nearly symmetric in AZIMUTH, so a normal's
+ * bearing does nothing to it and only its ELEVATION matters — which is why the
+ * gullies were invisible while the beds, the one feature that tips a normal up
+ * or down, drew perfectly. Sky visibility is the channel that IS available:
+ * an overhang is roofed and sees almost nothing, a bench faces the sky and sees
+ * most of it. The caller multiplies it into the vertex colour, which on a
+ * vertex-coloured MeshStandardMaterial scales every light term including the
+ * ambient. It is baked occlusion, not paint.
+ *
+ * The previous schedule was paint — [0.56, 1.14, 1.02, 0.84] — and it put its
+ * BRIGHTEST value on the lip, the band physically tucked directly under the
+ * overhang. A dark line with a bright line hard against it is how you draw a
+ * contour, which is exactly what the ridge was rendering.
+ *
+ * (2) BEDS MUST NOT BE A PERIODIC FUNCTION. Every bed used to get the same
+ * thickness, the same recess depth and the same colour, so the ring rendered as
+ * a set of uniformly spaced concentric contours curving in lockstep — a
+ * topographic map, not rock. Real bedding varies course to course in all three,
+ * and it does so on a schedule laid down once and then eroded, not on one that
+ * repeats. Hence `rng`: thickness spreads about 3:1, recess depth about 3:1 and
+ * albedo about 1.4:1, drawn once per bed from a seeded generator and therefore
+ * fixed for the life of the build. The internal proportions vary too, so a thin
+ * course is mostly overhang and a thick one mostly riser.
+ *
+ * The schedule is still indexed by RING and therefore identical in every
+ * column, which is what makes it aliasing-proof: nothing in it has a phase that
+ * can step from column to column (see the amendment on the strata Nyquist bug).
  * Everything that varies around the landform — the face height, the bed
- * amplitude, the gullies — is a band-limited harmonic field.
+ * amplitude, the gullies, the drainage chutes — is a band-limited harmonic
+ * field.
  *
  * @param {number} talusRings rings spent on the scree apron
  * @param {number} beds hard/soft bed pairs in the cliff band
  * @param {number} sTalus fraction of the face parameter given to the scree
- * @returns {number[][]} rows of [s, relief, tint], `s` strictly increasing
+ * @param {() => number} rng seeded generator, consumed 5x per bed
+ * @returns {number[][]} rows of [s, relief, sky, albedo], `s` strictly increasing
  */
-function cliffFaceProfile(talusRings, beds, sTalus) {
+function cliffFaceProfile(talusRings, beds, sTalus, rng) {
   const rows = [];
   for (let i = 0; i < talusRings; i++) {
-    rows.push([(sTalus * i) / (talusRings - 1), 1, 1]);
+    // Up the apron toward the wall, the wall fills more and more of the sky:
+    // 200 m out on the plain a 150 m cliff subtends ~35 degrees, and at its
+    // foot it fills a full half of the hemisphere.
+    const t = i / (talusRings - 1);
+    rows.push([sTalus * t, 1, lerp(0.90, 0.52, t), lerp(1.08, 0.96, t)]);
   }
+
+  // Draw the per-bed character first so the thicknesses can be normalised to
+  // fill the band exactly.
+  const thick = [], deep = [], alb = [], prop = [];
+  let tsum = 0;
   for (let b = 0; b < beds; b++) {
-    const base = sTalus + ((1 - sTalus) * b) / beds;
-    const span = (1 - sTalus) / beds;
-    rows.push([base + span * 0.085, -1.00, 0.56]);
-    rows.push([base + span * 0.130, -0.97, 1.14]);
-    rows.push([base + span * 0.700, -0.85, 1.02]);
-    rows.push([base + span * 1.000, 1.00, 0.84]);
+    const th = 0.44 + rng() * 1.42;
+    thick.push(th);
+    tsum += th;
+    deep.push(0.32 + rng() * 0.92);          // how far the soft course is cut back
+    alb.push(0.86 + rng() * 0.34);           // grey hard courses vs pale sandy ones
+    prop.push([0.05 + rng() * 0.06, 0.55 + rng() * 0.26]);
+  }
+
+  let base = sTalus;
+  for (let b = 0; b < beds; b++) {
+    const span = (1 - sTalus) * (thick[b] / tsum);
+    const d = deep[b];
+    const a = alb[b];
+    const oh = prop[b][0];                   // share of the bed spent overhanging
+    const lip = oh + 0.035 + oh * 0.5;
+    const riser = Math.max(lip + 0.18, prop[b][1]);
+    //         s                 relief    sky   albedo
+    rows.push([base + span * oh, -1.00 * d, 0.13, a * 0.88]);   // roofed, sees nothing
+    rows.push([base + span * lip, -0.97 * d, 0.31, a * 1.06]);  // fresh broken rock
+    rows.push([base + span * riser, -0.85 * d, 0.63, a * 1.00]); // vertical wall
+    rows.push([base + span * 1.000, 1.00 * d, 0.94, a * 0.93]); // bench, open to sky
+    base += span;
   }
   return rows;
 }
@@ -473,14 +525,34 @@ export class Level {
      * 0.22 — a mirror — which is what blew the conveyor deck out; every family
      * here was in the same neighbourhood. They are all weathered structural steel
      * on a dust plateau, so none of them should have been.
+     *
+     * `metal` IS NOW A HARD 0 OR 1, and the families that carry paint or oxide
+     * are dielectric. This is the same defect the mech went through and wrote
+     * up ("Painted armour is now metalness = 0; the previous all-metal setup
+     * gave the armour no diffuse lobe at all, which is what made a dark palette
+     * render as black plastic"), and it is why the deck the player stands on in
+     * the gameplay frame measures a mean of display 37 with railings, gratings
+     * and plate seams all over it that nothing can read. A conductor has NO
+     * diffuse lobe: with the key behind the structure, `dark` at metalness 1.0
+     * and albedo 0x3a3f44 had literally nothing left but a dim environment
+     * specular, so a deck full of hardware rendered as one black shape with a
+     * plastic sheen. Paint, primer, rust and concrete are all dielectrics;
+     * `steel` is the one family that is genuinely bare alloy and it keeps 1.0.
+     * The fractional values (0.9 / 0.8 / 0.72 / 0.55) were never physical
+     * anyway — the contract's style rules forbid them outside a rust transition.
+     *
+     * The albedos of the two paint families that lost their conductor came UP
+     * with the change, but only a little and deliberately not to compensate for
+     * it: a dielectric with a real diffuse lobe reads at its albedo, so paint
+     * owns darkness here exactly as it does on the mech.
      */
     this.mat = {
       steel: mk('steel', plateA, { color: 0x7d848b, rough: 0.80, metal: 1.0, env: 0.95, normalScale: 1.0 }),
-      teal: mk('teal', plateA, { color: 0x4e7d76, rough: 0.86, metal: 0.9, env: 0.85, normalScale: 1.05 }),
-      rust: mk('rust', plateA, { color: 0x8c4f2c, rough: 0.96, metal: 0.72, env: 0.7, normalScale: 1.15 }),
-      ochre: mk('ochre', plateB, { color: 0x9c8340, rough: 0.90, metal: 0.8, env: 0.8 }),
-      dark: mk('dark', plateB, { color: 0x3a3f44, rough: 0.96, metal: 1.0, env: 0.85 }),
-      trim: mk('trim', plateB, { color: 0xb1541c, rough: 0.86, metal: 0.55, env: 0.75 }),
+      teal: mk('teal', plateA, { color: 0x53837c, rough: 0.86, metal: 0.0, env: 0.85, normalScale: 1.05 }),
+      rust: mk('rust', plateA, { color: 0x8c4f2c, rough: 0.96, metal: 0.0, env: 0.7, normalScale: 1.15 }),
+      ochre: mk('ochre', plateB, { color: 0x9c8340, rough: 0.90, metal: 0.0, env: 0.8 }),
+      dark: mk('dark', plateB, { color: 0x474d54, rough: 0.96, metal: 0.0, env: 0.85 }),
+      trim: mk('trim', plateB, { color: 0xb1541c, rough: 0.86, metal: 0.0, env: 0.75 }),
       concrete: mk('concrete', conc, { color: 0x8e8b83, rough: 0.95, metal: 0.0, env: 0.45, ao: 1.0 }),
     };
 
@@ -689,31 +761,43 @@ export class Level {
    * line the veil is about 65%, and through AgX a 2:1 albedo ratio on the
    * remaining 35% arrives as under 8 display code values — measured on the face,
    * a vertical run of 14 samples spanning 130 px varied by +/-3. Beds are now
-   * GEOMETRY (see `cliffFaceProfile`), because relief moves N.L instead, and
-   * with a key at 24 against an ambient near 0.2 a bed's down-facing overhang
-   * and its sunward riser are separated by the largest ratio anything in this
-   * frame can offer. The vertex tint still bands, but it bands ON the same
-   * schedule, so the tonal and the physical beds are the same beds.
+   * GEOMETRY (see `cliffFaceProfile`), because relief moves N.L instead of
+   * albedo.
+   *
+   * (4) THE STRATA WERE A PERIODIC FUNCTION, which is what (3) left behind and
+   * what the review frame actually shows: uniformly spaced, perfectly parallel
+   * dark grooves curving in lockstep across the whole ridge, i.e. contour lines
+   * on a topographic map. Three things were true at once and all three are
+   * fixed in `cliffFaceProfile` and in the chute field below — every bed had the
+   * same thickness, the same recess depth and the same colour; the tonal bands
+   * were painted at full strength even where the geometry carrying them had
+   * eroded away; and NOTHING on the face ran vertically, because with the face
+   * beyond the terminator (measured: N.L -0.15..-0.89 on every ring) the only
+   * light is ambient, and ambient is symmetric in azimuth, so the gullies that
+   * were already there could not draw. Occlusion, not paint, is the channel.
    */
   _mesaRing() {
     const NA = 384;               // face columns; 7.8 m of arc each
     /** talus rings, bed count and the share of the face parameter given to scree */
     const S_TALUS = 0.30;
-    const FACE = cliffFaceProfile(8, 5, S_TALUS);
+    // Its own generator, so retuning the stratigraphy cannot reshuffle the
+    // harmonic phases below and reshape the whole landform underneath it.
+    const FACE = cliffFaceProfile(8, 6, S_TALUS, mulberry32(SEED ^ 0x9e17));
     const NF = FACE.length;       // profile rings on the visible face
     const NP = NF + 8;            // plus the back slope down to the far plain
     const NV = NA + 1;            // duplicated seam column, see the UV note
     const rng = mulberry32(SEED ^ 0x31d5);
 
     /*
-     * Every angular field is band-limited. Highest order anywhere is 27 against
-     * 384 columns = 14 columns per lobe, so nothing here can step per column.
+     * Every angular field is band-limited. Highest order anywhere is 29 against
+     * 384 columns = 13 columns per cycle, so nothing here can step per column.
      */
     const H_MASS = harmonics(rng, [1, 2, 3, 5, 8, 13], 1.0);  // mesas vs saddles
     const H_CROWN = harmonics(rng, [5, 9, 15, 23], 1.0);      // ragged skyline
     const H_NOTCH = harmonics(rng, [3, 5, 9, 14, 21], 0.7);   // erosion clefts
     const H_SPUR = harmonics(rng, [2, 3, 5, 8], 1.0);         // buttresses in plan
     const H_GULLY = harmonics(rng, [7, 11, 17, 24], 0.8);     // erosion channels
+    const H_CHUTE = harmonics(rng, [8, 13, 21, 29], 0.75);    // drainage down the face
     const H_CLIFF = harmonics(rng, [2, 3, 6], 1.0);           // sheer .. eroded
     const H_TONE = harmonics(rng, [2, 4, 7], 1.0);            // slow value drift
     const H_SLIDE = harmonics(rng, [2, 3, 5], 1.0);           // breaks the UV repeat
@@ -783,11 +867,31 @@ export class Level {
       const h = Math.max(112, (176 + mass * 128 + crown * 40) * (1 - notch * 0.40));
       const r0 = R_NOM + spur * 46;
       const talus = lerp(0.16, 0.46, cw);       // fraction of height that is scree
+      /*
+       * DRAINAGE CHUTES — the vertical erosion the face had none of. Every
+       * feature on the old ring ran horizontally, so the beds drew as unbroken
+       * concentric contours all the way round; what breaks a real cliff up is
+       * water running DOWN it, which incises a chute, washes the bedding out
+       * inside it and dumps a debris fan at the toe.
+       *
+       * Rectified, because erosion is one-sided: it removes material at the
+       * drainages and leaves the divides standing, so a signed sine would raise
+       * as many ribs as it cuts channels and the two would average out — the
+       * same argument `notch` already makes for the crest line.
+       *
+       * Order 29 against 384 columns is 13 columns per cycle, about 100 m of
+       * cliff, which is 60-90 px at the arena camera's 350-600 m sight lines and
+       * still well clear of the 5-columns-per-feature floor the strata Nyquist
+       * amendment sets.
+       */
+      const chuteA = clamp(Math.max(0, -angField(t, H_CHUTE) - 0.16) * 2.1, 0, 1);
       // Scree stands at its angle of repose (~34 deg), so the apron's RUN follows
       // from the height it has to cover. A fixed radial run gave an 11-degree
       // ramp under a short eroded section and a 48-degree one under a tall
       // sheer section, neither of which is a talus.
-      const talusRun = Math.min(h * talus * 1.45, 210);
+      // A chute delivers its debris to the apron below it, so the fan runs out
+      // further there than the apron either side of it does.
+      const talusRun = Math.min(h * talus * 1.45, 210) * (1 + 0.26 * chuteA);
       const cliffRun = lerp(7, 34, cw);         // the caprock leans back a little
       // Bed relief in metres. A sheer section carries deeper benches than an
       // eroded one, and the amplitude is the ONLY thing about the stratigraphy
@@ -796,7 +900,7 @@ export class Level {
       const bedAmp = lerp(4.0, 10.5, cw);
 
       for (let p = 0; p < NP; p++) {
-        let f, off, bedTint;
+        let f, off, skyRow, albRow, chute;
         if (p < NF) {
           const s = FACE[p][0];
           // The RING schedule is fixed but the talus FRACTION is per-column, so
@@ -808,23 +912,36 @@ export class Level {
           off = f < talus
             ? talusRun * Math.pow(f / talus, 0.86)
             : talusRun + cliffRun * (f - talus) / (1 - talus);
+          // A chute is a channel, so it is deepest where the water has been
+          // running longest — low and mid face — and dies out near the crest,
+          // which has no catchment above it.
+          chute = chuteA * (1 - smoothstep(0.66, 0.99, f)) * smoothstep(0.0, 0.14, f);
           // Beds are buried at the toe by their own scree and roll over at the
           // crest, so the relief fades in and out rather than ending on a step.
-          off += FACE[p][1] * bedAmp
+          // A chute WASHES THE BEDDING OUT: inside one there is no bench and no
+          // overhang left to cast, which is what truncates the horizontal bands
+          // instead of merely shading over them.
+          off += FACE[p][1] * bedAmp * (1 - 0.85 * chute)
             * smoothstep(S_TALUS * 0.55, S_TALUS * 1.25, s)
             * (1 - smoothstep(0.94, 1.0, s));
-          bedTint = FACE[p][2];
+          skyRow = FACE[p][2];
+          albRow = FACE[p][3];
         } else {
           const b = BACK[p - NF];
           off = talusRun + cliffRun + b[0];
           f = b[1];
-          bedTint = 0.92;
+          skyRow = 0.95;                       // open back slope, nothing above it
+          albRow = 0.94;
+          chute = 0;
         }
-        // Gullies bite deepest in the scree and die out under the caprock, with
-        // a little left over on the cliff so it is not a smooth cylinder.
+        // Gullies bite deepest in the scree and die out under the caprock. The
+        // residue on the cliff itself was 0.24 and is now 0.45: the caprock is
+        // most of what an arena camera sees, and with the face beyond the
+        // terminator a smooth cylinder up there has no interior value at all.
         const gd = Math.pow(Math.sin(Math.PI * clamp((f - 0.02) / 0.74, 0, 1)), 0.7)
-          + 0.24 * smoothstep(0.52, 0.96, f);
-        const r = r0 + off + gully * gd * 24;
+          + 0.45 * smoothstep(0.52, 0.96, f);
+        // Seen from inside the ring, cutting INTO the wall means a larger radius.
+        const r = r0 + off + gully * gd * 24 + chute * 15;
         const y = baseY + h * f - clamp(gully, 0, 1) * gd * 4.5;
 
         const k = a * NP + p;
@@ -848,15 +965,43 @@ export class Level {
         // whole band of rock is redder" drift, and at that period its phase
         // cannot alias. It is phased off the LOW-ORDER height only, because the
         // crown wobble and the gully cut move the surface, not the beds that
-        // were laid down before it eroded. The FINE banding is no longer a sine
-        // at all — `bedTint` comes off the geometric schedule, so a light band
-        // is a physically proud bed and a dark one is the shadow under it.
+        // were laid down before it eroded.
         const yBed = baseY + (176 + mass * 128) * f;
         const s1 = smoothstep(0.32, 0.68, Math.sin(yBed * 0.0419 + tone * 1.7) * 0.5 + 0.5);
         const scree = 1 - smoothstep(talus * 0.72, talus * 1.30, f);
         const cut = clamp(-gully * gd, 0, 1);   // shaded floor of a channel
-        const shade = (0.44 + s1 * 0.24 + scree * 0.12 - cut * 0.16 + tone * 0.05) * bedTint;
-        const warm = 0.88 + s1 * 0.22 + scree * 0.06;
+        const rib = clamp(gully * gd, 0, 1);    // a spur, standing clear of the wall
+        /*
+         * THE VERTEX COLOUR IS OCCLUSION, NOT PAINT. Measured with
+         * tools/probes/beds.js: every ring of the face this camera sees runs
+         * N.L -0.15..-0.89, so the key delivers nothing and the surface is lit
+         * by the hemisphere alone — under which a normal's AZIMUTH is worth
+         * almost nothing and only its ELEVATION counts. That is the whole
+         * explanation for the defect: the beds tip a normal up and down so they
+         * drew, the gullies and spurs only swing it sideways so they did not,
+         * and the face rendered as horizontal contour lines on flat brown.
+         * Baked sky visibility puts the sideways features back on a channel the
+         * ambient can actually deliver.
+         *
+         * `bedSharp` ties the tonal contrast of the beds to the same `cw` that
+         * sets their PHYSICAL amplitude. Without it an eroded stretch of ring
+         * whose benches have almost no relief left still drew its bands at full
+         * strength, which is the other half of why they ran unbroken for 360
+         * degrees.
+         */
+        const bedSharp = clamp(0.34 + 0.80 * cw, 0, 1);
+        let sv = 1 - (1 - skyRow) * bedSharp;
+        sv *= 1 - 0.50 * chute;                 // a chute is walled on both sides
+        sv *= 1 - 0.34 * cut;                   // and so is the floor of a gully
+        sv *= 1 + 0.11 * rib;                   // a spur sees more sky than the wall
+        // Albedo carries the material difference between courses — that is what
+        // `albRow` is for — plus fresh pale debris in the chutes and on the
+        // apron. It is deliberately a narrow range: through a 40-60% veil an
+        // albedo ratio arrives at a fraction of its size, so contrast has to
+        // come from the occlusion term.
+        const shade = albRow * sv
+          * (0.68 + s1 * 0.26 + scree * 0.13 + tone * 0.06 + chute * 0.11);
+        const warm = 0.90 + s1 * 0.20 + scree * 0.06 - chute * 0.07;
         const k3 = k * 3;
         col[k3] = clamp(shade * warm, 0, 1) * 255;
         col[k3 + 1] = clamp(shade * (0.93 + s1 * 0.05), 0, 1) * 255;

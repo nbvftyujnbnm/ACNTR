@@ -603,6 +603,99 @@ void main() {
 `;
 
 // ---------------------------------------------------------------------------
+// Projectile bodies — tracers, motor flares, plasma bolts, beams
+// ---------------------------------------------------------------------------
+
+/**
+ * Ordnance in flight used to be solid geometry wearing a `MeshBasicMaterial`:
+ * a 6-gon tube of ONE constant colour with a hard silhouette. Measured on
+ * shots/iter32/gameplay.png, an enemy round drew as an 86 px line of uniform
+ * width and uniform brightness — "a clean constant-width curve with no glow,
+ * no taper and no head-bright falloff", i.e. a debug line.
+ *
+ * Three things fix that, and all three have to be in the SHADER because the
+ * geometry is shared and instanced:
+ *
+ *  1. CROSS-SECTION SOFTNESS. `|N·V|` is 1 where the surface faces the lens
+ *     and 0 at the silhouette, for a tube and for a sphere alike. Raising it
+ *     to a power turns a hard-edged solid into a glow whose edge dissolves,
+ *     which is the whole difference between a lit cylinder and a light.
+ *  2. AN AXIAL PROFILE. Real tracer luminance is concentrated at the head and
+ *     dies along the trail. The vertex stage ALSO pinches the tail radius, so
+ *     the streak is a wedge rather than a bar — a constant-width line reads as
+ *     vector art no matter how it is shaded.
+ *  3. HDR OUTPUT. `uGain` is applied on top of the instance colour so the core
+ *     lands well past the bloom prefilter (1.90 scene-linear) while the skirt
+ *     falls under it. That ordering is what produces a tight hot core with a
+ *     wide soft halo instead of a uniform veil.
+ */
+export const projectileVert = /* glsl */ `
+${COMMON}
+
+uniform float uTailWidth;  // radius multiplier at the tail (1 = no pinch)
+uniform float uHeadPow;    // axial profile exponent
+uniform float uTailGain;   // brightness floor at the tail
+uniform float uAxial;      // 1 = tube (taper along +Z), 0 = blob (no taper)
+uniform float uWidth;      // extra radial scale — the halo instance runs wide
+
+varying vec3 vCol;
+varying vec3 vNrmW;
+varying vec3 vViewW;
+varying float vProfile;
+
+void main() {
+  // Geometry contract: the tube is a unit cylinder about +Z spanning z -0.5
+  // (tail) .. +0.5 (head); a blob is a unit sphere. `a` is 1 at the head.
+  float a = clamp(position.z + 0.5, 0.0, 1.0);
+  float axialT = mix(1.0, a, uAxial);
+  float widthMul = mix(1.0, mix(uTailWidth, 1.0, axialT), uAxial) * uWidth;
+
+  vec3 local = vec3(position.xy * widthMul, position.z);
+  vec4 wp = modelMatrix * instanceMatrix * vec4(local, 1.0);
+
+  // Normals must survive the non-uniform instance scale (a tracer is 30x
+  // longer than it is wide), or |N·V| collapses toward the axis and the tube
+  // shades as a flat ribbon.
+  mat3 nm = mat3(modelMatrix * instanceMatrix);
+  vec3 n = normalize(nm * vec3(normalize(vec3(position.xy, 0.0) + vec3(0.0, 0.0, 1e-6)) * vec3(1.0, 1.0, 0.0) + vec3(0.0, 0.0, uAxial < 0.5 ? position.z : 0.0)));
+  vNrmW = mix(normalize(nm * normalize(position)), n, uAxial);
+  vViewW = cameraPosition - wp.xyz;
+
+  vProfile = mix(1.0, mix(uTailGain, 1.0, pow(axialT, uHeadPow)), uAxial);
+  vCol = instanceColor;
+
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+export const projectileFrag = /* glsl */ `
+${COMMON}
+
+uniform float uSoftPow;   // cross-section falloff exponent
+uniform float uGain;      // HDR multiplier on the instance colour
+uniform float uAlpha;
+
+varying vec3 vCol;
+varying vec3 vNrmW;
+varying vec3 vViewW;
+varying float vProfile;
+
+void main() {
+  vec3 n = normalize(vNrmW);
+  vec3 v = normalize(vViewW);
+  // Soft cross-section. Front and back faces both draw (DoubleSide), which is
+  // what gives the core its extra stop over the rim for free.
+  float soft = pow(clamp(abs(dot(n, v)), 0.0, 1.0), uSoftPow);
+  float w = soft * vProfile;
+  if (w <= 0.002) discard;
+  gl_FragColor = vec4(vCol * (w * uGain), clamp(w * uAlpha, 0.0, 1.0));
+
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+// ---------------------------------------------------------------------------
 // Thruster plumes
 // ---------------------------------------------------------------------------
 

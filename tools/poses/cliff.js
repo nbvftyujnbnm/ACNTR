@@ -17,7 +17,6 @@
   const { debug, game } = window.__ACNTR__;
   debug.setHudVisible(false);
   debug.clearEnemies();
-  debug.releaseCamera();
 
   debug.placePlayerOnGround(-120, 60, Math.PI * 0.5);
   debug.step(1.0);

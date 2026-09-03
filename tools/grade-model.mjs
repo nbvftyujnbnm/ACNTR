@@ -110,6 +110,81 @@ export function agxDisplay(color, look) {
   return mul(AGX_OUT_COLS, c).map(clamp01);
 }
 
+/* ---------------------------------------------------------------------------
+ * AgX, BACKWARDS.
+ *
+ * Every stage of `agxDisplay` is invertible, which is what lets a candidate
+ * `exposure` or `agxLook` be scored against a capture that already exists
+ * instead of against a fresh 90-second render:
+ *
+ *   AGX_OUT matrix        exact (3x3 inverse)
+ *   saturation about luma exact — the forward map preserves luma, so the pivot
+ *                         is read straight off the output
+ *   pow(x, power)         exact
+ *   x * slope + offset    exact
+ *   agxContrast()         a monotonic 6th-order polynomial on [0,1]; bisected
+ *   log2 / EV normalise   exact
+ *   AGX_IN matrix         exact
+ *
+ * WHERE IT STOPS BEING EXACT, and it is the same caveat the rest of the
+ * offline path carries: the forward chain clamps to [0,1] in three places. A
+ * channel that arrived at a rail carried no information into the display
+ * value, so the inverse can only return the rail. Count those pixels before
+ * believing a magnitude.
+ * ------------------------------------------------------------------------ */
+
+/** Invert a 3x3 given as COLUMNS, returning columns. */
+function invCols(cols) {
+  const m = (r, c) => cols[c][r];
+  const a = m(0, 0), b = m(0, 1), c0 = m(0, 2);
+  const d = m(1, 0), e = m(1, 1), f = m(1, 2);
+  const g = m(2, 0), h = m(2, 1), i = m(2, 2);
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c0 * C;
+  if (Math.abs(det) < 1e-12) throw new Error('grade-model: singular AgX matrix');
+  // Each row below is a COLUMN of the inverse — the adjugate's cofactors come
+  // out transposed, which is exactly the layout `mul()` wants. Do NOT add a
+  // transpose here: the same column-major/row-major confusion that CONTRACT.md
+  // warns about for AGX_IN/AGX_OUT applies to their inverses, and transposing
+  // once too often silently tints every result rather than throwing.
+  return [
+    [A / det, B / det, C / det],
+    [-(b * i - c0 * h) / det, (a * i - c0 * g) / det, -(a * h - b * g) / det],
+    [(b * f - c0 * e) / det, -(a * f - c0 * d) / det, (a * e - b * d) / det],
+  ];
+}
+
+const AGX_IN_INV = invCols(AGX_IN_COLS);
+const AGX_OUT_INV = invCols(AGX_OUT_COLS);
+
+/** Inverse of `agxContrast` on [0,1], by bisection. Monotonic there. */
+function agxContrastInv(y) {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 28; i++) {
+    const mid = 0.5 * (lo + hi);
+    if (agxContrast(mid) < y) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/**
+ * Display-referred AgX output -> scene-linear radiance (PRE-exposure, POST
+ * bloom — bloom is added upstream of `color *= uExposure`).
+ * @param {number[]} disp
+ * @param {number[]} look slope, offset, power, saturation
+ * @returns {number[]} scene-linear RGB, pre-exposure
+ */
+export function agxInverse(disp, look) {
+  let c = mul(AGX_OUT_INV, disp);
+  const l = LUMA(c);                       // saturation is luma-preserving
+  c = c.map((v) => l + (v - l) / look[3]);
+  c = c.map((v) => Math.pow(Math.max(v, 0), 1 / look[2]));
+  c = c.map((v) => (v - look[1]) / look[0]);
+  c = c.map((v) => agxContrastInv(clamp01(v)));
+  c = c.map((v) => Math.pow(2, v * (AGX_MAX_EV - AGX_MIN_EV) + AGX_MIN_EV));
+  return mul(AGX_IN_INV, c);
+}
+
 /** sRGB OETF, as the renderer's colorspace_fragment applies it. */
 export function srgbOETF(x) {
   x = clamp01(x);
@@ -147,8 +222,13 @@ export function grade(linear, p) {
   const hw = smoothstep(bal, 1, lum);
   disp = disp.map((v, i) => clamp01(v + p.splitShadow[i] * sw + p.splitHighlight[i] * hw));
 
-  // gl_FragColor = agxToLinear(disp) then the sRGB OETF.
-  const code = disp.map((v) => srgbOETF(Math.pow(Math.max(v, 0), 2.2)) * 255);
+  // FINAL_FRAG writes displayToLinear(disp) and three's colorspace_fragment
+  // applies the sRGB OETF on top. Since 2026-09-02 `displayToLinear` is the
+  // true sRGB EOTF, so the pair CANCELS and the code value is the display
+  // value. It used to be `pow(disp, 2.2)`, which is not that inverse and
+  // crushed everything below display 0.35 — every toe exchange rate this file
+  // printed before the fix was computed through that crush and is too small.
+  const code = disp.map((v) => clamp01(v) * 255);
   return { disp, code, luma: 0.2126 * code[0] + 0.7152 * code[1] + 0.0722 * code[2] };
 }
 
