@@ -637,8 +637,29 @@ export class RenderPipeline {
       if (typeof s.aerialDensity === 'number') this._aerialDensity = s.aerialDensity;
       if (typeof s.aerialRamp === 'number') this._aerialRamp = s.aerialRamp;
     }));
+    // RE-TRIGGER, NOT ACCUMULATE — and this is the half of the red-rim fix the
+    // ceiling and the decay could not reach.
+    //
+    // `hit` drives `uDamage`, and an accumulator with a ceiling has one
+    // inevitable behaviour under sustained fire: it converges. At a hit rate r
+    // against a bump b and decay k it settles at b*r/k and STAYS THERE, a
+    // constant. Measured on shots/iter36/gameplay.png, which is a routine
+    // 60%-AP frame — so `crit` is exactly zero and every bit of this is `hit` —
+    // mean R-G by screen radius, 8 bands from centre to corner:
+    //     11.9  11.1   8.9   6.3   5.1   7.8  16.5  26.9
+    // Twenty-seven code values of red at the frame edge against five in the
+    // middle. That is a filter, not a flash, and it is what every reviewer has
+    // been looking at.
+    //
+    // `max` gives a hit the SAME PEAK as before (0.85, so a single hit is
+    // unchanged and still reads) but makes a second hit re-strike the same
+    // flash instead of summing toward a plateau. At four hits a second the term
+    // is now a 0.85-to-0 sawtooth that is at zero 38% of the time and averages
+    // 0.26, where the accumulator sat rock-steady at 0.44. Flicker is the point:
+    // a value that returns to zero between hits reads as being hit, a value
+    // that never does reads as a gel over the lens.
     this._offs.push(bus.on(EV.PLAYER_HIT, () => {
-      this._dyn.hit = Math.min(0.85, this._dyn.hit + 0.6);
+      this._dyn.hit = Math.max(this._dyn.hit, 0.85);
       this._dyn.scan = Math.min(1, this._dyn.scan + 0.5);
     }));
     this._offs.push(bus.on(EV.STAGGER, (e) => {
