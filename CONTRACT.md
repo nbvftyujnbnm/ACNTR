@@ -2201,3 +2201,89 @@ two of the silhouette metrics were wrong on their first outing.
   its own relief gets less dip, and the floor rises by whatever drop is left.
   ANY future "make it more random" change to a two-axis quantity should be
   sampled as direction + magnitude for the same reason.
+- 2026-09-04 [render] **THE NEAR-HORIZON SKY WAS FLAT BECAUSE OF A GAP BETWEEN
+  TWO CORRECT DECISIONS, AND THE NUMBER IS 0.85 CODE VALUES.** "Flat" had been
+  restated for several passes without anyone saying how flat; the metric that
+  answers it is the standard deviation of the sky's stratification — a vertical
+  high-pass, because strata are horizontal and a 2-D blur wide enough to pass a
+  50 px band also averages along it and reports a flat sky for one that is not.
+  MEASURED with tools/skysim.mjs on the vista frustum: 0.85 code values, against
+  a grain floor of 2.0 that the pipeline adds on purpose. The layers were half a
+  code value UNDER the noise.
+  The transfer curve is innocent, and that is checkable rather than arguable:
+  tools/grade-model.mjs says a 9% radiance swing buys 5 code values anywhere in
+  the sky's range (105, 140, 175 and 208 all cost 8.4-10.7%).
+  THE GAP. `exp( -up * 7.5 )` e-folds at 7.6 degrees and is at 0.10 by 17, and a
+  hero framing's sky STARTS around 10 degrees because terrain covers everything
+  below. The cloud deck above is held out below 24 degrees for the curtain
+  reason recorded earlier. Between them sat the entire visible sky with nothing
+  in it. Both decisions are right; neither owned 10-24 degrees.
+  FIXED by giving the SAME 26x stratum field a second, much slower altitude
+  profile (`highDeck` in sky.js), faded in above the dense deck so the first 3.5
+  degrees stay exactly as tuned and out before the clouds arrive. Threshold pair
+  0.40/0.74 -> 0.44/0.72: tighter and still above the fbm's 0.5 mean, so the
+  layers get SPARSER and each one stronger — clear air between strata, and the
+  contrast is bought without lifting the whole sky.
+  RESULT, predicted offline then confirmed in the renderer: stratification s.d.
+  2.17 -> 3.11 in the captured frame (sim predicted 0.85 -> 2.49, which in
+  quadrature with the 2.0 grain floor is 3.19), with the region's mean up 3.0
+  code values (138.1 -> 141.1). shots/fan/fan_base.png is the before,
+  shots/iter37/vista.png the after.
+  MEASURED DEAD END, recorded so it is not tried: using the sun veil's 16x field
+  as a SECOND, coarser deck. At 17-21 degrees of elevation one band of that
+  field is 120-200 px tall in a 1080-line frame, so one or two of them fill the
+  whole visible sky and arrive as a smooth GRADIENT — traced down a single
+  column it moved the display value 10 codes monotonically over 120 px. Two
+  thicknesses of stratum is a good idea at the horizon and a brightness control
+  higher up. The scale that reads as a LAYER at those elevations is the 26x
+  field, at 40-60 px, so the fix had to be reach and not a second field.
+  SECOND MEASURED DEAD END: extending the sun-side extinction `veil` to the
+  whole sky by giving `sunSide` a floor. Swept 0 -> 0.45 in the sim and it moved
+  the frame by under one code value — because the vista's frame CENTRE is only
+  39 degrees off the sun, so `pow(mu,1.4)` is already 0.71 there and the floor
+  has almost nothing left to add. The knob survives in skysim as `veilFloor`.
+- 2026-09-04 [render] **GLOBAL CONTRAST RE-MEASURED, AND THE OLD COMPLAINT IS
+  STALE FOR THE VISTA.** The standing figure — "the far butte 139, the sky 143,
+  the near ridge 101, the whole background inside 40 code values" — no longer
+  describes the frame. On shots/fan/fan_base.png (`tools/retransfer.mjs`, luma
+  percentiles p1/p50/p99 unless noted):
+      whole frame     29 / 109 / 231
+      sky, sun side  194 / 208 / 223
+      sky, anti-sun   98 / 105 / 118
+      mountain, left  92 / 102 / 113
+      far plain       96 / 112 / 133
+      sunlit sand     17 / 134 / 190   (p95 174)
+      shadowed sand   33 /  42 / 124
+  That is a 202-code span with the sand's lit/shadow pair at 134 vs 42. The
+  frame is not low contrast. What IS still true is narrower and already
+  assigned: sky, mountain and plain sit inside 26 code values of each other,
+  which is aerial perspective doing its job, and the amendment above already
+  established that the remedy there is SILHOUETTE AND OVERLAP, not value.
+  Note the gameplay frame is not the place to judge this — iter36's is
+  dominated by an explosion, and 2.1% of it is above 224 for that reason alone.
+- 2026-09-04 [render] **THE RED EDGE, MEASURED PROPERLY AND HALF FIXED.** The
+  earlier amendment named the damage rim rather than the vignette and fixed the
+  quick-boost bleed, the ceiling (1.2 -> 0.85) and the decay (2.6 -> 5.5/s).
+  It was not enough, and the reason is structural. Mean R-G by screen radius on
+  shots/iter36/gameplay.png, 8 bands centre to corner:
+      11.9  11.1  8.9  6.3  5.1  7.8  16.5  26.9
+  That frame is at 60% AP, so `crit` is EXACTLY ZERO and all 26.9 of it is the
+  hit term. The control matters as much: the same measurement on an undamaged
+  vista falls 15.9 -> 7.3 from mid-frame to corner, i.e. no red edge at all, so
+  the vignette really is neutral and this really is `uDamage`.
+  AN ACCUMULATOR WITH A CEILING CONVERGES. At hit rate r, bump b and decay k it
+  settles at b*r/k and then holds a CONSTANT — the decay only sets how fast it
+  gets there. `hit` is now `max(hit, 0.85)`, a re-strike: identical peak for a
+  single hit, but a second hit restarts the same flash instead of summing. At
+  four hits a second it is a sawtooth that reaches zero 38% of the time and
+  averages 0.26 where the accumulator sat rock-steady at 0.44.
+  WHAT IS LEFT, for whoever picks this up. The rim is still a radially
+  SYMMETRIC screen blend, and both halves of that are why it reads as a filter.
+  Symmetric, because a warning that appears equally on all four sides carries no
+  information — biasing it toward the incoming hit's screen direction would make
+  it diegetic, and `EV.PLAYER_HIT` already carries the source. And a screen
+  blend lifts DARK pixels hardest (`disp + c*dv*(1-disp)`), which is why the
+  measured tint is worst exactly where the frame is darkest: at the corner the
+  luma is 83 and the tint is 27. Weighting `dv` by the pixel's own luma would
+  stop it washing the shadows, but it would also damp the low-AP warning in a
+  dark scene, so that trade needs a frame in front of it before it is made.
