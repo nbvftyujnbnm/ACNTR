@@ -2287,3 +2287,46 @@ two of the silhouette metrics were wrong on their first outing.
   luma is 83 and the tint is 27. Weighting `dv` by the pixel's own luma would
   stop it washing the shadows, but it would also damp the low-AP warning in a
   dark scene, so that trade needs a frame in front of it before it is made.
+- 2026-09-04 [render/world] **THE AERIAL IN-SCATTER HUE *IS* WHY THE DISTANT
+  BUTTES READ AS CUT-OUTS, AND THE EARLIER "MEASURED DEAD END" WAS MEASURED IN
+  THE WRONG FRAME.** This amends the 2026-09-03 entry above; do not act on that
+  one without reading this.
+  That entry sampled the GAMEPLAY frame and reported the buttes "within 4 luma
+  and 3 chroma of the sky beside them". `tools/poses/cliff.js` exists precisely
+  because the vista and gameplay cameras hide distant-landform defects — it is
+  the ground-level pose the buttes are actually judged from. MEASURED on
+  shots/L52/cliff.png, each patch against the sky IMMEDIATELY BESIDE IT at the
+  same elevation:
+      butte L body        rgb(136,131,132)  R-B  4.0  luma 132.4  sd 3.02
+      sky beside butte L  rgb(156,143,130)  R-B 25.9  luma 144.9
+      butte R body        rgb(128,125,128)  R-B  0.2  luma 126.6  sd 3.89
+      sky beside butte R  rgb(153,144,134)  R-B 18.8  luma 145.5
+      far plain / ring    rgb(104, 99, 99)  R-B  4.9  luma 100.5
+  So the gap is 12-19 luma and 19-26 CHROMA, not 4 and 3 — five and eight times
+  what the earlier sample said. And the far plain is neutral too, so this is the
+  whole distant layer, not the buttes. A neutral patch inside a warm field reads
+  as pale paper whatever its luma is; that is the entire "flat pale cut-out".
+  WHERE IT COMES FROM, and it is one line: `Sky.js` builds `aerialColor` as
+  `zenith.lerp(horizon, 0.60)` and then multiplies **b by 1.30** with r by 0.94.
+  At 92-95% veil the in-scatter IS the landform's colour, so that deliberate
+  blue push is painting every distant surface neutral-cool inside a sky whose
+  own R-B is 19-26. The comment defending it ("warm near, cool far is what the
+  eye reads as distance") is right about the PRINCIPLE and wrong about the
+  MAGNITUDE at this sun: the sky against which the cue is read is itself the
+  warm end, so the veil only has to be cooler than the ROCK, not cooler than
+  the sky.
+  **AND HERE IS WHY THE PREVIOUS EXPERIMENT MOVED ONE CODE VALUE.**
+  `Pipeline.js:321` sets `this._aerialColor = new THREE.Color(0.16, 0.17, 0.19)`
+  and `Pipeline.js:630` copies Sky's emitted `aerialColor` over it on every
+  `sky:params` event. THE CONSTRUCTOR VALUE IS DEAD. Anything that changes the
+  aerial hue anywhere downstream of Sky's `b * 1.30` gets the blue back on the
+  next emit. Same family as the `debug.setPass` no-op and the groundterms probe
+  that pointed at a roof: an A/B whose control cannot move reads exactly like
+  "this term does not matter".
+  OWNER: `src/render/Sky.js` — this agent owns `src/world/` and did not touch
+  it. The prescription is measurable rather than aesthetic: sample the butte and
+  the sky beside it in `shots/<n>/cliff.png` and bring the veil's R-B to within
+  a few code values of the SKY's at that elevation, currently 19-26. Nothing in
+  `src/world/` can do it — at a 93% veil the mesh's own vertex colour would need
+  an R-B of about 157 code values, i.e. bright orange rock, to move the
+  composite by 11.
