@@ -609,7 +609,14 @@ export class Level {
     // cliff came back as an even stipple, the closest thing to stucco this
     // level has ever rendered. Relief on a landform at that range has to come
     // from the mesh; the map's job here is grain, not form.
-    cliff.normalScale.set(1.3, 1.3);
+    // 0.55, not 1.3, and this is the SAME defect the terrain's `normalStrength`
+    // was just measured for. The rock map's |xy| is mean 0.224 / p99 0.416
+    // (tools/probes/dustmap.js), so 1.3 is a 16-degree typical flank on a
+    // landform lit by a 13.5-degree sun — the stipple visible all over the
+    // boundary ring in shots/L46/tanks.png is that term, not the mesh. Halving
+    // the coefficient twice has been tried (1.95 -> 1.3) without measuring what
+    // it multiplies; 0.55 is 7 degrees, which is grain.
+    cliff.normalScale.set(0.55, 0.55);
     cliff.onBeforeCompile = cliffBreakup;
     this._materials.push(cliff);
     this.mat.cliff = cliff;
@@ -1438,6 +1445,32 @@ export class Level {
   _buildContainmentField() {
     const baseY = this.terrain ? this.terrain.minHeight : -20;
     const geo = new THREE.CylinderGeometry(ARENA_R, ARENA_R, 200, 168, 6, true);
+    /*
+     * THE CURTAIN IS ANCHORED TO THE GROUND IT ACTUALLY STANDS ON.
+     *
+     * Its fades were functions of `uv.y`, i.e. of height up the CYLINDER, and
+     * the cylinder is a rigid tube at a fixed y. The boundary ring it follows
+     * rises 150-290 m and falls again, so a fade pinned to uv.y cuts the
+     * curtain off in mid-air over a high shoulder and leaves it buried in a low
+     * saddle — which is the "a ContainmentField panel floats unattached" defect:
+     * a rectangle of additive haze with no visible base, hanging over the ridge
+     * wherever the terrain happened to be lower than the fade.
+     *
+     * A vertex attribute carrying the ground height under each column costs
+     * 1 176 `heightAt` calls at build time and nothing at all per frame, and it
+     * lets the fragment shader work in HEIGHT ABOVE GROUND. The curtain then
+     * meets the dirt everywhere, which is also where a containment field should
+     * be brightest.
+     */
+    {
+      const pos = geo.attributes.position;
+      const gy = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) {
+        // Positions are local to a mesh translated to `baseY + 92`.
+        gy[i] = this.heightAt(pos.getX(i), pos.getZ(i)) - (baseY + 92);
+      }
+      geo.setAttribute('aGroundY', new THREE.BufferAttribute(gy, 1));
+    }
     const mat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: this._uTime,
@@ -1446,10 +1479,13 @@ export class Level {
         uColor: { value: new THREE.Color(0x2fa8ff) },
       },
       vertexShader: /* glsl */`
+        attribute float aGroundY;
         varying vec3 vW;
         varying vec2 vUvv;
+        varying float vAbove;
         void main() {
           vUvv = uv;
+          vAbove = position.y - aGroundY;
           vec4 wp = modelMatrix * vec4( position, 1.0 );
           vW = wp.xyz;
           vec4 mv = viewMatrix * wp;
@@ -1463,10 +1499,17 @@ export class Level {
         uniform vec3 uColor;
         varying vec3 vW;
         varying vec2 vUvv;
+        varying float vAbove;
         void main() {
           float d = length( vW.xz - uPlayer.xz );
           float prox = 1.0 - smoothstep( 55.0, 210.0, d );
-          float vert = smoothstep( 0.02, 0.30, vUvv.y ) * ( 1.0 - smoothstep( 0.45, 0.98, vUvv.y ) );
+          // Height ABOVE THE GROUND under this column, not height up the tube.
+          // Anything below the dirt is discarded outright rather than faded, so
+          // the curtain cannot glow through the inside of a mesa; above it the
+          // 0-14 m ramp is the anchor and the 70-140 m one is the top.
+          if ( vAbove < -4.0 ) discard;
+          float vert = smoothstep( 0.0, 14.0, vAbove )
+                     * ( 1.0 - smoothstep( 70.0, 140.0, vAbove ) );
           float bars = 0.55 + 0.45 * sin( vUvv.x * 1340.0 );
           float scan = 0.5 + 0.5 * sin( vW.y * 0.34 - uTime * 1.7 );
           float pulse = 0.72 + 0.28 * sin( uTime * 2.3 + vUvv.x * 40.0 );
