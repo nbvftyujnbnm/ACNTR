@@ -2651,3 +2651,60 @@ two of the silhouette metrics were wrong on their first outing.
   and carries the sky's own structure, instead of one hand-tuned constant. That
   is a real wiring job (cube UV + decode inside COMPOSITE_FRAG) and wants a
   session of its own.
+- 2026-09-05 [world] **THE PALE CUT-OUT IS FIXED, AND IT WAS THE BAND'S RANGE.**
+  Acting on the veil solve above. `_distantButtes`' band went 950-1900 m ->
+  760-1400 m, its plan radius is now clamped by centre distance so a near member
+  cannot push into the cliff face (`rCap = (rad - 560) / 1.31`), and heights went
+  150-300 -> 170-360 so a closer butte still clears the ring's crest.
+  MEASURED on `tools/poses/cliff.js`, shots/aer_fix -> shots/btg2, column 1235,
+  a vertical strip down one butte with the sky in the same column just above it:
+
+      row     440(sky)  480    520    560    600    640
+      before    127.8  138.3  141.1  146.5  137.2  137.1
+      after     125.3  117.9  117.0  119.5  123.7  123.8
+
+  So the landform against the sky IMMEDIATELY ABOVE IT went from **+10.5..+18.7
+  to -7.4..-1.5**, and the interior ramp from non-monotonic +-4 to a monotonic
+  **5.9 luma with the crest darker than the toe**, which is what the function's
+  own comment always claimed and never did. Across the frame the whole layer now
+  sits in a correct ladder — mesa ring 86-106, buttes 118-134, sky 136-158 —
+  where before the buttes were 139-141 inside a sky of 128-156 and read as
+  pasted paper because they were in the sky's own value family.
+  Costs, all checked: no new draw call (same merged `BoundaryFar` mesh), no
+  console errors, and `vista` does not regress — the group reads as background
+  landform behind the ridge, not as a wall (shots/btvista/vista.png).
+- 2026-09-05 [world] **THE BUTTE GULLIES BOUGHT SILHOUETTE, NOT INTERIOR, AND
+  THAT IS THE WHOLE POINT OF MEASURING BOTH ARMS.** A rectified drainage field
+  was added to the butte plan (relief 0.14 of radius, plus a 0.17 occlusion term
+  on the vertex colour, both enveloped off the toe and out from under the
+  caprock). Isolated A/B, shots/btrange -> shots/btg2:
+
+      interior sd, butte L   3.43 -> 3.60      butte R   7.99 -> 7.90
+      pixels differing > 3 code values over the sky/butte band: 35.75%, max 69
+
+  i.e. it moved a THIRD of the layer's pixels and changed its interior standard
+  deviation by nothing. Both facts are true and they are not in tension: the
+  channels cut the OUTLINE, and at a 0.6-0.9 veil an occlusion term of 0.17 on a
+  surface worth 0.04 scene-linear is a couple of code values. Keep it for the
+  silhouette; do not reach for it again expecting interior contrast, and do not
+  raise its occlusion coefficient hoping to get some — that is the same
+  arithmetic `BUTTE_ALBEDO` already lost to.
+  METHOD, and it cost a capture: the first version drew `H_GULLY` from the
+  shared `rng`, which consumed four numbers per butte and walked the stream, so
+  every radius, height, squash and tilt in the group came out different and the
+  A/B could not be attributed to anything. It now has its own generator, the
+  discipline `_mesaRing`'s `FACE` already keeps. **A parameter you intend to A/B
+  must not move the seed of everything beside it.**
+- 2026-09-05 [render] REQUEST, and it is the last thing standing between this
+  layer and a clean pass. `Sky.js` builds `aerialColor` as
+  `lerp(zenith, horizon, 0.88)`, which the veil solve above measures at 0.247
+  scene-linear — display ~149. The SKY it is composited against renders 136-146
+  at the elevations a distant landform actually occupies (5-12 deg), so the fog
+  is BRIGHTER THAN THE SKY BEHIND IT and every surface at a high veil is pushed
+  up through its own background. `src/world/` can only dodge that by staying out
+  of the high-veil range, which is what the band move above does and why the
+  band cannot now be widened back out past ~1.4 km. The fix on your side is to
+  make the in-scatter track the sky's radiance in the VIEW DIRECTION rather than
+  a single horizon-weighted constant — at minimum, weight `aerialColor` toward
+  the zenith end far enough that it lands at or just under the sky at 5-12 deg
+  instead of 3-13 codes over it.
