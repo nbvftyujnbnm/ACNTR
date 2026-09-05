@@ -64,6 +64,11 @@
   // replenishment, and `page.screenshot` on this canvas has measured 24-130 s
   // (see every `shotMs` in `shots/*/report.json`), so a capped burst is stone
   // dead in the picture. capture.mjs calls __POSE_CLEANUP__ after the shutter.
-  const t = setInterval(boom, 90);
+  // 90 ms was the rate for a 1.1 s window. Running to cleanup that is hundreds
+  // of detonations held at the particle system's capacity for the length of the
+  // capture, which taxes the very frame the pose is trying to photograph. An
+  // explosion lives ~1.2 s, so 300 ms keeps three or four alive at all times —
+  // which is all this pose needs — at a third of the cost.
+  const t = setInterval(boom, 300);
   window.__POSE_CLEANUP__ = () => clearInterval(t);
 })();

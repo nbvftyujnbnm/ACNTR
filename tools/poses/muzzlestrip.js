@@ -15,9 +15,18 @@
 // that is arithmetically over. The ages below bracket the part that is
 // actually visible.
 //
-// Same framing rule as the explosion filmstrip: NO CAMERA OVERRIDE (it does
-// not reach the render under freeze, recorded in CONTRACT.md). The row is
-// placed ahead of the player and photographed by the real chase camera.
+// Same framing rule as the explosion filmstrip: NO CAMERA OVERRIDE. That used
+// to be justified by "it does not reach the render under freeze"; that finding
+// is RETRACTED (CONTRACT.md, 2026-09-05 — it was this pose family's 6 s
+// teardown timer firing before the shutter). The row is placed ahead of the
+// player and photographed by the real chase camera because that frames the
+// flash at the distance combat happens, which is a better reason anyway.
+//
+// AND THE RESULT THIS POSE ORIGINALLY REPORTED IS RETRACTED WITH IT. "Peak
+// luma 60-86 across all five ages, zero pixels over L=200" was measured on a
+// frame whose flashes had been dead for tens of seconds, because the same timer
+// released the freeze before the picture was taken. Re-shoot before quoting any
+// number from this pose.
 (async () => {
   const { debug, game, THREE } = window.__ACNTR__;
   debug.setHudVisible(false);
