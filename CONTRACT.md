@@ -2403,3 +2403,73 @@ two of the silhouette metrics were wrong on their first outing.
   distributed at one scale, so it reads as noise rather than as armour plate,
   panel line and fitting in a hierarchy. That is a modelling question for
   `src/mech/`, not a lighting one.
+- 2026-09-05 [combat/vfx] **EVERY PARTICLE IN THIS SYSTEM FADES TWICE, AND IT
+  HALVES THE USEFUL LIFE OF EVERY FLASH.** `particleVert` computes
+  `alpha = mix(aCol0.a, aCol1.a, t) * fadeIn * tail` where
+  `tail = pow(1 - t, alphaCurve)`. So anything authored `alpha0 = 1,
+  alpha1 = 0` — which is nearly every hot layer in `VFX.js` — runs at
+  **(1-t)^(1+alphaCurve)**, not at (1-t).
+  Worked through for the explosion flash core (life 0.06, alphaCurve 1.6, so
+  (1-t)^2.6): 44% alpha at a THIRD of its life, 16% at half, 1% at 83%. The
+  `explosion` filmstrip's youngest sample is age 0.05 s and its comment claims
+  it "catches the flash at peak"; arithmetically it catches a flash that is
+  99% gone. Same for the muzzle core (life 0.042, curve 1.4 -> (1-t)^2.4):
+  `muzzle.js` fires and steps 30 ms, which is 71% of the life, i.e. 5% alpha.
+  Both diagnostics were shooting the corpse.
+  THE FIX IS THE SHAPE, NOT THE LENGTH. Lengthening `life` makes a flash
+  linger dimly; what an AC6 flash does is hold flat for two or three frames
+  and then stop. Hold `alpha1` well above zero (0.4-0.5) and drop
+  `alphaCurve` to ~1.0, and the product becomes flat-topped. Applied to the
+  explosion's core and flare here.
+  Whenever you reason about how long an effect reads, use (1-t)^(1+curve).
+- 2026-09-05 [combat/vfx] **THE EXPLOSION IS NOT A LIGHT SOURCE — MEASURED.**
+  On shots/boom05/explosion.png, per-detonation peak luma across the six ages
+  is 156 / 150 / 146 / 144 / 143 / 137, and the SKY BEHIND THEM peaks at 149.
+  The brightest pixel in a fresh 18 m detonation is five per cent brighter
+  than the background it is drawn over, and **zero pixels anywhere in the
+  frame exceed L=200**. That is the real defect behind "the explosion has no
+  structure": not composition, not clipping (the earlier correction that the
+  core is NOT clipped is right and still stands), but that the fire never gets
+  bright enough to separate from the sky or to cross the bloom threshold.
+  Cross-checked against the arithmetic: a mid-heat fireball puff emitted at
+  1.8 linear composites to ~1.1 after alpha, which AgX puts just above the sky
+  and just under bloom. The measurement and the maths agree.
+  The lever is the ALPHA puffs' radiance, and it is safe to raise precisely
+  because they are alpha and not additive — alpha compositing does not
+  accumulate into the featureless slab that got the additive fireball removed.
+  Section 2's puff radiance went 2.6*heat+0.5 -> 6.2*heat+0.7 and the additive
+  core sprites 7 -> 12.
+  NOTE THE ORDER OF WORK: the rolling smoke (section 3) was left alone. The
+  earlier amendment showing that delaying it destroys the explosion is about
+  the SMOKE; the fireball's own radiance is a separate lever and is the one to
+  reach for first.
+- 2026-09-05 [combat] TWO WIRING BUGS ON THE IMPACT PATH, both the same shape
+  as the deleted `_fxTrail`. (1) `ProjectileManager._fxImpact` emits
+  `EV.IMPACT` **and** calls `vfx.impact` directly. Only the bus handler
+  consulted `VFX`'s de-duplication ring, so both paths ran and **every round
+  that hit anything spawned the entire impact twice** — two spark bursts, two
+  scorch decals, two flash lights, double additive energy at one point. The
+  guard now lives in `VFX.impact` itself, where the ring's own comment says it
+  belongs, so it holds whichever path arrives first. (2) The same call site
+  passed the scale as a bare number into `impact(pos, normal, type, opts)`,
+  whose fourth argument is an OPTIONS OBJECT, so `(opts && opts.scale) || 1`
+  read `undefined` and every impact ran at scale 1 — the authored 1.4 splash,
+  1.8 charged and 2.2 beam multipliers were computed and thrown away.
+  (3) Related: `_fxExplosion` emits `EV.IMPACT` with `type: 'explosion'`, and
+  `VFX._impactKind` has no case for it, so it fell through to its 'concrete'
+  default and **every detonation also spawned a full concrete impact** at
+  scale clamp(radius,..,4) — ~55 grey dust puffs, ~35 chunks and a 3-6 m CRACK
+  DECAL over the fireball, hanging in mid-air for an airburst. That is exactly
+  the floating-decal bug `_fxExplosion` raycasts the ground to avoid, arriving
+  through the other door. The EV.IMPACT handler now ignores blast payloads.
+  Note the grey dust was also DESATURATING every in-game explosion; the
+  `explosion` filmstrip never showed it because `debug.vfx` calls
+  `VFX.explosion` directly and bypasses `_fxExplosion` entirely. A diagnostic
+  that skips the caller cannot see a bug in the caller.
+- 2026-09-05 [tools] BOTH VFX FILMSTRIP POSES WERE PHOTOGRAPHING THE DEFOCUS.
+  `explosion.js` reported its own `passes` as `dof: true` and put the row 98 m
+  from the lens; `muzzlestrip.js` run 1 put a 2 m muzzle flash 44 m away with
+  the mech occluding the middle of the row, and came back as faint smudges
+  plus two hot pixels that were the mech's own lamps. Both now call
+  `debug.setPass('dof', false)` and frame at combat range. A diagnostic exists
+  to show what an effect CONTAINS; lens blur belongs in the review poses.

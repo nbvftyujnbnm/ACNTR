@@ -33,10 +33,18 @@
 
   // Ages in seconds. The core sprite lives 42 ms, the cross blades 38 ms, the
   // flare 62 ms, the gas cone 60-100 ms — so this brackets birth to death.
-  const AGES = [0.004, 0.012, 0.022, 0.035, 0.055, 0.085];
-  const AHEAD = 17;
-  const SPACING = 5.6;
-  const HEIGHT = 5.5;
+  // WHERE THE ROW GOES, AND WHY IT IS BEHIND THE PLAYER.
+  // Run 1 put it 17 m AHEAD, which is ~44 m from the chase lens with the mech
+  // sitting in the middle of it, and with DOF focused on the mech. It came
+  // back as five faint smudges and two hot pixels that were the mech's own
+  // lamps: nothing gradeable. A muzzle flash is a ~2 m object, so it has to be
+  // photographed from ~20 m, not 44. `ahead` is negative — the row is placed
+  // BETWEEN the chase camera and the player — and lifted clear of the mech's
+  // head so nothing occludes it.
+  const AGES = [0.004, 0.014, 0.030, 0.050, 0.080];
+  const AHEAD = -6;
+  const SPACING = 4.4;
+  const HEIGHT = 11;
   // In-game flashScale: rifle 0.55, handgun 0.7, missile 0.9. Grade the shape
   // at the scale the game actually uses, not at a flattering one.
   const SCALE = 0.7;
@@ -46,7 +54,10 @@
   // and the one thing this pose exists to grade cannot be seen.
   const dir = debug.right().clone().normalize();
 
+  // DOF OFF: the row is nowhere near the focus plane, and run 1 photographed
+  // the defocus rather than the effect.
   debug.setPass('motionBlur', false);
+  debug.setPass('dof', false);
   debug.step(0.3);
 
   const half = (AGES.length - 1) / 2;
@@ -91,6 +102,7 @@
     playerAt: p.toArray().map((n) => +n.toFixed(1)),
     spots: spots.map((v) => v.toArray().map((n) => +n.toFixed(1))),
     screenPx: screen,
+    metresFromLens: spots.map((v) => +v.distanceTo(cam.position).toFixed(1)),
     cameraActual: cam.position.toArray().map((n) => +n.toFixed(1)),
     liveParticles: game.vfx?.liveParticles ?? null,
     note: 'Left to right = youngest to oldest. If the strip fades to nothing by '
@@ -102,5 +114,6 @@
     debug.freeze(false);
     debug.releaseCamera();
     debug.setPass('motionBlur', true);
+    debug.setPass('dof', true);
   }, 6000);
 })();

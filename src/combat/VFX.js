@@ -1022,9 +1022,20 @@ export class VFX {
       p.life = randRange(0.30, 0.62);
       p.size0 = R * 0.30; p.size1 = R * randRange(0.85, 1.45);
       p.tile = TILE.SMOKE_A + (i % 3);
-      p.color0.setRGB(2.6 * heat + 0.5, (0.95 * heat + 0.10) * lerp(0.75, 1.05, Math.random()), 0.30 * heat * heat + 0.03);
+      // RADIANCE, MEASURED. On shots/boom05 the brightest pixel anywhere in a
+      // fresh detonation was 191,149,123 — luma 156 against a sky that peaks
+      // at 149. The explosion was five per cent brighter than its background:
+      // a warm-brown cloud, not a light source, and zero pixels over L=200 at
+      // any age. At the old numbers a mid-heat puff emits 1.8 linear and
+      // composites to ~1.1, which AgX puts a hair above the sky and just under
+      // the bloom threshold, so it never got a halo either.
+      // These are ALPHA puffs, which is why the number can go up: alpha
+      // compositing does not accumulate the way the additive slab that was
+      // removed here did, so the ball keeps its silhouette and its interior
+      // while the hot middle finally outruns the sky.
+      p.color0.setRGB(6.2 * heat + 0.7, (2.35 * heat + 0.16) * lerp(0.75, 1.05, Math.random()), 0.55 * heat * heat + 0.04);
       p.color1.setRGB(0.16 * cr, 0.055 * cg, 0.028 * cb);
-      p.alpha0 = 0.92; p.alpha1 = 0;
+      p.alpha0 = 0.92; p.alpha1 = 0.22;
       p.fadeIn = 0.03; p.erode = 0.34; p.sizeCurve = 0.45; p.alphaCurve = 1.35;
       p.turb = 0.6 * big; p.turbFreq = 5.5;
       p.rot = Math.random() * TAU; p.spin = randRange(-3.5, 3.5);
@@ -1038,12 +1049,12 @@ export class VFX {
       p.pos.copy(pos).addScaledVector(_v0, Math.random() * R * 0.22);
       p.vel.copy(_v0).multiplyScalar(randRange(2, 6) * big);
       p.drag = 5.5;
-      p.life = randRange(0.13, 0.26);
+      p.life = randRange(0.17, 0.32);
       p.size0 = R * 0.22; p.size1 = R * randRange(0.5, 0.8);
       p.tile = TILE.SMOKE_A + (i % 3);
-      hdr(p.color0, 1.0, lerp(0.80, 0.58, Math.random()), lerp(0.40, 0.14, Math.random()), 7);
+      hdr(p.color0, 1.0, lerp(0.80, 0.58, Math.random()), lerp(0.40, 0.14, Math.random()), 12);
       hdr(p.color1, cr, cg * 0.30, cb * 0.06, 0.7);
-      p.alpha0 = 0.85; p.alpha1 = 0;
+      p.alpha0 = 0.85; p.alpha1 = 0.2;
       p.fadeIn = 0.02; p.sizeCurve = 0.4; p.alphaCurve = 1.5;
       p.rot = Math.random() * TAU; p.spin = randRange(-4, 4);
       ps.emit();
