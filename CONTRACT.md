@@ -2582,3 +2582,72 @@ two of the silhouette metrics were wrong on their first outing.
   is bounded by, so f = 0.6 / display -14 is the best this layer can do from
   the world side. Going below that needs the VEIL's luma at 1 km, which is
   `src/render/` (see the REQUEST below).
+- 2026-09-05 [render] **THE VEIL WAS 19% BRIGHTER THAN THE SKY IT IS SEEN
+  AGAINST, AND IT IS A CONSTANT WHERE THE SKY IS A RAMP.** Acts on the request
+  above ("the veil's own luma at that depth"), and answers it with a ratio
+  rather than a feeling.
+  `tools/probes/veil.js` (new) reproduces the cliff pose's camera, raycasts the
+  pixels the butte patches are measured at, and evaluates COMPOSITE_FRAG's fog
+  maths ON THE CPU from the LIVE uniforms — tau per medium, the veil fraction,
+  the in-scatter colour. `tools/skysim.mjs` grows a `cliff` pose so it can say
+  what the SKY is along those same rays. Together they close the loop offline:
+      butte crest, 1405 m   veil f 0.895   in-scatter 0.2500 linear
+      the sky along that very ray                     0.2094 linear
+  The in-scatter was 19% BRIGHTER than the whole atmospheric column in the same
+  direction, which no finite path can be. That is the luma half of the pale
+  cut-out, and it is why a landform measured 139.9-141.1 against a sky at
+  135-139.
+  THE AERIAL TERM IS THE ONLY LEVER OUT THERE, measured: at 1.4 km `tDeck` is
+  **exactly zero** (from a camera 80 m up the deck's exponential profile is at
+  e^-9 of its base) and `tBand` is 0.5%, so `wAir` = 0.995. `aerialColor` moves
+  a distant pixel very nearly 1:1 and `deckColor`/`bandColor` do not reach it
+  at all — do not try to tune the far distance with them.
+  FIXED: `Sky.js` multiplies `aerialColor` by 0.90 (10% of radiance is ~6
+  display codes here, per `tools/grade-model.mjs`).
+  PREDICTED THEN CONFIRMED, and the prediction method is the reusable part:
+  composite = (1-f)*surface + f*inscat, so a change of in-scatter moves the
+  linear composite by exactly f*(I' - I) and THE SURFACE CANCELS. Invert the
+  measured display through grade-model, add f*(I'-I), grade forward. On the two
+  patches no other agent touched between the two captures it landed on the
+  digit: far plain predicted 104.7, measured 104.8; near dune predicted 82.7,
+  measured 83.0. The sky did not move (0.0 over both control patches), which
+  also confirms the sky pass is not fogged.
+  CROSS-BUILD WARNING, live this session: the butte patches moved 4-6 codes
+  MORE than predicted, and the reason is not the model — `src/world/` landed a
+  butte-range change in the same minute, so those patches are not the same
+  geometry in the two frames. Two of the four measured patches were still clean
+  and they are the ones quoted above. **When three agents are running, pick
+  control patches in parts of the frame the other agents are not editing.**
+  AND THE NUMBER `src/world/` IS QUOTING HAS CHANGED: the in-scatter constant
+  in `_distantButtes`' comment (`C = f * 0.247 + (1-f) * S`) is now **0.2251**.
+  The f -> display table there shifts down ~5 codes at f = 0.9, ~3 at f = 0.61.
+- 2026-09-05 [render] **WHAT IS LEFT OF THE CUT-OUT IS THAT THE VEIL HAS NO
+  DIRECTION AND NO TEXTURE.** Measured on the same rays, and this is the next
+  lever for whoever picks it up.
+  (1) NO VERTICAL RAMP. Along the cliff bearing the sky runs 0.3807 linear at
+  2 deg of elevation to 0.2094 at 9 deg — the horizon glow, a factor of 1.8.
+  The veil is 0.2450-0.2506 at EVERY one of those rays, because `uAerialColor`
+  is one constant with no dependence on the view direction. So the distant
+  layer is under the sky at the horizon and over it higher up, and it is FLAT
+  across a landform that spans both. The interior ramp `_distantButtes` wants
+  (crest darker than toe) is exactly what a sky-following veil would produce
+  for free — and, being 90% of those pixels, it is the only thing that can.
+  The shape of the fix is `exp( -max(dir.y, 0) * k )` with the base rescaled so
+  the 6-9 deg value is preserved (a horizon gain that is not renormalised is a
+  brightness change, not a gradient). NOT SHIPPED HERE, and the reason is
+  measurable rather than cautious: at 0.3 deg the far plain is only f = 0.44,
+  so a 37% horizon gain would lift it ~9 display codes, and re-milking the
+  lower frame is the exact failure this pass was built to avoid. It needs its
+  own capture, and ideally the gain applied through `f` so it cannot reach the
+  half-veiled midground.
+  (2) NO SPATIAL TEXTURE. `dustGain` deliberately modulates the deck and band
+  only, so past ~1 km — where those two are 0.5% of the blend — the air has no
+  structure at all. Measured on the cliff frame: butte interior s.d. 3.6 code
+  values against a sky at 7.2, and 3.6 IS the grain floor. Whatever the mesh
+  does, the pixels are 90% a perfectly uniform sheet.
+  (3) THE HONEST FIX FOR BOTH IS THE ENVIRONMENT MAP. `Sky.environment` is a
+  PMREM of the very sky these rays terminate into; sampling it along `dir` at
+  high roughness gives an in-scatter that is correct in elevation AND azimuth
+  and carries the sky's own structure, instead of one hand-tuned constant. That
+  is a real wiring job (cube UV + decode inside COMPOSITE_FRAG) and wants a
+  session of its own.
