@@ -965,24 +965,33 @@ export class VFX {
     // automatic failure, and the reason no explosion has ever photographed as an
     // orange fireball. The flash is now SMALL and BRIEF; the fireball below
     // carries the size, and it carries it in the band where colour survives.
+    // EVERY PARTICLE HERE FADES TWICE. `particleVert` computes
+    //   alpha = mix(aCol0.a, aCol1.a, t) * fadeIn * pow(1 - t, alphaCurve)
+    // so anything authored `alpha0 = 1, alpha1 = 0` runs at (1-t)^(1+curve),
+    // not (1-t). At the old numbers the core was at 16% alpha by HALF its
+    // 60 ms life and 1% by 50 ms: a flash that is arithmetically over in about
+    // 30 ms, i.e. two frames at 60 fps and a coin toss at this harness's 10.
+    // The lives below are barely longer; what changed is the SHAPE — a1 held
+    // well above zero and a gentler curve, so the flash is flat-topped and
+    // then gone, instead of decaying from its first millisecond.
     let p = ps.begin(BATCH_ADD);
     p.pos.copy(pos);
-    p.life = 0.06;
+    p.life = 0.075;
     p.size0 = R * 0.35; p.size1 = R * 1.05;
     p.tile = TILE.CORE;
     hdr(p.color0, 1.0, 0.97, 0.9, 34);
     hdr(p.color1, 1.0, 0.55, 0.2, 4);
-    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.35; p.alphaCurve = 1.6;
+    p.alpha0 = 1; p.alpha1 = 0.5; p.fadeIn = 0; p.sizeCurve = 0.35; p.alphaCurve = 1.0;
     ps.emit();
 
     p = ps.begin(BATCH_ADD);
     p.pos.copy(pos);
-    p.life = 0.105;
+    p.life = 0.13;
     p.size0 = R * 0.8; p.size1 = R * 2.3;
     p.tile = TILE.FLARE;
     hdr(p.color0, 1.0, 0.84, 0.55, 8.5);
     hdr(p.color1, 1.0, 0.32, 0.07, 0.9);
-    p.alpha0 = 1; p.alpha1 = 0; p.fadeIn = 0; p.sizeCurve = 0.3; p.alphaCurve = 1.7;
+    p.alpha0 = 1; p.alpha1 = 0.4; p.fadeIn = 0; p.sizeCurve = 0.3; p.alphaCurve = 1.1;
     p.rot = Math.random() * TAU; p.spin = randRange(-1.2, 1.2);
     ps.emit();
 
