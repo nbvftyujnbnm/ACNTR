@@ -219,6 +219,20 @@ async function startServer() {
     if (note) shot.note = note;
     if (shotFailed) shot.failed = shotFailed;
     report.shots.push(shot);
+    // FLUSH THE REPORT AFTER EVERY SHOT, not once at the end. A capture on this
+    // box runs 25 s to 2 min PER POSE, and runs get killed — by an outer
+    // `timeout`, by the container, by a spend limit. Writing only at the end
+    // means a run that dies on its last pose throws away every note from the
+    // ones that succeeded, and the notes are the half that says whether the
+    // pictures show what they claim. The PNGs are already on disk one by one;
+    // the report should be too.
+    // `partial` is cleared by the final write below. A report still carrying it
+    // is from a run that did not reach the end: its `consoleErrors`,
+    // `failedShots` and `benignErrors` are unpopulated, and poses may be
+    // missing entirely.
+    report.partial = true;
+    report.remainingPoses = poses.slice(report.shots.length);
+    writeFileSync(resolve(outDir, 'report.json'), JSON.stringify(report, null, 2));
     if (!shotFailed) {
       console.log(`  captured ${file}  (${(shotMs / 1000).toFixed(1)}s${stats ? `, ${stats.drawCalls} calls, ${(stats.triangles / 1000) | 0}k tris, ${stats.fps} fps` : ''})`);
     }
@@ -269,6 +283,8 @@ async function startServer() {
     }).catch(() => {});
   }
 
+  delete report.partial;
+  delete report.remainingPoses;
   const failed = report.shots.filter((s) => s.failed);
   report.failedShots = failed.map((s) => s.pose);
   report.consoleErrors = [...new Set(consoleErrors)].slice(0, 30);
