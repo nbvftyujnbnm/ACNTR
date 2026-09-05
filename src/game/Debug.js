@@ -590,7 +590,7 @@ export class Debug {
     return { inFrustum, visible, blockedAt, camBuried, camY: +cam.position.y.toFixed(1) };
   }
 
-  frameHeroShot({ dist = 18.4, height = 6.4, lookY = 4.7, fov = 34, yaw = null } = {}) {
+  frameHeroShot({ dist = 18.4, height = 6.4, lookY = 4.7, fov = 34, yaw = null, quarter = 0.45 } = {}) {
     const sun = this.game.sky?.sunDirection;
     const pts = this.game.level?.spawnPoints;
     const ph = this.game.physics;
@@ -744,7 +744,37 @@ export class Debug {
       ? 0 : (bestBlocked === Infinity ? 0 : bestBlocked);
 
     // Face the mech roughly toward the camera so we see its front.
-    const faceYaw = yaw != null ? yaw : Math.atan2(best.camPos.x - best.sp.x, best.camPos.z - best.sp.z);
+    //
+    // THE SIGN HERE WAS INVERTED, AND IT POINTED THE MECH'S BACK AT THE LENS ON
+    // EVERY HERO AND MECH_DETAIL SHOT EVER TAKEN. This project's yaw convention
+    // is `forward(Y) = (-sin Y, 0, -cos Y)` — see `Debug.forward`, and the
+    // plumes exhausting along +z in tools/poses/plume.js — so facing a target T
+    // from S needs sin Y = S.x - T.x and cos Y = S.z - T.z, i.e. the mech-minus-
+    // camera difference. It was written camera-minus-mech, which is exactly the
+    // negation: a clean 180 degrees.
+    //
+    // Measured on shots/rev01/hero.png with tools/probes/chestdisc.js, which
+    // reports the camera in MECH-LOCAL coordinates: [0, 5.89, 16.99]. The x of
+    // exactly 0 is the giveaway — the lens was not merely behind the mech, it
+    // was dead on its back axis, which is the signature of a sign flip rather
+    // than of drift. The frame the file header calls "the frame most directly
+    // comparable to an Armored Core VI key render" was a photograph of the
+    // mech's backpack, and the two large pale discs on it that read as a pair
+    // of eyes were the main booster nozzles, which are correct hardware seen
+    // from the one angle a key render never uses.
+    //
+    // An explicit `yaw` argument is unaffected; this is the default path only.
+    //
+    // AND TURN IT OFF THE LENS AXIS. Facing the camera dead-on is not what this
+    // pose's own header asks for — "a cinematic 3/4 view" — and it is not what
+    // a key render is: a straight-on subject has one flat front plane, no
+    // reading of its depth, and both shoulders at identical angles to the key.
+    // Measured after the sign fix and before this, the camera sat at mech-local
+    // x of EXACTLY 0. `quarter` is the body turn in radians; 0.45 is about 26
+    // degrees, enough to open the near flank and put the two shoulders at
+    // different angles to the sun without hiding the chest.
+    const faceYaw = yaw != null ? yaw
+      : Math.atan2(best.sp.x - best.camPos.x, best.sp.z - best.camPos.z) + quarter;
     this.placePlayerOnGround(best.sp.x, best.sp.z, faceYaw);
     this.setCamera(
       { x: best.camPos.x, y: best.camPos.y, z: best.camPos.z },
