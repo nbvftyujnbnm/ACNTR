@@ -2787,3 +2787,59 @@ two of the silhouette metrics were wrong on their first outing.
   alpha 0.29, by a pose that believed it was at t=0.10. Fixed to match the
   engine. If you have a pose whose timing was tuned against the old behaviour,
   it is now getting what it asked for and may need its numbers re-read.
+- 2026-09-05 [tools] **THE SHUTTER IS TENS OF SECONDS OF REAL TIME LATER BUT
+  ONLY ~0.2-0.5 s OF SIMULATION TIME LATER.** This refines the amendment above,
+  which got the real-time half right and left the other half implicit — and the
+  other half is where the remaining pose bugs live.
+
+  Measured, same run (shots/rehab1): `landing` places the mech 6.75 m up and
+  returns; at the shutter it is 6.26 m up, a fall of 0.49 m, which under this
+  game's 24 m/s^2 is 0.20 s of simulated time. `muzzleanat` before the freeze
+  fix advanced the particle clock 0.518 s. The engine clamps dt to 0.1 s and
+  only a handful of frames run during a 24-130 s screenshot, so:
+
+    * REAL-time timers fire HUNDREDS of times into a nearly static simulation.
+      A `setInterval(blast, 300)` running to cleanup is ~100 detonations
+      deposited into half a second of sim time, and they cannot expire because
+      the clock is barely moving. Measured: `particles` reported 17,658 live
+      particles at the shutter, and `combat_vfx` — same pattern, plus weapons
+      every 140 ms — became so expensive that `page.screenshot` blew its 180 s
+      timeout and the pose FAILED outright. A real-time keep-alive is not a
+      keep-alive; it is an unbounded deposit.
+    * SIM-time reasoning is what a pose should use, and it flips the premise
+      several poses were built on. "The shutter opens 1.1 s later so an effect
+      fired in-script is gone" is FALSE: an explosion with a 1.2 s life fired at
+      pose end is still alive at the shutter, because only ~0.3 s of sim has
+      passed. Only sub-0.5 s effects — muzzle flashes, impact flashes, the
+      explosion's own white-hot flash — need a freeze at all.
+
+  THE RULES, superseding the "hold it with a timer" advice everywhere:
+    1. Build and stage everything with `debug.step`, which advances sim time
+       deterministically and does not care about frame rate.
+    2. Freeze only for effects shorter than ~0.5 s. Longer ones survive to the
+       shutter on their own.
+    3. Never use `setInterval` to keep an effect alive. Stage repeats with
+       `debug.step`, or drive them from `engine.addLateUpdate` off accumulated
+       `dt` so the rate is in sim time and the population stays bounded.
+    4. Never use `setTimeout` to restore state — that is `__POSE_CLEANUP__`.
+- 2026-09-05 [combat] **THE MUZZLE FLASH IS CORRECT AND THE "IT IS INVISIBLE"
+  FINDING IS RETRACTED.** `muzzlestrip`'s old headline — "peak luma 60-86 across
+  all five ages, ZERO pixels over L=200" — was measured on a frame whose flashes
+  had been dead for tens of seconds. Re-shot on the fixed harness, same pose,
+  same geometry, same `flashScale` 0.7, same ~20 m from the lens, against a
+  control patch 110 px above each box at 48-63:
+
+      age    peak L   px > 200   px > 240
+        4 ms    248       1154        595
+       14 ms    254       1125        718
+       30 ms    253        813        199
+       50 ms    247        335         43
+       80 ms    225          1          0
+
+  3,428 pixels over L=200 across the row, against "zero". The flash clips, and
+  it decays monotonically to nothing by 80 ms — which at 60 fps is five frames
+  with the energy in the first three. That is a correct, snappy muzzle flash and
+  it needs no change. The batch dump agrees: at 4 ms the authored core sprite
+  (tile 1, radiance 17) is the top contributor at alpha 0.81.
+
+  Do not re-open this without a capture taken after 65ec71e.
