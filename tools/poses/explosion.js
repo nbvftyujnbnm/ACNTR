@@ -120,6 +120,18 @@
     cameraActual: camNow.position.toArray().map((n) => +n.toFixed(1)),
     playerAt: p.toArray().map((n) => +n.toFixed(1)),
     detonationSpots: spots.map((v) => v.toArray().map((n) => +n.toFixed(1))),
+    // WHERE EACH ONE LANDS ON SCREEN. Without this the strip has to be read by
+    // projecting the world positions by hand against a guessed FOV, and the
+    // first attempt at that put the youngest detonation on the wrong side of
+    // the frame. `agesLeftToRight` is the ORDER OF THE ARRAY, not a promise
+    // about the picture: which screen edge age 0.05 lands on depends on the
+    // chase camera's yaw, so read the pixels off these coordinates.
+    screenPx: spots.map((v) => {
+      const q = v.clone().project(camNow);
+      return [Math.round((q.x * 0.5 + 0.5) * (game.engine.width || 1920)),
+              Math.round((-q.y * 0.5 + 0.5) * (game.engine.height || 1080))];
+    }),
+    metresFromLens: spots.map((v) => +v.distanceTo(camNow.position).toFixed(1)),
     // Are there any particles alive at all when the shutter opens?
     liveParticles: (() => {
       for (const k of ['count', '_count', 'alive', '_alive', 'active', '_active']) {
@@ -129,7 +141,8 @@
       }
       return { field: null, n: 'unknown' };
     })(),
-    note: 'Each detonation is frozen at the age listed, left to right. '
+    note: 'Each detonation is frozen at the age in agesLeftToRight[i], at '
+        + 'screenPx[i] — the array order is not necessarily left to right. '
         + 'The flash lives 0.06-0.105 s, the fireball 0.30-0.62 s, so the '
         + 'first one or two are SUPPOSED to be white-hot and featureless.',
     passes: debug.passes(),
