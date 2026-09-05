@@ -52,15 +52,14 @@
   const AHEAD = 56;
   const HEIGHT = 20;
 
-  // NO CAMERA OVERRIDE. `debug.setCamera` combined with `debug.freeze(true)`
-  // does not reach the render here: measured, the override stays set and
-  // `engine.camera.position` reads the requested value at shutter time, yet
-  // the frame is composed from the chase camera — from the override position
-  // the player would sit 52 deg off axis against a 37 deg half-FOV, outside
-  // the frustum, and it is plainly centred in the picture. Something between
-  // the frozen update loop and the render is using a different camera. That is
-  // recorded in CONTRACT.md as an open question; this pose simply does not
-  // depend on the answer.
+  // NO CAMERA OVERRIDE — by choice, not by necessity. This used to say that
+  // `setCamera` plus `freeze(true)` "does not reach the render", because the
+  // frame came back composed from the chase camera while the override still
+  // read correctly. RESOLVED: the pose's own 6 s cleanup timer called
+  // `releaseCamera()`, and the screenshot takes 24-130 s, so the override was
+  // gone before the shutter and the "at shutter" sample was taken at 1 s.
+  // Overrides work; teardown on a timer does not. See the cleanup at the foot
+  // of this file.
   //
   // Using the real chase camera is better for this job anyway: the detonations
   // are then framed exactly as a player would see them, at the distance combat
@@ -99,9 +98,11 @@
   const rest = sorted[0].a - elapsed;
   if (rest > 0) debug.step(rest);
 
-  // FREEZE. The harness renders about 1.1 s of real time after this returns,
-  // which is longer than the whole effect — without this every detonation
-  // would be over and the frame would show smoke and nothing else.
+  // FREEZE. The harness screenshots tens of seconds after this returns, which
+  // is a hundred times the whole effect — without this every detonation would
+  // be over and the frame would show smoke and nothing else. The freeze must
+  // then be RELEASED IN __POSE_CLEANUP__, never on a timer: a 6 s timer used to
+  // hand the clock back well before the shutter and undo the whole point.
   debug.freeze(true);
 
   // Instrumented, because the first run of this pose produced a frame with no
@@ -134,24 +135,32 @@
     passes: debug.passes(),
   };
 
-  // The note is read AFTER the screenshot, so a late sample lands in the
-  // report. The camera matched what was asked at pose end and the frame still
-  // came back composed from the chase view, which means something moves it
-  // during the 1.1 s settle — and only a reading taken inside that window can
-  // say so.
-  setTimeout(() => {
+  // Sample from a LATE-UPDATE, not a timer. The note is read after the
+  // screenshot, so a field rewritten every frame reports what the shutter saw.
+  // The old version sampled on a 1000 ms timeout and called the result
+  // `cameraAtShutter`, which is where the "setCamera does not reach the
+  // render" puzzle in the comment above came from: the 6 s restore below fired
+  // before the screenshot (which takes 24-130 s on this box), `releaseCamera`
+  // handed the frame back to the chase camera, and the 1 s sample was long
+  // gone by then. There was never a second camera.
+  game.engine.addLateUpdate(() => {
+    const n = window.__POSE_NOTE__;
+    if (!n) return;
     const c = game.engine.camera;
-    window.__POSE_NOTE__.cameraAtShutter = c.position.toArray().map((n) => +n.toFixed(1));
-    window.__POSE_NOTE__.timeScaleAtShutter = game.engine.timeScale;
-  }, 1000);
+    n.cameraAtShutter = c.position.toArray().map((v) => +v.toFixed(1));
+    n.timeScaleAtShutter = game.engine.timeScale;
+    n.psTimeAtShutter = +(game.vfx?.ps?.time ?? -1).toFixed(3);
+    n.liveAtShutter = game.vfx?.liveParticles ?? null;
+  });
 
   // Leave the session as we found it; poses share one browser. capture.mjs
-  // also restores camera, freeze, keys and passes after every shot, so this is
-  // belt and braces — but it must fire well after the 1.1 s shutter.
-  setTimeout(() => {
+  // runs this AFTER the screenshot and after the note is read, which is the
+  // only place it can go: on a timer it unfreezes a 500 ms effect tens of
+  // seconds before the picture is taken.
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.releaseCamera();
     debug.setPass('motionBlur', true);
     debug.setPass('dof', true);
-  }, 6000);
+  };
 })();

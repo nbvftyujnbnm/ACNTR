@@ -305,7 +305,8 @@ the file for the phrase in caps.
 
 | If you are about to… | Read |
 |---|---|
-| write or fix a review pose | **THE HARNESS RENDERS THE CAPTURED FRAME ~1.1 s OF REAL TIME AFTER THE POSE SCRIPT RETURNS** — three separate diagnoses died on this |
+| write or fix a review pose | **THE SHUTTER IS TENS OF SECONDS AFTER THE POSE RETURNS, NOT 1.1 s** — and a pose must NEVER tear down its own state on a `setTimeout`. Five diagnoses died on this |
+| read a `__POSE_NOTE__` field | if it was sampled by a `setTimeout`, it describes a frame that is tens of seconds older than the picture beside it — sample from `addLateUpdate` |
 | reposition the player in a pose | **ROOT ROTATION IS NOT THE AIM** — CameraRig owns `aimYaw`, and setting only the root is undone within a second |
 | judge whether something is "in frame" | **BEING INSIDE THE FRUSTUM AND BEING VISIBLE ARE DIFFERENT QUESTIONS** |
 | put a backtick anywhere near GLSL | **THE GLSL LINT HAD A FALSE NEGATIVE** — this bug has broken the build three times |
@@ -475,6 +476,10 @@ two of the silhouette metrics were wrong on their first outing.
   gone and the plate seams are mush. The review poses teleport the camera
   (`cameraRelativeToPlayer`) and then settle for ~1.1 s, which at SwiftShader frame rates
   is ~13 frames — not enough for a 0.925-blend TAA history to converge, and the velocity
+  [2026-09-05: the frame budget is larger than "~13" says. The screenshot itself takes
+  24-130 s with the page still ticking, at roughly 0.15 fps, so add another handful of
+  frames. It is still nowhere near convergence, so the conclusion stands — but do not
+  quote 13 as the number.]
   buffer right after a teleport is full of huge vectors for motion blur to smear along.
   Owner of the post pipeline / capture harness: either let stills settle far longer, or
   reset TAA history and zero the velocity buffer after a pose's camera jump.
@@ -1379,6 +1384,8 @@ two of the silhouette metrics were wrong on their first outing.
   photographed for at least the settle window, or hold it with a
   `setTimeout(..., 3000)` release like boost.js does. Reading state at the end
   of the script tells you what was true 1.1 s before the picture.
+  **SUPERSEDED 2026-09-05 — the 1.1 s figure is wrong and the `setTimeout`
+  release is the opposite of the fix. See the amendment of that date.**
 - 2026-09-01 [combat] THE INSTANCED PARTICLE PATH WORKS — hypothesis tested and
   REFUTED, recorded so nobody spends a day on it again. Because the flame layer
   produced no pixels under every possible forcing, the natural suspicion was
@@ -2708,3 +2715,75 @@ two of the silhouette metrics were wrong on their first outing.
   a single horizon-weighted constant — at minimum, weight `aerialColor` toward
   the zenith end far enough that it lands at or just under the sky at 5-12 deg
   instead of 3-13 codes over it.
+- 2026-09-05 [tools] **THE SHUTTER IS TENS OF SECONDS AFTER THE POSE RETURNS,
+  NOT 1.1 s — AND EVERY POSE THAT TORE DOWN ITS OWN STATE ON A `setTimeout` WAS
+  PHOTOGRAPHING A SIMULATION IT HAD ALREADY RELEASED.** This supersedes the
+  2026-09-01 "~1.1 s settle" amendment, whose closing rule ("hold it with a
+  `setTimeout(..., 3000)` release like boost.js does") was exactly backwards.
+
+  `capture.mjs` waits `SETTLE` (1100 ms) and THEN calls `page.screenshot`. The
+  screenshot is not instantaneous on this box. Measured `shotMs`, every report
+  on disk: 24.1, 30.3, 31.9, 46.1, 54.6, 57.3, 60.4, 60.7, 67.1, 73.3, 88.0,
+  88.4, 102.3, 113.6, 129.7 seconds. The page keeps ticking throughout — badly,
+  about 0.15 fps, but it ticks. So a cleanup timer set for 3000 or 6000 ms
+  fires **before** the frame is captured, every time, on every pose.
+
+  Confirmed in `shots/muz01` on three independent readings that agree:
+    1. `timeScaleTraps` (a property trap on `engine.timeScale`) recorded exactly
+       one 0 -> 1 transition, at frame 5, with the stack pointing at
+       `debug.freeze(false)` on the pose's own 6 s timer.
+    2. `atRenderTime`, sampled from `addLateUpdate` and therefore read after the
+       screenshot: `timeScale: 1`, and `ps.time` had advanced 0.518 s past the
+       value at pose end.
+    3. The pixels. The two control sprites authored `life: 30` read display luma
+       241 and 252; the four short-lived spots read 88, 96, 97, 71 against a
+       background of 55-63 — i.e. nothing. Their `alive` counts at render time
+       were 0, 0, 0, 0.
+
+  WHAT THIS INVALIDATES. Anything concluded from a frozen pose whose subject
+  lived less than about half a second, because 0.5 s of sim ran between the
+  freeze and the shutter:
+    * **The muzzle flash is not broken.** `muzzlestrip` reported a peak of 105
+      where a raw sprite reached 181, and that was read as a defect between
+      `VFX.muzzleFlash` and the batch. There is no such defect: at pose time the
+      batch holds the real flash at `maxEff` 13.2 against the raw control's 17,
+      emitting at full authored radiance. The pose photographed an empty volume.
+      Whether the flash READS at gameplay frame rates is still open — it is now
+      testable for the first time.
+    * **"`debug.setCamera` + `debug.freeze(true)` does not reach the render"** —
+      the open question recorded in `explosion.js` and in this file. RESOLVED,
+      and there was never a second camera: the pose's 6 s timer called
+      `releaseCamera()` before the shutter, so the chase camera composed the
+      frame, and the sample that "proved the override was still set" was taken
+      at 1000 ms, five seconds before the release.
+    * `landing.js` timed a sub-second dust sheet to land "just before the
+      shutter" and then let the sim run for the length of the capture.
+    * `particles.js` replenished for 1.1 s; `bloomsrc.js` held its volley for
+      3.2 s; `combat_vfx.js` for 6 s.
+
+  THE RULE, and it is now enforced by the harness rather than by memory:
+    * A pose puts its teardown in `window.__POSE_CLEANUP__`. `capture.mjs` calls
+      it after the screenshot and after `__POSE_NOTE__` is read. **No pose may
+      contain a `setTimeout` that restores state.** A keep-alive `setInterval`
+      is fine and should run until cleanup, never to a timer or a count.
+    * A pose that wants to report what the SHUTTER saw rewrites
+      `__POSE_NOTE__` from `engine.addLateUpdate`. A note sampled on a timer
+      describes a frame tens of seconds older than the picture beside it.
+    * Prefer holding the moment over timing it. `landing.js` now freezes 0.18 s
+      after the real `EV.LANDED` instead of racing the shutter.
+- 2026-09-05 [tools] **`Debug.step` ADVANCED `clock.elapsed` AFTER THE UPDATERS,
+  SO EMISSIONS BETWEEN TWO `step()` CALLS WERE AGED BY THE PREVIOUS CALL'S
+  `stepDt`.** `Engine._frame` increments `clock.elapsed` and then dispatches
+  (Engine.js:148 before :151); `Debug.step` dispatched and then incremented.
+  Subsystems that key off the `elapsed` ARGUMENT rather than their `dt` — the
+  particle system does, `ps.time = elapsed`, and stamps every particle's birth
+  from it — therefore ended each `step()` trailing `clock.elapsed` by exactly
+  one `stepDt`. The lag discharged as a jump on the first substep of the next
+  call.
+
+  Measured in `muzzleanat`: after `step(0.3, 1/60)`, a `step(0.004, 1/960)`
+  aged the particles 19.8 ms — 16.7 (the stale 1/60) plus 3.1 — when the pose
+  had asked for 4. A 42 ms muzzle-flash core was photographed at t=0.47,
+  alpha 0.29, by a pose that believed it was at t=0.10. Fixed to match the
+  engine. If you have a pose whose timing was tuned against the old behaviour,
+  it is now getting what it asked for and may need its numbers re-read.

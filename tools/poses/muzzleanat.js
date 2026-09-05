@@ -1,15 +1,30 @@
-// MUZZLE FLASH ANATOMY — why nothing is drawn where the flash was spawned.
+// MUZZLE FLASH ANATOMY — the pose that found the harness bug, not a flash bug.
 //
-// DIAGNOSTIC. `addladder` proved the additive particle path itself is healthy:
-// a raw BATCH_ADD sprite at radiance 1 peaks at display luma 181 against a
-// background at 76, and radiance 8 and up clip at 254. `muzzlestrip` at the
-// same positions, in the same frame geometry, with five real `VFX.muzzleFlash`
-// calls whose core sprite is authored at radiance 17, produced a maximum of
-// 105 across the entire row — i.e. nothing.
+// ANSWERED. Read this before re-running it or re-opening the question.
 //
-// So the defect is between `VFX.muzzleFlash` and the batch, and this pose
-// reads the batch directly rather than inferring from pixels. It lays out, in
-// one frame:
+// The setup: `addladder` proved the additive particle path is healthy (a raw
+// BATCH_ADD sprite at radiance 1 peaks at display luma 181 against a background
+// at 76, and radiance 8 and up clip at 254), while `muzzlestrip` — same
+// positions, same frame geometry, five real `VFX.muzzleFlash` calls whose core
+// sprite is authored at radiance 17 — produced a maximum of 105 across the
+// entire row. That looked like a defect between `VFX.muzzleFlash` and the
+// batch. IT IS NOT. This pose read the batch directly and found the real flash
+// sitting at `maxEff` 13.2 against the raw control's 17: full authored radiance,
+// emitting correctly.
+//
+// What was actually wrong was the harness, and this pose's own `timeScaleTraps`
+// caught it: the pose released `debug.freeze(false)` on a 6 s `setTimeout`, and
+// `page.screenshot` on this canvas takes 24-130 s. Every short-lived spot was
+// dead by the shutter (`atRenderTime.alive` = 0) while the two `life: 30`
+// controls read 241 and 252. Teardown now lives in `__POSE_CLEANUP__`, which
+// capture.mjs calls AFTER the picture. `Debug.step` was also aging emissions by
+// the previous call's `stepDt`; both are written up in CONTRACT.md, 2026-09-05.
+//
+// What is still open is a design question, not a bug: whether a 42 ms core and
+// a 105 ms total READ at gameplay frame rates. Re-run this pose to answer it —
+// it is the first version that can.
+//
+// The layout, in one frame:
 //   1  raw core sprite, radiance 17, long life          — the control
 //   2  raw core sprite, the flash core's EXACT authored numbers, long life
 //   3  raw core sprite, the flash core's exact numbers INCLUDING life 0.042,
@@ -20,7 +35,9 @@
 // and then DUMPS every additive particle within 2 m of each spot with its
 // age, t, size and the alpha the vertex shader will compute for it.
 //
-// No camera override (it does not reach the render under freeze), DOF off.
+// No camera override — by choice, not necessity. The old claim that overrides
+// "do not reach the render under freeze" was the same 6 s-timer bug:
+// `releaseCamera()` fired before the shutter. DOF off.
 (async () => {
   const { debug, game, THREE } = window.__ACNTR__;
   debug.setHudVisible(false);
@@ -98,11 +115,13 @@
   debug.freeze(true);
 
   // ---- WHO UNFREEZES IT? ---------------------------------------------------
-  // Measured: `timeScale` is 0 when this pose returns and 1 by the time the
-  // shutter opens ~1.1 s later, and 0.45 s of particle time passes in between.
-  // Only four places in the whole tree assign it (Engine's constructor,
-  // Debug.freeze/step/resetState/silhouette), so trap the assignment and keep
-  // the stack rather than guessing at a fifth.
+  // ANSWERED, and the trap is what answered it: `timeScale` is 0 when this
+  // pose returns and 1 by the time the shutter opens, with ~0.52 s of particle
+  // time passing in between. The single recorded 0 -> 1 transition came from
+  // THIS POSE'S OWN cleanup timer — `debug.freeze(false)` on a 6 s timeout,
+  // against a screenshot that takes 24-130 s. Teardown now lives in
+  // __POSE_CLEANUP__. The trap stays because it is cheap and it is the only
+  // thing that can prove the freeze held.
   const eng = game.engine;
   const traps = [];
   let _ts = eng.timeScale;
@@ -187,7 +206,7 @@
 
   // ---- AND READ IT AGAIN AT RENDER TIME ------------------------------------
   // The dump above is a POSE-TIME snapshot. The harness renders the captured
-  // frame ~1.1 s of real time after the pose script returns, and every
+  // frame tens of seconds after the pose script returns, and every
   // conclusion about a 40 ms effect depends on whether `debug.freeze(true)`
   // actually holds the particle clock across that gap. `__POSE_NOTE__` is read
   // AFTER the screenshot, so a field rewritten every late-update reports the
@@ -265,9 +284,9 @@
     n.atRenderTime = liveScan();
   });
 
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.setPass('motionBlur', true);
     debug.setPass('dof', true);
-  }, 6000);
+  };
 })();

@@ -5,18 +5,18 @@
 // Nothing is forced, and the note reports whether the landing actually
 // happened so a frame that missed it cannot be graded as though it had.
 //
-// The timing is the whole trick, and it is built on the harness fact that has
-// bitten three separate diagnoses: THE SHUTTER OPENS ~1.1 s OF REAL TIME AFTER
-// THIS SCRIPT RETURNS. So the pose does NOT land the mech and then return —
-// that dust would be 1.1 s old and mostly gone. It returns with the mech
-// hanging at rest 6.75 m up, which under this game's 24 m/s^2 gravity is
-// exactly 0.75 s of fall: the impact lands about a third of a second before
-// the shutter, with the fast skirt still expanding and the billow rolling up
-// behind it.
+// The timing is the whole trick, and this pose used to get it wrong in the way
+// documented at the top of CONTRACT.md's harness section. THE SHUTTER DOES NOT
+// OPEN 1.1 s AFTER THIS SCRIPT RETURNS. capture.mjs waits `SETTLE` (1100 ms)
+// and THEN calls `page.screenshot`, which on this canvas has measured 24 to
+// 130 SECONDS — every `shotMs` in `shots/*/report.json` says so — with the
+// page still ticking (slowly) throughout. A sub-second dust sheet timed to
+// land "just before the shutter" is therefore a minute old in the picture.
 //
-// The one way this degrades is toward a YOUNGER effect, never a missing one:
-// the engine clamps dt to 0.1 s, so if the box is loaded enough that the sim
-// runs behind real time the impact simply happens closer to the shutter.
+// So the pose no longer races the shutter: it drops the mech, and freezes the
+// clock 0.18 s AFTER the real `EV.LANDED`. The frame then holds the impact for
+// as long as the capture takes, with the fast skirt still expanding and the
+// billow rolling up behind it, whatever the box's frame rate is doing.
 (async () => {
   const { debug, game, bus, EV } = window.__ACNTR__;
   debug.setHudVisible(false);
@@ -40,12 +40,21 @@
 
   // Count real landings from here on, so the note can say whether the frame
   // contains one rather than assuming it does.
+  // FREEZE ON IMPACT. The dust sheet lives well under a second, and the
+  // screenshot of this canvas has measured 24-130 s (every `shotMs` in
+  // `shots/*/report.json`). Waiting for the shutter to happen to coincide with
+  // the landing is not a plan; holding the clock at the landing is. `hold` is
+  // a fraction of a second of dust growth after touchdown, so the sheet has
+  // spread rather than being caught as a point.
+  const HOLD_AFTER_IMPACT = 0.18;
   let landings = 0;
   let lastImpact = 0;
+  let holdLeft = -1;
   const off = bus.on(EV.LANDED, (p) => {
     if (!p || p.entity !== game.player) return;
     landings++;
     lastImpact = p.impactSpeed ?? 0;
+    if (holdLeft < 0) holdLeft = HOLD_AFTER_IMPACT;
   });
 
   // Hang the mech at rest 6.75 m up and RETURN. placePlayer zeroes velocity, so
@@ -53,27 +62,35 @@
   // past the 0.55 at which landingDust also throws its dust ring.
   if (Number.isFinite(gy)) debug.placePlayer(x, gy + 6.75, z, yaw);
 
-  // Read the note back after the impact should have happened, not now: at this
-  // point the mech has not fallen a millimetre. capture.mjs reads
-  // __POSE_NOTE__ after the screenshot, so a timer that fires inside the
-  // settle window still lands in report.json.
-  setTimeout(() => {
+  // Report from a LATE-UPDATE, not a timer. capture.mjs reads __POSE_NOTE__
+  // after the screenshot, so a field rewritten every frame describes the state
+  // the shutter actually saw. The old version sampled on a 950 ms timeout and
+  // then let the sim run on for the length of the capture, so `landings` and
+  // `liveParticles` in report.json belonged to a frame that was tens of
+  // seconds older than the picture beside them.
+  window.__POSE_NOTE__ = { pending: true };
+  game.engine.addLateUpdate((dt) => {
+    if (holdLeft > 0) {
+      holdLeft -= dt;
+      if (holdLeft <= 0) debug.freeze(true);
+    }
     const m = game.player.moveState || {};
-    window.__POSE_NOTE__ = {
+    const n = {
       landings,
       impactSpeed: +lastImpact.toFixed(1),
       grounded: !!m.grounded,
       heightAboveGround: +(m.heightAboveGround ?? -1).toFixed(2),
       liveParticles: game.vfx?.liveParticles ?? null,
       openGround: open ? open.clear : null,
+      frozenAtImpact: holdLeft <= 0 && landings > 0,
     };
     if (!landings) {
-      window.__POSE_NOTE__.warning =
-        'the mech never landed inside the settle window — this frame has no landing dust in it';
+      n.warning = 'the mech never landed inside the settle window — this frame has no landing dust in it';
+    } else if (!n.liveParticles) {
+      n.warning = 'landed, but nothing is alive in the particle system at shutter time';
     }
-    off?.();
-  }, 950);
+    window.__POSE_NOTE__ = n;
+  });
 
-  // Placeholder in case the timer has not fired when the note is read.
-  window.__POSE_NOTE__ = { pending: true };
+  window.__POSE_CLEANUP__ = () => { debug.freeze(false); off?.(); };
 })();

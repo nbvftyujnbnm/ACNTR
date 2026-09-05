@@ -23,7 +23,7 @@
   debug.step(0.4);
 
   // Start HIGH, then hold Space. The harness renders the captured frame about
-  // 1.1 s of real time after this script returns, so a mech that is merely
+  // tens of seconds after this script returns, so a mech that is merely
   // airborne at pose end can be back on the ground by the shutter — and a
   // grounded mech drops to the 0.07 idle thruster level, which is correctly
   // almost invisible. Starting 30 m up means it cannot reach the ground inside
@@ -53,7 +53,7 @@
   debug.setPass('motionBlur', false);
   debug.step(0.08);
 
-  // FREEZE. The harness renders ~1.1 s of real time after this returns, and a
+  // FREEZE. The harness screenshots tens of seconds after this returns, and a
   // mech holding vertical thrust climbs at up to 18 m/s — so the last frame put
   // it 15 m above where the camera was aimed and cropped its head off. Freezing
   // stops the simulation but not the renderer, and the flame handles keep the
@@ -90,9 +90,9 @@
   if (!flames.length) window.__POSE_NOTE__.warning = 'no plume above idle — the thruster drive is not running';
 
   // Leave the pass as we found it; poses share one browser session.
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.releaseKeys();
     debug.setPass('motionBlur', true);
-  }, 3000);
+  };
 })();

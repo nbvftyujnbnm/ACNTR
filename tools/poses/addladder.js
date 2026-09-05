@@ -16,10 +16,12 @@
 // two demand opposite fixes and no amount of looking at the picture separates
 // them.
 //
-// Same framing rule as the other filmstrips: NO CAMERA OVERRIDE (it does not
-// reach the render under freeze — see CONTRACT.md), DOF off, row placed
-// between the chase lens and the player so a ~1 m sprite is photographed from
-// ~20 m rather than 44.
+// Same framing rule as the other filmstrips: NO CAMERA OVERRIDE, DOF off, row
+// placed between the chase lens and the player so a ~1 m sprite is
+// photographed from ~20 m rather than 44. (The override is avoided by habit,
+// not because it is broken: the "setCamera does not reach the render under
+// freeze" finding was a pose teardown timer firing before the shutter, and is
+// retracted in CONTRACT.md under 2026-09-05.)
 (async () => {
   const { debug, game, THREE } = window.__ACNTR__;
   debug.setHudVisible(false);
@@ -70,7 +72,7 @@
       const g = RUNGS[i];
       const d = ps.begin(g.batch);
       d.pos.copy(spots[i]);
-      d.life = 30;                 // outlives the harness's ~1.1 s settle
+      d.life = 30;                 // outlives the whole capture, however slow
       d.size0 = SIZE; d.size1 = SIZE;
       d.tile = TILE_CORE;
       d.color0.setRGB(g.r, g.r, g.r);
@@ -114,9 +116,9 @@
     window.__POSE_NOTE__.warning = `only ${emitted}/${RUNGS.length} sprites were accepted by the particle system`;
   }
 
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.setPass('motionBlur', true);
     debug.setPass('dof', true);
-  }, 6000);
+  };
 })();

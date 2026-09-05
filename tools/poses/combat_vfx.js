@@ -2,11 +2,13 @@
 //
 // TWO traps this pose exists to avoid, both of which it used to fall into.
 //
-// 1. THE SHUTTER OPENS ~1.1 s AFTER THIS SCRIPT RETURNS. The old version fired
-//    its effects inside the script and returned; AC6-scale impacts are gone in
-//    200 ms and a fireball in under a second, so the frame that got graded for
-//    "VFX" contained nothing but stale smoke. Everything here is driven from a
-//    REAL-TIME interval that keeps running through the settle window, and the
+// 1. THE SHUTTER OPENS TENS OF SECONDS AFTER THIS SCRIPT RETURNS — capture.mjs
+//    waits 1100 ms and then screenshots, and the screenshot itself has measured
+//    24-130 s on this box. The old version fired its effects inside the script
+//    and returned; AC6-scale impacts are gone in 200 ms and a fireball in under
+//    a second, so the frame that got graded for "VFX" contained nothing but
+//    stale smoke. Everything here is driven from a REAL-TIME interval that runs
+//    until __POSE_CLEANUP__ (which capture.mjs calls AFTER the shutter), and the
 //    volley is phased so that whenever the shutter opens there is one blast in
 //    its white-flash stage, one in its orange-fireball stage, and one that is
 //    already a black smoke column — which is exactly the three-stage structure
@@ -87,7 +89,10 @@
   // always a muzzle flash inside its 60 ms life.
   const tb = setInterval(blast, 300);
   const ts = setInterval(shoot, 140);
-  setTimeout(() => { clearInterval(tb); clearInterval(ts); debug.releaseKeys(); }, 6000);
+  // Both volleys run until cleanup, which capture.mjs calls AFTER the shutter.
+  window.__POSE_CLEANUP__ = () => {
+    clearInterval(tb); clearInterval(ts); debug.releaseKeys();
+  };
 
   const m = game.player.moveState || {};
   window.__POSE_NOTE__ = {

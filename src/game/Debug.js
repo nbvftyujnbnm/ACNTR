@@ -946,16 +946,34 @@ export class Debug {
     return this;
   }
 
-  /** Advance the simulation by a fixed amount without real time passing. */
+  /**
+   * Advance the simulation by a fixed amount without real time passing.
+   *
+   * `clock.elapsed` is advanced BEFORE the updaters run, exactly as
+   * `Engine._frame` does it. It used to advance after, and that one-line
+   * difference was not cosmetic: subsystems that key off the `elapsed`
+   * ARGUMENT rather than their `dt` — the particle system sets
+   * `ps.time = elapsed` and stamps every particle's birth from it — ended a
+   * `step()` call trailing `clock.elapsed` by exactly one `stepDt`. The lag
+   * then discharged as a jump on the first substep of the NEXT `step()`, so
+   * anything emitted between two calls was aged by the PREVIOUS call's
+   * `stepDt` before the new one advanced a single tick.
+   *
+   * Measured, in `tools/poses/muzzleanat.js`: after `step(0.3, 1/60)`, a
+   * `step(0.004, 1/960)` aged the particles by 19.8 ms — 16.7 (the stale
+   * 1/60) plus 3.1 — when the pose had asked for 4. A 42 ms muzzle-flash
+   * core was therefore photographed at t=0.47 by a pose that believed it was
+   * at t=0.10, and read as a flash that "does not fire".
+   */
   step(seconds = 1, stepDt = 1 / 60) {
     const n = Math.round(seconds / stepDt);
     const e = this.game.engine;
     const prevScale = e.timeScale;
     e.timeScale = 1;
     for (let i = 0; i < n; i++) {
+      e.clock.elapsed += stepDt;
       for (const fn of e._updaters) fn(stepDt, e.clock.elapsed, stepDt);
       for (const fn of e._lateUpdaters) fn(stepDt, e.clock.elapsed, stepDt);
-      e.clock.elapsed += stepDt;
     }
     e.timeScale = prevScale;
     return this;

@@ -63,10 +63,10 @@
 
   // Leave the pass as we found it; poses share one browser session.
   // Restore both, since the poses share one browser session.
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.releaseKeys();
     debug.setPass('motionBlur', true);
     game._vfxDepthTex = null;
     game._wireVfxDepth();
-  }, 3000);
+  };
 })();

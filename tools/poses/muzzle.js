@@ -137,8 +137,8 @@
     window.__POSE_NOTE__.warning = 'a flash exists but NONE of it is in frame — grade nothing from this image';
   }
 
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.setPass('motionBlur', true);
-  }, 3000);
+  };
 })();

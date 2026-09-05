@@ -11,7 +11,7 @@
 // `tools/probes/tonebloom.js` measured off rtScene itself.
 //
 // WEAPONS ARE HELD DOWN THROUGH THE SETTLE WINDOW. `capture.mjs` screenshots
-// ~1.1 s of real time after this script returns (see the Contract Amendment),
+// tens of seconds after this script returns (see the Contract Amendment),
 // and a muzzle flash lasts two or three frames — so a pose that fires once at
 // the end photographs no flash at all. The interval keeps the emissive
 // population alive until well past the shutter and then stops.
@@ -49,7 +49,11 @@
     debug.fireAll();
     if (pipe) { pipe._dyn.hit = 0; pipe._dyn.crit = 0; pipe._dyn.critT = 0; pipe._dyn.scan = 0; }
   }, 60);
-  setTimeout(() => clearInterval(hold), 3200);
+  // The hold runs until cleanup, which capture.mjs calls AFTER the shutter.
+  // It used to stop on a 3200 ms timer, and the screenshot of this canvas
+  // takes 24-130 s — so the frame was captured tens of seconds after the last
+  // shot was fired, with nothing left lit.
+  window.__POSE_CLEANUP__ = () => clearInterval(hold);
 
   const live = (game.enemies?.list || []).filter((e) => e && e.alive !== false && e.root);
   const seen = debug.visibleCount(live);

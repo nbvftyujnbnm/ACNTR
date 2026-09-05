@@ -1,7 +1,7 @@
 // DIAGNOSTIC — the damage rim, held open so it can be photographed.
 //
 // A landed hit drives `_dyn.hit` to 0.85 and it decays at 5.5/s, so the whole
-// flash is over in 0.155 s. The harness renders the captured frame about 1.1 s
+// flash is over in 0.155 s. The harness captures the frame tens of seconds
 // of real time AFTER this script returns, which means an honestly-timed pose
 // photographs an empty frame every time. So this one holds the term open: it
 // wraps `RenderPipeline._updateDynamics` and re-arms `hit` (and the incoming
@@ -70,5 +70,9 @@
     };
   };
   note();
-  setInterval(note, 60);
+  // Sample until cleanup, which capture.mjs calls after the shutter. An
+  // interval that is never cleared also survives into the NEXT pose and
+  // overwrites its note.
+  const t = setInterval(note, 60);
+  window.__POSE_CLEANUP__ = () => clearInterval(t);
 })();

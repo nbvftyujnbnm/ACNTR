@@ -110,10 +110,10 @@
     passes: debug.passes(),
   };
 
-  setTimeout(() => {
+  window.__POSE_CLEANUP__ = () => {
     debug.freeze(false);
     debug.releaseCamera();
     debug.setPass('motionBlur', true);
     debug.setPass('dof', true);
-  }, 6000);
+  };
 })();

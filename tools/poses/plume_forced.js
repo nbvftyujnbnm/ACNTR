@@ -7,7 +7,7 @@
 // about the FRAME: where the plume is when the shutter opens, and where the
 // camera is looking then.
 //
-// The harness renders about 1.1 s of real time AFTER this script returns, and
+// The harness screenshots tens of seconds AFTER this script returns, and
 // `debug.setCamera` pins an ABSOLUTE world pose that does not follow the mech.
 // Any pose that leaves the mech moving therefore photographs an empty patch of
 // sky. So this one:
@@ -16,7 +16,7 @@
 //     the handles on an interval, so nothing can reset them before the shutter
 //   * republishes __POSE_NOTE__ on that same interval, so the numbers in
 //     report.json describe the frame that was actually photographed rather than
-//     the state 1.1 s earlier
+//     the state at pose end
 (async () => {
   const { debug, game, THREE } = window.__ACNTR__;
   debug.setHudVisible(false);
@@ -88,5 +88,5 @@
   report();
 
   const t = setInterval(() => { force(); report(); }, 60);
-  setTimeout(() => { clearInterval(t); debug.setPass('motionBlur', true); }, 6000);
+  window.__POSE_CLEANUP__ = () => { clearInterval(t); debug.setPass('motionBlur', true); };
 })();

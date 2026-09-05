@@ -62,5 +62,9 @@
     };
   };
   note();
-  setInterval(note, 60);
+  // Sample until cleanup, which capture.mjs calls after the shutter. An
+  // interval that is never cleared also survives into the NEXT pose and
+  // overwrites its note.
+  const t = setInterval(note, 60);
+  window.__POSE_CLEANUP__ = () => clearInterval(t);
 })();

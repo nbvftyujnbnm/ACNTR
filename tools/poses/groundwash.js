@@ -6,10 +6,11 @@
 // Three harness facts it is built around, all of them recorded in CONTRACT.md
 // and all of them expensive to rediscover:
 //
-//  1. THE SHUTTER OPENS ~1.1 s AFTER THIS SCRIPT RETURNS. So the mech must be
-//     left in a state that KEEPS blasting the deck for that whole window —
-//     hence held keys with a self-clearing release, and hence a hover rather
-//     than a jump (a jump climbs out of wash height inside the window).
+//  1. THE SHUTTER OPENS TENS OF SECONDS AFTER THIS SCRIPT RETURNS (1100 ms of
+//     settle plus a screenshot that has measured 24-130 s). So the mech must be
+//     left in a state that KEEPS blasting the deck indefinitely — hence keys
+//     held until __POSE_CLEANUP__ rather than released on a timer, and hence a
+//     hover rather than a jump (a jump climbs out of wash height).
 //  2. `debug.freeze(true)` is not usable here. The wash is a per-frame emitter
 //     driven by dt, so a frozen sim emits nothing and the frame is empty.
 //  3. ROOT ROTATION IS NOT THE AIM — use debug.placePlayer / cameraBehindPlayer,
@@ -45,7 +46,7 @@
   // Keys stay down through the settle window and release themselves — the
   // poses share one browser session and a latched key would drive every frame
   // captured after this one.
-  setTimeout(() => debug.releaseKeys(), 3200);
+  window.__POSE_CLEANUP__ = () => debug.releaseKeys();
 
   const m = game.player.moveState || {};
   const vfx = game.vfx;

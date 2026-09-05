@@ -38,7 +38,7 @@
   );
 
   // Fire several so the frame cannot miss on timing alone, and keep firing
-  // through the settle window — the harness renders about 1.1 s after this
+  // through the whole capture — the harness screenshots long after this
   // script returns, and AC6-scale impacts are gone in 200 ms.
   const boom = () => {
     debug.vfx('explosion', centre.clone(), 14);
@@ -60,6 +60,10 @@
   };
 
   // Keep replenishing so something is alive when the shutter actually opens.
-  let n = 0;
-  const t = setInterval(() => { boom(); if (++n > 12) clearInterval(t); }, 90);
+  // It has to run to CLEANUP, not to a count: 12 booms at 90 ms is 1.1 s of
+  // replenishment, and `page.screenshot` on this canvas has measured 24-130 s
+  // (see every `shotMs` in `shots/*/report.json`), so a capped burst is stone
+  // dead in the picture. capture.mjs calls __POSE_CLEANUP__ after the shutter.
+  const t = setInterval(boom, 90);
+  window.__POSE_CLEANUP__ = () => clearInterval(t);
 })();

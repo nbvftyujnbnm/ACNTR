@@ -68,5 +68,5 @@
   };
 
   // Leave the pass as we found it; poses share one browser session.
-  setTimeout(() => { debug.releaseCamera(); debug.setPass('motionBlur', true); }, 3000);
+  window.__POSE_CLEANUP__ = () => { debug.releaseCamera(); debug.setPass('motionBlur', true); };
 })();

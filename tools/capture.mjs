@@ -178,7 +178,10 @@ async function startServer() {
   for (const pose of poses) {
     const src = readFileSync(resolve(POSE_DIR, `${pose}.js`), 'utf8');
     const before = consoleErrors.length;
-    await page.evaluate(() => { delete window.__POSE_NOTE__; }).catch(() => {});
+    await page.evaluate(() => {
+      delete window.__POSE_NOTE__;
+      delete window.__POSE_CLEANUP__;
+    }).catch(() => {});
     try {
       await page.evaluate(src);
     } catch (e) {
@@ -222,6 +225,31 @@ async function startServer() {
     if (note?.warning) console.error(`  [pose:${pose}] ${note.warning}`);
     // Reset between poses so state doesn't leak.
     await page.evaluate(() => {
+      try {
+        // A POSE MUST NOT RESTORE ITS OWN STATE ON A TIMER. `page.screenshot`
+        // of a 1920x1080 WebGL canvas under SwiftShader has measured 24-130
+        // SECONDS on this box (every `shotMs` in `shots/*/report.json` says
+        // so), while the poses that predate this hook all cleaned up on a
+        // `setTimeout` of 3000 or 6000 ms. Every one of those fired long
+        // before the shutter, so the frame on disk was composed AFTER the
+        // pose had unfrozen the clock and released the camera.
+        //
+        // That is not a subtle bias. `muzzleanat` measured the particle clock
+        // running on 0.52 s past freeze, which is five times the longest
+        // muzzle-flash particle's life: the pose photographed an empty
+        // volume and the flash was written off as broken. The same hook also
+        // answers the standing "setCamera does not reach the render" puzzle
+        // recorded in CONTRACT.md — `releaseCamera()` on a 6 s timer had
+        // handed the frame back to the chase camera before the shutter.
+        //
+        // So poses hand their teardown to `window.__POSE_CLEANUP__` and it is
+        // called HERE, after the screenshot and after the note is read.
+        const fn = window.__POSE_CLEANUP__;
+        delete window.__POSE_CLEANUP__;
+        if (typeof fn === 'function') fn();
+      } catch (e) {
+        console.warn('[pose cleanup] threw', e);
+      }
       try {
         const d = window.__ACNTR__.debug;
         d.silhouette({ on: false })

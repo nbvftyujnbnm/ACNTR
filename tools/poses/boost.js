@@ -28,21 +28,23 @@
   debug.holdKeys(['KeyW', 'Space', 'ControlLeft']);
   debug.step(1.5);
 
-  // The throttle stays OPEN through the harness's settle window, and this is
-  // the difference between grading a 95 m/s frame and grading a 56 m/s one.
-  // step() advances the simulation but does not render, so the frame that gets
-  // screenshotted is one the harness renders AFTER the pose returns, ~1.1 s of
-  // real time later. Releasing the keys here handed that window to the
-  // deceleration model: measured on this build, the captured frame read 56 m/s
-  // on the HUD with no velocity left for the speed cues to key off. Under
-  // SwiftShader the engine clamps dt to 0.1 s and only renders a handful of
-  // frames in that window, so holding costs a couple of hundred metres of
-  // travel and keeps the mech at its assault-boost terminal speed.
+  // The throttle stays OPEN until the shutter, and this is the difference
+  // between grading a 95 m/s frame and grading a 56 m/s one. step() advances
+  // the simulation but does not render, so the frame that gets screenshotted is
+  // one the harness renders AFTER the pose returns — and that is not the 1.1 s
+  // this comment used to claim: capture.mjs settles for 1100 ms and then takes
+  // a screenshot that has measured 24-130 s on this box. Releasing the keys
+  // here handed all of that to the deceleration model: measured, the captured
+  // frame read 56 m/s on the HUD with no velocity left for the speed cues to
+  // key off. Under SwiftShader the engine clamps dt to 0.1 s and renders only a
+  // handful of frames in that window, so holding costs a couple of hundred
+  // metres of travel and keeps the mech at its assault-boost terminal speed.
   //
-  // Self-clearing rather than left latched: the poses run in ONE browser
-  // session and boost sorts FIRST, so a stuck key would drive every frame
-  // after it.
-  setTimeout(() => debug.releaseKeys(), 3000);
+  // Released in cleanup rather than left latched: the poses run in ONE browser
+  // session and boost sorts FIRST, so a stuck key would drive every frame after
+  // it. It must NOT be a timer — a `setTimeout(3000)` release fires long before
+  // the shutter, which is the bug this comment used to describe as the fix.
+  window.__POSE_CLEANUP__ = () => debug.releaseKeys();
 
   // Report the speed the pose actually reached. Because of the render-after-
   // return behaviour above, this is a LOWER bound on what the captured frame
