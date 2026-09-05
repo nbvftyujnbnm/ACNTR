@@ -1201,7 +1201,18 @@ export class Level {
       [0.585, 0.988], [0.430, 1.000], [0.230, 0.997], [0.000, 0.990],
     ];
     const NP = PROF.length;
-    const NA = 64, NV = NA + 1;
+    /*
+     * 112 COLUMNS, NOT 64, AND THE RANGE CHANGE IS WHAT FORCED IT. At 1.4-1.9 km
+     * a butte was 540 px wide and 64 columns of a 0.42-1.0 squashed plan put a
+     * silhouette segment at 12-20 px, which the veil smeared away. Pulled in to
+     * 0.76-1.4 km the same shape is 700-900 px and those segments are 25-40 px
+     * of dead-straight edge with a visible corner at each end — measured on
+     * shots/btrange/cliff.png, and "visible hard polygon silhouette on anything
+     * meant to be curved" is on REVIEW's automatic-fail list. 112 lands them
+     * back at 14-22 px. Cost is 42k triangles on a 3.18M frame, and this mesh
+     * casts no shadow so it is paid once.
+     */
+    const NA = 112, NV = NA + 1;
 
     /*
      * count, radius min/span, plan radius min/span, height min/span, contrast.
@@ -1377,9 +1388,9 @@ export class Level {
         const tiltB = Math.sin(dipAz) * dipMag;
         const capFloorM = 112 + dipMag * r * 0.95;
 
-        // Highest plan order is 17 against 64 columns — 3.8 columns per lobe,
-        // which is coarse enough to survive the mesh and fine enough to put
-        // notches in an outline rather than a smooth oval.
+        // Highest plan order is 17 against 112 columns — 6.6 columns per lobe,
+        // coarse enough to survive the mesh and fine enough to put notches in an
+        // outline rather than a smooth oval.
         const H_PLAN = harmonics(rng, [2, 3, 5, 8, 11, 17], 1.0);
         const H_CROWN = harmonics(rng, [1, 2, 3, 5, 9], 1.0);
         // The crown CLEFT. `H_CROWN` is a signed sine and averages out into a
@@ -1390,6 +1401,24 @@ export class Level {
         // kind this range can deliver.
         const H_CLEFT = harmonics(rng, [2, 3, 5, 9], 0.8);
         const H_TONE = harmonics(rng, [1, 3, 6], 1.0);
+        /*
+         * DRAINAGE GULLIES, the same feature and the same argument as the mesa
+         * ring's chute field, arriving here because the band moved in.
+         *
+         * Everything this layer had ran HORIZONTALLY — profile rings, beds, the
+         * caprock line — so once a butte was close enough to read at all
+         * (shots/btrange/cliff.png) it read as a stack of smooth flat facets.
+         * What breaks a real cliff up is water running DOWN it. Rectified, since
+         * erosion only ever removes: a signed sine raises as many ribs as it
+         * cuts channels and the two average out, which is the argument `cleft`
+         * and the ring's `notch` both already make.
+         *
+         * Order 19 against 112 columns is 5.9 columns per channel, clear of the
+         * 5-per-feature floor the strata Nyquist amendment sets, and it is
+         * pointedly NOT a bed frequency — a gully must not beat against the
+         * horizontal banding or the two alias into a plaid.
+         */
+        const H_GULLY = harmonics(rng, [5, 8, 13, 19], 0.85);
         const bedPhase = rng() * TAU;
 
         const pos = new Float32Array(NV * NP * 3);
@@ -1403,6 +1432,7 @@ export class Level {
           const planN = angField(t, H_PLAN);
           const plan = 1 + 0.27 * planN;
           const cleft = Math.max(0, angField(t, H_CLEFT) - 0.10);
+          const gully = clamp(Math.max(0, -angField(t, H_GULLY) - 0.10) * 1.7, 0, 1);
           /*
            * The floor is the same constraint the height minimum above is: base
            * sits at about -24 and the vista camera at 78, so a column that
@@ -1425,7 +1455,19 @@ export class Level {
             // pennants on the silhouette; at a 92-95% veil a sliver keeps about
             // a twentieth of its own radiance, so the risk that bought the
             // taper has mostly gone and the outline needs the buttresses back.
-            const rr = r * PROF[p][0] * (1 + 0.31 * planN * (1 - 0.50 * frac));
+            /*
+             * The gully's HEIGHT ENVELOPE. A drainage channel is cut by water
+             * that has already run some distance, so it is deepest on the open
+             * wall, absent at the toe (where its own debris fan has filled it
+             * back in, and where the ring's back slope buries the shape anyway)
+             * and gone under the caprock — a caprock that survived is by
+             * definition the bed the water has NOT cut through, and notching it
+             * would throw exactly the thin edge-on slivers the plan taper below
+             * exists to avoid.
+             */
+            const gh = smoothstep(0.06, 0.32, frac) * (1 - smoothstep(0.60, 0.78, frac));
+            const rr = r * PROF[p][0]
+              * (1 + 0.31 * planN * (1 - 0.50 * frac) - 0.14 * gully * gh);
             const hl = h * frac * hs;
             const lx0 = ca * rr, lz0 = sa * rr * squash;
             // Small-angle rotation about X then Z, ramped in off the toe.
@@ -1455,9 +1497,18 @@ export class Level {
              * it and reads as pasted paper. The albedo has to be pulled down
              * for the veiled result to sit below the sky, which is where a
              * distant landform belongs.
+             *
+             * `gully` gets an OCCLUSION term as well as its relief, and that is
+             * the half that draws. The cliff ring's own amendment settles why:
+             * a face this far from the sun's azimuth is lit almost entirely by
+             * ambient, ambient is symmetric in azimuth, so N.L can barely tell a
+             * channel from the wall beside it. What a channel really does is see
+             * less sky. Same coefficient family as `under`, which is the same
+             * effect under the caprock.
              */
             let sh = 0.44 + s1 * 0.23 + s2 * 0.09 + scree * 0.13
-              + (plan - 1) * 0.40 + tone * 0.05 - under * 0.14;
+              + (plan - 1) * 0.40 + tone * 0.05 - under * 0.14
+              - gully * gh * 0.17;
             // Desert varnish. The cap is the oldest surface on the landform and
             // the only one facing the sky, so it needs to come down or it wins
             // the frame. Keyed to the ring INDEX, not the height fraction — the
