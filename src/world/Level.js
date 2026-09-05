@@ -77,6 +77,18 @@ const UV_STRUCT = 8;
  */
 const UV_CLIFF = 42;
 
+/**
+ * Overall albedo multiplier on the distant buttes, and the ONE number that
+ * decides whether that layer reads as rock or as pasted paper.
+ *
+ * The post stack veils by `composite = own * (1 - f) + inscat * f`, and at
+ * 0.95-1.9 km f runs 0.66 to 0.97. So the shape's whole read — is it above or
+ * below the sky, does it have an interior ramp, do near and far members of the
+ * ring separate in value — is set by the SIGN AND SIZE of `own - inscat`, and
+ * `own` is linear in this coefficient. Calibrated by capture; see the amendment.
+ */
+const BUTTE_ALBEDO = 0.0;
+
 /* ========================================================================== */
 /*  Module scratch — update() must never allocate                              */
 /* ========================================================================== */
@@ -1412,7 +1424,7 @@ export class Level {
             // a cut-out, and a ramp is the only interior cue that survives a
             // 95% veil.
             sh *= 1.09 - 0.27 * frac;
-            sh = 0.60 + (sh - 0.60) * con;
+            sh = (0.60 + (sh - 0.60) * con) * BUTTE_ALBEDO;
             const k3 = k * 3;
             col[k3] = clamp(sh * 1.03, 0, 1) * 255;
             col[k3 + 1] = clamp(sh * 0.95, 0, 1) * 255;

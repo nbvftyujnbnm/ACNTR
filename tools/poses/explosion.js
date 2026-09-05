@@ -49,8 +49,8 @@
   // vetted range" bug already fixed once in the gameplay pose, repeated here.
   // An explosion with `ground: false` does not need terrain at all, so the
   // whole class of problem goes away by not touching it.
-  const AHEAD = 70;
-  const HEIGHT = 26;
+  const AHEAD = 56;
+  const HEIGHT = 20;
 
   // NO CAMERA OVERRIDE. `debug.setCamera` combined with `debug.freeze(true)`
   // does not reach the render here: measured, the override stays set and
@@ -65,7 +65,14 @@
   // Using the real chase camera is better for this job anyway: the detonations
   // are then framed exactly as a player would see them, at the distance combat
   // actually happens.
+  // DEPTH OF FIELD OFF. The first run of this pose put the row 98 m from the
+  // lens with `dof: true` (its own report says so), and the capture came back
+  // as six soft brown smudges — which was then read as "the explosion has no
+  // structure". Some of that softness was the defocus, not the effect. This is
+  // a diagnostic whose whole job is to show what the fireball CONTAINS, so the
+  // lens blur has to come off; grade the running-game look from `combat_vfx`.
   debug.setPass('motionBlur', false);
+  debug.setPass('dof', false);
   debug.step(0.3);
 
   // Fire OLDEST first, so that by the time the youngest is triggered the
@@ -145,5 +152,6 @@
     debug.freeze(false);
     debug.releaseCamera();
     debug.setPass('motionBlur', true);
+    debug.setPass('dof', true);
   }, 6000);
 })();
