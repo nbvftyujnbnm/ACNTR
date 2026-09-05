@@ -383,6 +383,41 @@ export class Sky {
       p.aerialColor.b * 1.03
     );
 
+    // AND IT HAS TO SIT UNDER THE SKY IT IS SEEN AGAINST. The hue fix above
+    // closed the chroma gap and the buttes still read as pasted paper, because
+    // the residual was LUMA: they measured 139.9-141.1 against a sky at 135-139
+    // in the same frame — a distant landform brighter than its own background.
+    //
+    // MEASURED, and the number is a ratio rather than a feeling.
+    // `tools/probes/veil.js` evaluates COMPOSITE_FRAG's fog maths on the CPU
+    // from the live uniforms at the pixels the butte patches are measured at,
+    // and `tools/skysim.mjs` (pose `cliff`) says what the sky is along those
+    // SAME rays. At the butte crest the veil terminates into 0.2500 linear
+    // where the sky is 0.2094 — the in-scatter is 19% BRIGHTER than the sky it
+    // is drawn in front of. That is not a defensible source function: an
+    // in-scatter integrated over 1.4 km of near-ground air cannot out-run the
+    // whole atmospheric column in the same direction, and the layer's own
+    // comment already says every layer must terminate into a colour the sky
+    // actually shows along that sight line.
+    //
+    // 0.90 is sized from the transfer curve, not guessed: the aerial term is
+    // 99.5% of the in-scatter at that range (tDeck is ZERO from a camera 80 m
+    // up, tBand 0.5%), so this is very nearly a 1:1 lever, and 10% of radiance
+    // is ~6 display code values here. Predicted with the capture as the anchor
+    // (composite = (1-f)*surface + f*inscat, so the surface cancels out of the
+    // difference): butte cap 139.9 -> 133.8, mid 141.1 -> 135.1, toe 140.7 ->
+    // 134.6, far plain 109.5 -> 104.7, near dune 86.9 -> 82.7, sky unchanged
+    // because the sky pass is not fogged. R-B holds at 22-23 against the sky's
+    // 20-25, so the hue fix above survives intact.
+    //
+    // WHAT THIS DOES NOT FIX, measured and left for the next pass: the veil is
+    // a CONSTANT colour, so it cannot follow the sky's own near-horizon ramp.
+    // Along this bearing the sky runs 0.38 linear at 2 deg to 0.21 at 9 deg;
+    // the veil is 0.2450-0.2506 at every one of those rays. Under the sky at
+    // the horizon, over it higher up, and flat across a landform that spans
+    // both.
+    p.aerialColor.multiplyScalar(0.90);
+
     p.sunColor.copy(c.sunTint).multiplyScalar(0.62);
 
     // The post stack owns atmosphere outright. A FogExp2 here would be a SECOND

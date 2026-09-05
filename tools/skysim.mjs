@@ -311,6 +311,18 @@ export const POSES = {
   vista: { eye: [-150, 78, 210], look: [40, 55, -60], fov: 52 },
   // mirrors tools/poses/sky.js framing intent (pitched up 34 deg)
   sky: { eye: [-150, 78, 210], look: [40, 78 + 0.674 * 330, -60], fov: 52 },
+  // mirrors tools/poses/cliff.js. That pose picks its eye and its bearing at
+  // runtime, so these are the values it actually resolved to, read back from
+  // `tools/probes/veil.js` (camera -198, 81.59, -8; bearing index 7 of 48 =
+  // 52.5 deg; look point 500 m out at y = 150; 38 deg vertical field). The
+  // reconstruction is checked, not assumed: the probe's own per-pixel ray
+  // elevations agree with this camera to 0.02 degrees.
+  cliff: {
+    eye: [-198, 81.59, -8],
+    look: [-198 + Math.cos((7 / 48) * 2 * Math.PI) * 500, 150,
+      -8 + Math.sin((7 / 48) * 2 * Math.PI) * 500],
+    fov: 38,
+  },
 };
 
 function norm(v) {
