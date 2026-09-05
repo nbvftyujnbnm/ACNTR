@@ -2499,3 +2499,29 @@ two of the silhouette metrics were wrong on their first outing.
   METHOD: this was an A/B left half-run by an agent that was cut off. Before
   committing an in-flight experiment, MEASURE BOTH ARMS. Both arms being
   identical is itself the finding.
+- 2026-09-05 [mech] **RETRACTED: "THE MECH'S GREEBLE SITS AT ONE SCALE AND
+  READS AS NOISE RATHER THAN A HIERARCHY."** I wrote that yesterday off the
+  first honest `mech_detail` frame and it does not survive measurement.
+  `tools/detail.mjs` decomposes a rect into disjoint Burt-Adelson octaves and
+  reports RMS code values per band, which is exactly the right instrument:
+  noise concentrates in b1-b2 and falls away, while designed structure carries
+  energy at the plate and panel-line scales too. Measured on
+  shots/mech02/mech_detail.png (b1 ~2 px .. b64 ~64 px wavelength):
+      mech torso     4.24 3.41 3.61 3.87 4.12 4.51 5.10   total 39.0
+      mech shoulder  5.01 3.94 4.04 4.31 4.71 5.32 5.92   total 48.3
+      level wall     3.38 1.16 0.83 0.68 0.73 1.05 1.62   total 33.3
+  The hull's spectrum is FLAT-TO-RISING across six octaves — the opposite of
+  noise — and it carries more multi-scale energy than the level's own panelled
+  surfaces. Roughly equal energy per octave is also what natural imagery
+  looks like. There is no supported criticism of the mech's detail structure
+  here, and nobody should spend a session restructuring it on this basis.
+  A SECOND READING FROM THE SAME RUN ALSO FAILED. A third rect measured 27.6
+  total against the torso's 39.0, which looks like "the legs are
+  under-detailed" — but cropping the rect at 2x shows it is about 40%
+  BACKGROUND, so the deficit is dilution, not the mech. Same trap as the
+  butte-cap sample: a rect chosen from an opinion measures the opinion.
+  ALWAYS CROP THE RECT AND LOOK AT IT BEFORE BELIEVING WHAT IT MEASURED.
+  METHOD, now five for five this week: an impression about an image is a
+  hypothesis about numbers. `tools/detail.mjs` for "is there detail and at
+  what scale", `tools/png.mjs` + a ten-line script for brightness, warmth or
+  clipping, `tools/crop.mjs` for "what is actually in this region".
