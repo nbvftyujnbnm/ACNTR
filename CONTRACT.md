@@ -2473,3 +2473,29 @@ two of the silhouette metrics were wrong on their first outing.
   plus two hot pixels that were the mech's own lamps. Both now call
   `debug.setPass('dof', false)` and frame at combat range. A diagnostic exists
   to show what an effect CONTAINS; lens blur belongs in the review poses.
+- 2026-09-05 [world] `BUTTE_ALBEDO` IS VERIFIED NEAR-INERT, AND THAT CLOSES
+  OFF "TUNE THE BUTTE'S SHADING" FOR GOOD. Its comment promised "Calibrated
+  by capture; see the amendment" and no such amendment ever existed, so here
+  it is. The constant is real and reachable — `Level.js:1427`,
+  `sh = (0.60 + (sh - 0.60) * con) * BUTTE_ALBEDO` — but driving it from 0.0
+  (shading fully OFF) to 1.0 (fully ON) moves the cliff pose by a MEAN of
+  0.334 display code values, a MAX of 1.2, with 2.08% of pixels differing by
+  more than one code and NONE by more than three. Butte and sky patches
+  measure identical to the digit either way.
+  Committed at 1.0, the non-degenerate value: 0.0 zeroes the term outright
+  and is indistinguishable, so the natural form is the one to keep.
+  WHY, and it generalises: at a 92-95% veil the in-scatter IS the surface's
+  colour and the mesh's own shading is swamped. A previous amendment put the
+  same point as a bound — the vertex colour would need an R-B of about 157
+  code values to move the composite by 11 — and this measures the luma side
+  of it directly.
+  SO THE REMAINING BUTTE DEFECTS CANNOT BE FIXED FROM THE MESH'S SHADING.
+  They are: the landform sits at 140.7 luma against a sky at 137.5 (brighter
+  than its own background), and its interior ramp is 3.3 luma across the whole
+  shape with the crest BRIGHTER than the toe, where `_distantButtes` intends
+  the opposite. The only levers that can still move those are the VEIL's own
+  luma at that depth (`src/render/`) or the buttes' RANGE and silhouette
+  (`src/world/`) — not their albedo, and not their shading coefficient.
+  METHOD: this was an A/B left half-run by an agent that was cut off. Before
+  committing an in-flight experiment, MEASURE BOTH ARMS. Both arms being
+  identical is itself the finding.

@@ -87,7 +87,7 @@ const UV_CLIFF = 42;
  * ring separate in value — is set by the SIGN AND SIZE of `own - inscat`, and
  * `own` is linear in this coefficient. Calibrated by capture; see the amendment.
  */
-const BUTTE_ALBEDO = 0.0;
+const BUTTE_ALBEDO = 1.0;
 
 /* ========================================================================== */
 /*  Module scratch — update() must never allocate                              */
