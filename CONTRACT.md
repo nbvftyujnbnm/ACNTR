@@ -2935,3 +2935,53 @@ two of the silhouette metrics were wrong on their first outing.
   smooth sheet against the structured terrain's sd of ~33 above it. That is the
   dust wash. Grade the landing from this pose now; it is the first capture of it
   that contains one.
+- 2026-09-05 [tools] **EVERY HERO AND MECH_DETAIL FRAME THIS PROJECT HAS EVER
+  GRADED SHOWED THE MECH'S BACK.** `Debug.frameHeroShot` had the sign of its
+  facing yaw inverted (fixed in 407c70b), and both poses get their camera AND
+  the mech's yaw from it. The convention is `forward(Y) = (-sin Y, 0, -cos Y)`,
+  so facing a target needs the mech-minus-camera difference; it was written
+  camera-minus-mech, which is exactly 180 degrees.
+
+  Measured with `tools/probes/chestdisc.js`, which reports the camera in
+  MECH-LOCAL coordinates. Before: [0, 5.89, 16.99]. The x of EXACTLY 0 is what
+  identified it — the lens was not merely behind the mech, it was dead on its
+  back axis, which is a sign flip and not drift. After the fix and a 0.45 rad
+  three-quarter turn: [7.39, 5.89, -15.30], i.e. 25.8 degrees off the front axis.
+
+  WHAT TO RE-EXAMINE. Every recorded judgement about how the MECH LOOKS was made
+  against its backpack. That does not automatically make them wrong — an octave
+  spectrum or an AO mean is a real measurement of whatever was in the rect — but
+  the SUBJECT was not the one the entry names. In particular:
+    * "lighten the mech's paint" / the MECH_PALETTES darkness argument, which
+      this file records as having cost two passes of oscillation.
+    * "add negative space to the mech", the "only one true sky-gap" entry, and
+      THE LEG'S FLAT PROFILE — a rear three-quarter reads a leg's width/depth
+      budget differently from a front one.
+    * The single-radius AO result ("the mech torso lost 8.6% of its mean and
+      6.5% of its standard deviation") — the torso rect was the spine housing.
+    * My own retracted "mech greeble reads as noise", and its retraction.
+  Re-shoot before re-arguing any of them. The front carries the visor, the chest
+  vents, the shoulder cannon and the arm optic; the back carries the boosters and
+  the radiator stack, and they are not interchangeable subjects.
+
+  It also explains a thing that has confused three passes: the two large pale
+  discs that read as a PAIR OF EYES in shots/rev01/hero.png. They are not chest
+  optics and they are not a defect — they are the main booster nozzles, correct
+  hardware, seen from the one angle a key render never uses.
+- 2026-09-05 [render] The 2026-09-03 "the brightest large surface sits at middle
+  grey" finding REPRODUCES on the corrected front-view hero frame, independently
+  measured. shots/rev02/hero.png luma percentiles p1/p5/p50/p95/p99:
+      whole frame   12 / 20 /  68 / 115 / 172     2.74% under 16, 0.05% over 235
+      mech only     10 / 16 /  55 / 158 / 212     4.74% under 16, 0.21% over 235
+      sky band      49 / 57 /  70 /  94 / 129
+  The BLACK POINT IS FINE — 2.7% of the frame is genuinely in the toe. The top
+  of the scale is what is unused: 1% of the frame exceeds code 172, and the
+  brightest large surface in a sunlit desert exterior is the sky at a median of
+  70. This is the same scene/exposure placement problem already recorded, now
+  confirmed on the frame that is supposed to be the key render, and it is the
+  single largest remaining gap between these captures and an AC6 key art
+  reference. It is NOT a curve problem: `tools/grade-model.mjs` says the shipped
+  grade does not clip until scene-linear 3.2.
+  Note for whoever takes it: the hero frame's own numbers were unusable until
+  today, because the subject was facing away. The mech's p50 went 43 -> 55 and
+  its p95 102 -> 158 purely from turning it around into the key.
