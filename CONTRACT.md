@@ -2330,3 +2330,38 @@ two of the silhouette metrics were wrong on their first outing.
   `src/world/` can do it — at a 93% veil the mesh's own vertex colour would need
   an R-B of about 157 code values, i.e. bright orange rock, to move the
   composite by 11.
+- 2026-09-04 [render] AERIAL HUE FIXED AT SOURCE, AND THE REMAINING CUT-OUT
+  READ IS LUMA, NOT HUE. Acts on the amendment above, which correctly caught
+  that my 2026-09-03 "dead end" was measured in the wrong frame AND had a
+  control that could not move.
+  `Sky.js` now builds `aerialColor` as `lerp(zenith, horizon, 0.88)` with a
+  mild `b * 1.03` instead of `lerp(..., 0.60)` with `b * 1.30`. The old value
+  sat at R-B -0.059 LINEAR — actually blue — inside a sky at +0.055, and at a
+  92-95% veil that in-scatter IS every distant surface's colour.
+  MEASURED, shots/aer_base -> shots/aer_fix on `tools/poses/cliff.js`, each
+  patch against the sky immediately beside it:
+      butte L cap    R-B  8.0 -> 23.5      butte L body  R-B  3.6 -> 22.8
+      butte R cap    R-B  4.4 -> 20.2      butte R body  R-B -0.2 -> 19.9
+      far ridge      R-B  4.2 -> 17.1      sky beside L  R-B 20.7 (unchanged)
+  An 18-22 chroma gap closed to 0-3. The far ridge moved too, confirming this
+  was the whole distant layer. Depth separation survives: the veil is still
+  cooler than the horizon (+0.034 vs +0.055 linear) and far cooler than
+  sunlit sand.
+  **THE BUTTES STILL READ AS CUT-OUTS, AND THE NUMBERS NOW SAY WHY.** After
+  the fix, butte L measures cap 140.7 / upper face 139.7 / lower body 143.0
+  luma against sky 137.5. Two things, both geometry and both for the owner of
+  `src/world/`:
+    1. THE LANDFORM IS BRIGHTER THAN THE SKY BEHIND IT — 140.7 vs 137.5. A
+       distant backlit form should sit at or just under its background.
+    2. THE INTERIOR RAMP IS FLAT AND SLIGHTLY INVERTED — 3.3 luma across the
+       whole shape, with the CREST BRIGHTER than the toe. `_distantButtes`'s
+       own comment says "the crest is darker than the toe so every shape has
+       an interior ramp"; measured, it does not.
+  A shape with no interior gradient, brighter than its background, reads as
+  pasted paper whatever its hue. The hue half is done; this half is not, and
+  it cannot be fixed from `src/render/`.
+  METHOD NOTE: the first sample I took after the fix showed 22.8 against
+  20.7 and I nearly called the whole defect closed — but the image still
+  showed cut-outs. The contract's own rule settled it: when a measurement and
+  an image disagree, believe the image and go fix the metric. The metric was
+  measuring hue when the residual was luma.

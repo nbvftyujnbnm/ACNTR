@@ -352,15 +352,35 @@ export class Sky {
     // frame. At 0.86 its luminance was 0.285 against sunlit sand at ~0.25.
     p.bandColor.copy(c.horizon).lerp(c.sunTint, 0.15).multiplyScalar(0.78);
 
-    // Aerial perspective: cool and pale. This is the term that separates a
-    // distant ridge from the one in front of it — if it is warm like the rest,
-    // depth collapses into a single beige plane. The explicit blue push is the
-    // whole point: warm near, cool far is what the eye reads as distance.
-    p.aerialColor.copy(c.zenith).lerp(c.horizon, 0.60);
+    // Aerial perspective: cooler than the ROCK, not cooler than the SKY.
+    //
+    // The principle below is right — warm near, cool far is what the eye reads
+    // as distance — but the old magnitude was wrong at this sun, and it was
+    // the whole of the "distant buttes read as flat pale cut-outs" defect.
+    // `lerp(zenith, horizon, 0.60)` then `b * 1.30` lands this at an R-B of
+    // -0.059 LINEAR: actually blue. At a 92-95% veil the in-scatter IS a
+    // distant surface's colour, so every far landform was being painted
+    // neutral-cool inside a sky whose own R-B is +0.055. A neutral patch in a
+    // warm field reads as pasted paper whatever its luminance is.
+    //
+    // MEASURED on shots/aer_base/cliff.png, each patch against the sky
+    // immediately beside it at the same elevation:
+    //     butte L rgb(136,131,132) R-B  3.6   sky beside rgb(147,136,126) R-B 20.7
+    //     butte R rgb(128,125,128) R-B -0.2   sky beside rgb(157,146,135) R-B 21.9
+    // An 18-22 chroma gap. `tools/poses/cliff.js` is the pose that shows this;
+    // the gameplay camera does not, and a sample taken there reported the gap
+    // as 3 and produced a "measured dead end" that was simply the wrong frame.
+    //
+    // The sky the cue is read AGAINST is itself the warm end here, so the veil
+    // only has to be cooler than the rock. Lerping most of the way to the
+    // horizon and keeping a mild blue push leaves the aerial at about +0.034
+    // linear — still cooler than the horizon's +0.055, and far cooler than
+    // sunlit sand, so depth separation survives without the inversion.
+    p.aerialColor.copy(c.zenith).lerp(c.horizon, 0.88);
     p.aerialColor.setRGB(
-      p.aerialColor.r * 0.94,
-      p.aerialColor.g * 1.02,
-      p.aerialColor.b * 1.30
+      p.aerialColor.r * 0.995,
+      p.aerialColor.g * 1.00,
+      p.aerialColor.b * 1.03
     );
 
     p.sunColor.copy(c.sunTint).multiplyScalar(0.62);
