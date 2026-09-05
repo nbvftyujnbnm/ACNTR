@@ -40,9 +40,15 @@
   pipe.params.damage.dirBias = 1.0;
   pipe.params.damage.lumaWeight = 1.0;
 
+  // Re-arm ABOVE the decay: `_updateDynamics` subtracts `step * 5.5` from `hit`
+  // BEFORE it computes the uniforms from it, and at the 12 fps a capture runs
+  // at that step is 0.083 s -- so setting 0.85 here lands 0.39 in the frame and
+  // the first run of this pose photographed a rim at uDamage 0.156 instead of
+  // the 0.442 it was aiming for. Adding the decay back makes the post-decay
+  // value exactly 0.85 whatever the frame rate is.
   const orig = pipe._updateDynamics.bind(pipe);
   pipe._updateDynamics = (dt) => {
-    pipe._dyn.hit = 0.85;
+    pipe._dyn.hit = 0.85 + Math.min(dt || 0.016, 0.1) * 5.5;
     pipe._setHitDirection({ source: src });
     orig(dt);
   };
