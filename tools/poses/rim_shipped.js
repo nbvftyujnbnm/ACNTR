@@ -27,6 +27,12 @@
   debug.step(1.0);
 
   const pipe = game.pipeline;
+  // Captured BEFORE the overrides below, or the restore in __POSE_CLEANUP__
+  // puts this arm's values back as though they were the defaults — which for
+  // the control arm would leave dirBias and lumaWeight at 0 for every pose
+  // that runs after it in the same browser session.
+  const origBias = pipe.params.damage.dirBias;
+  const origLuma = pipe.params.damage.lumaWeight;
   const p = game.player.root.position;
 
   // The attacker: 60 m out on the player's LEFT and slightly behind, so the
@@ -54,6 +60,21 @@
   };
   debug.step(0.2);
 
+  // FREEZE. Not to hold the rim — the re-arm above does that — but to kill the
+  // SCENE. The two arms are captured in separate `page.screenshot` calls that
+  // have measured 60 s and 114 s, and without a freeze the mech animates, the
+  // dust drifts and TAA resolves differently in between, so the difference
+  // image carries a whole frame of unrelated motion. Measured on the first
+  // A/B (shots/rim01, unfrozen): the central 35% of the frame, which no rim
+  // reaches, differed by 1.0 code value of red excess between the two arms —
+  // the same order as the lobe being looked for. Frozen, the two frames are
+  // identical everywhere except the term under test.
+  //
+  // `_updateDynamics` still runs when frozen (late updaters and the pipeline
+  // render are called every frame regardless of timeScale) but with dt 0, so
+  // the re-arm holds and nothing decays.
+  debug.freeze(true);
+
   const note = () => {
     const f = pipe.mFinal.uniforms;
     window.__POSE_NOTE__ = {
@@ -74,5 +95,17 @@
   // interval that is never cleared also survives into the NEXT pose and
   // overwrites its note.
   const t = setInterval(note, 60);
-  window.__POSE_CLEANUP__ = () => clearInterval(t);
+  // RESTORE THE MONKEY-PATCH. `pipe._updateDynamics` is replaced above, and
+  // capture.mjs's between-pose reset cannot undo that — it only knows about
+  // `debug`. Left in place it pins a 0.85 damage rim over every pose that runs
+  // after this one in the same browser session, which is exactly the kind of
+  // leak that once carried a red vignette out of the HUD pose and into the VFX
+  // frame after it. Same for the two `params.damage` overrides.
+  window.__POSE_CLEANUP__ = () => {
+    clearInterval(t);
+    pipe._updateDynamics = orig;
+    pipe.params.damage.dirBias = origBias;
+    pipe.params.damage.lumaWeight = origLuma;
+    debug.freeze(false);
+  };
 })();
