@@ -2525,3 +2525,60 @@ two of the silhouette metrics were wrong on their first outing.
   hypothesis about numbers. `tools/detail.mjs` for "is there detail and at
   what scale", `tools/png.mjs` + a ten-line script for brightness, warmth or
   clipping, `tools/crop.mjs` for "what is actually in this region".
+- 2026-09-05 [world/render] **THE BUTTE LAYER'S WHOLE PROBLEM IS ONE NUMBER —
+  THE VEIL AT ITS RANGE — AND THE VEIL IS A FUNCTION OF DISTANCE ONLY.**
+  Solved numerically instead of argued, `tools/probes/veil.js` (which
+  reproduces `tools/poses/cliff.js`'s camera exactly and evaluates
+  COMPOSITE_FRAG's fog maths on the CPU from the LIVE uniforms) plus
+  `tools/grade-model.mjs --invert` to put display codes and scene radiance in
+  the same units. Numbers, on the shipped build:
+
+      sample            mesh          dist   veil f   display   scene-linear
+      butteR mid        BoundaryFar   1128   0.783    ~138      0.201
+      butteL cap        BoundaryFar   1405   0.895    ~140      0.205
+      butteL far        BoundaryFar   1588   0.936    ~141      0.207
+      mesa ring (plain) Boundary       698   0.436    ~105      0.115
+      mesa ring (dune)  Boundary       581   0.300     ~95      0.096
+      pure in-scatter    —              —    1.000    ~149      0.2470
+
+  `wAir` is 0.99 on every distant sample, so `inscat` at this range IS
+  `aerialColor` and the deck/band media contribute nothing to a butte.
+  The composite is exactly `C = f*0.247 + (1-f)*S`, and the two ring samples
+  (same rock, two ranges) solve for the rock: **S = 0.03..0.05 scene-linear,
+  i.e. the landform's own surface is SIX TIMES DARKER THAN THE FOG IN FRONT
+  OF IT.** Substituting the ring's S back at the other range predicts display
+  94 against 95 measured, so the model is good to a code value.
+
+  THAT ARITHMETIC EXPLAINS EVERY OBSERVATION AT ONCE:
+  - Why the buttes read pale: at f = 0.78-0.94 they are 78-94% fog, and fog
+    here is display ~149 against a sky at 139-146 at the same elevation.
+  - Why `BUTTE_ALBEDO` measured inert: the whole surface term is 6-11% of the
+    pixel, and it is a 0.04 term inside a 0.25 one. Blacking it out is worth
+    about one display code. The prior amendment's finding is CORRECT; what it
+    could not know is that the coefficient is not small, the WEIGHT is.
+  - Why the interior ramp is 3.3 luma: the ramp lives in the same 6-11%.
+  - Why the mesa ring reads as rock at the identical albedo: f = 0.30-0.44.
+  **`BUTTE_ALBEDO` IS NOT INERT AS A CONSTANT — IT IS INERT AT 1.4 km.** Its
+  authority scales as (1-f), so the same edit is worth 6x more at 900 m. Do not
+  quote the old measurement at a range it was not taken at.
+
+  THE LEVER, quantified, at the cliff pose (camera 125 m BEHIND the origin
+  along its own view bearing, so camera distance = ring radius + 125):
+
+      ring radius   camera dist   veil f   predicted display   vs sky ~142
+          760           885        0.61          128              -14
+          900          1025        0.72          136               -6
+         1400          1525        0.92          147               +5
+         1900          2025        0.97          149               +7
+
+  So `_distantButtes`' band of 950-1900 m puts its NEAREST possible member at
+  f = 0.75 and everything else above 0.85 — the layer was authored entirely
+  inside the range where its own geometry cannot be seen. Nothing about its
+  shape, shading or albedo could have fixed that.
+  THE FLOOR ON THIS FROM `src/world/` IS THE MESA RING'S BACK SLOPE, which
+  runs from the face at r = 430-522 out to r = 906 (`BACK`'s last entry, 430 m
+  of radial offset past `R_NOM` 476). A butte centred inside ~760 m either
+  buries itself in that slope or pushes its plan into the cliff face the arena
+  is bounded by, so f = 0.6 / display -14 is the best this layer can do from
+  the world side. Going below that needs the VEIL's luma at 1 km, which is
+  `src/render/` (see the REQUEST below).
