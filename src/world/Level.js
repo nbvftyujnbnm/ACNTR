@@ -1217,23 +1217,53 @@ export class Level {
      * above any gameplay one.
      */
     /*
-     * ONE band, 0.95-1.9 km, not two out to 3 km. Working the fog numbers: the
-     * aerial term alone reaches tau 1.2 at 1 km (70% veiled), 2.5 at 1.5 km
-     * (92%) and 3.5 at 2.4 km (97%). Past about 2 km a landform retains so
-     * little of its own radiance that it renders as one flat patch of fog
-     * colour with a hard edge — measured on the previous capture, a 3 km butte
-     * came back as a uniform pale rounded rectangle with ZERO interior
-     * variation, which is the paper cut-out this whole layer exists to stop
-     * being. A shape only reads as rock while it still owns some of its own
-     * light. The far horizon is the far plain's job.
+     * 0.76-1.4 km, IN FROM 0.95-1.9, AND THIS IS THE WHOLE FIX FOR THE PALE
+     * CUT-OUT. The band was authored from the right principle — "a shape only
+     * reads as rock while it still owns some of its own light" — against fog
+     * numbers that were an estimate. Measured on the shipped build instead
+     * (`tools/probes/veil.js` evaluates COMPOSITE_FRAG from the live uniforms;
+     * `tools/grade-model.mjs --invert` puts display codes and scene radiance in
+     * one unit), the composite at this range is exactly
      *
-     * The height minimum is the other hard constraint: base is about -24 and
-     * the crown modulation can take 0.81 of the nominal height, so anything
-     * under ~150 m of relief can put its flat, up-facing cap below the vista
-     * camera at y=78 and read as a floating slab.
+     *     C = f * 0.247 + (1 - f) * S,     S = 0.03..0.05 scene-linear
+     *
+     * where 0.247 is the in-scatter (99% of it the aerial term out here, so the
+     * deck and band media do not reach a butte at all) and S is the landform's
+     * own surface — SIX TIMES DARKER THAN THE FOG IN FRONT OF IT. So the pixel
+     * is a lerp between rock and fog and `f` is the only coefficient in it.
+     *
+     * At the cliff pose the camera sits 125 m behind the origin along its own
+     * view bearing, so camera distance = ring radius + 125, and:
+     *
+     *     ring radius   veil f   predicted display   sky at that elevation
+     *         760        0.61          128                   ~142
+     *         950        0.75          137                   ~142
+     *        1400        0.92          147                   ~142
+     *        1900        0.97          149                   ~142
+     *
+     * i.e. the old band's NEAREST possible member was already 75% fog and its
+     * far half rendered ABOVE the sky it stood against. That is the pasted
+     * paper, and no silhouette, shading or albedo inside the mesh could have
+     * reached it — the surface was only 6-11% of the pixel. Pulled in, the
+     * near members land at f = 0.61 (39% their own rock, ~14 display codes
+     * under the sky, which is the value family the mesa ring reads as rock in)
+     * and the far ones stay at 0.92, so the group carries a real depth spread
+     * instead of one uniform wash.
+     *
+     * The FLOOR on this is the mesa ring's own back slope, which runs out to
+     * r = 906 (`BACK`'s last entry past `R_NOM`). Inside ~760 a butte either
+     * buries itself in that slope or pushes its plan into the cliff face the
+     * arena is bounded by — see the plan clamp below, which enforces the
+     * second half of that.
+     *
+     * Heights go up with the range coming in (150-300 -> 170-360) because a
+     * closer butte has to clear the ring's crest to be seen at all, and because
+     * the base is about -24 and the crown modulation can take 0.81 of the
+     * nominal height: anything under ~150 m of relief can put its flat,
+     * up-facing cap below the vista camera at y=78 and read as a floating slab.
      */
     const GROUPS = [
-      [22, 950, 950, 85, 145, 150, 150, 1.00],
+      [22, 760, 640, 85, 145, 170, 190, 1.00],
     ];
 
     /*
@@ -1294,7 +1324,22 @@ export class Level {
         const rad = rad0 + place[i].radT * rads;
         const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
         const nd = place[i].needle;
-        const r = (br0 + rng() * brs) * (nd ? 0.30 : 1.0);
+        /*
+         * PLAN RADIUS IS CLAMPED BY HOW CLOSE THE CENTRE IS, and that clamp is
+         * what lets the band start at 760 m at all. The widest point of a butte
+         * is `r * 1.31` (the profile's base ring times the full plan wobble), so
+         * a 230 m shape centred at 760 would reach r = 458 — inside the mesa
+         * ring's own cliff FACE (`R_NOM` 476 +/- 46), i.e. a mountain growing
+         * out of the wall the arena is bounded by, visible from the deck. 560 is
+         * that face's outer envelope plus a margin.
+         *
+         * It also happens to be right: a remnant standing close in on the ring's
+         * back slope has been eroded longer than one out on the plain, so the
+         * near members coming out narrower is the geology, not just the budget.
+         * Needles are already at 0.30 and never bind.
+         */
+        const rCap = Math.max(45, (rad - 560) / 1.31);
+        const r = Math.min((br0 + rng() * brs) * (nd ? 0.30 : 1.0), rCap);
         const h = (bh0 + rng() * bhs) * (nd ? 1.28 : 1.0);
         const squash = 0.42 + rng() * 0.58;
         const turn = rng() * TAU;
