@@ -75,6 +75,14 @@ const SHIPPED = {
   splitBalance: 0.42,
   vignette: 0.26,
   vignetteSmooth: 0.42,
+  // The damage rim's own structure. `damage` is uDamage itself and is 0 unless
+  // a candidate asks for one; the other three describe the rim's SHAPE and
+  // default to the symmetric, unweighted form every capture before 2026-09-05
+  // was shot with.
+  damage: 0,
+  damageDir: [1, 0],
+  damageBias: 0,
+  damageLuma: 0,
   // THE SHIPPED ENCODE IS NOW AN IDENTITY. Before 2026-09-02 FINAL_FRAG wrote
   // pow(disp, 2.2) and let three's sRGB OETF run on top, so code =
   // 255 * OETF(disp^2.2) — a hard crush below display 0.35. `displayToLinear`
@@ -188,22 +196,49 @@ function unSplit(c, g) {
 /**
  * The low-AP / hit rim, and its inverse. FINAL_FRAG applies it AFTER the
  * vignette as `disp += C * dv * (1 - disp)`, a screen blend, so it inverts per
- * channel as `(disp - C*dv) / (1 - C*dv)`. `dv` already carries uDamage and the
- * pulse; the caller supplies them because a still cannot state the sine's phase.
+ * channel as `(disp - C*dv) / (1 - C*dv)`. `dv` already carries uDamage, the
+ * pulse and the directional lobe; the caller supplies them because a still
+ * cannot state the sine's phase or the direction of the shot that caused it.
+ *
+ * THE LUMA WEIGHT MAKES THE FORWARD MAP DEPEND ON THE PIXEL'S OWN LUMA, so the
+ * inverse has no closed form and is solved by the same fixed-point iteration
+ * `unSplit` uses. The rim's offset is bounded by 0.85 * dv and dv is well under
+ * 0.5 in any shipped frame, so the iteration is a contraction; six passes are
+ * far more than the split toner needs for the same reason.
  */
 const DAMAGE_COLOR = [0.85, 0.06, 0.05];
-const applyDamage = (c, dv) => {
-  for (let i = 0; i < 3; i++) c[i] += DAMAGE_COLOR[i] * dv * (1 - c[i]);
+/**
+ * Weight the rim by the pixel's own luma, normalised so a pixel AT THE PIVOT is
+ * unchanged — mirrors `damageLumaWeight` in src/render/shaders/grade.js and the
+ * two constants must be kept in step with it.
+ */
+const DMG_LUMA_FLOOR = 0.35;
+const DMG_LUMA_PIVOT = 0.33;
+const damageLumaWeight = (lum, k) => {
+  if (k <= 1e-6) return 1;
+  const lw = (DMG_LUMA_FLOOR + (1 - DMG_LUMA_FLOOR) * lum) /
+    (DMG_LUMA_FLOOR + (1 - DMG_LUMA_FLOOR) * DMG_LUMA_PIVOT);
+  return 1 + k * (lw - 1);
 };
-const unDamage = (c, dv) => {
-  for (let i = 0; i < 3; i++) {
-    const k = DAMAGE_COLOR[i] * dv;
-    if (k > 1e-6) c[i] = (c[i] - k) / (1 - k);
+const applyDamage = (c, dv, lumaK) => {
+  const w = damageLumaWeight(LUMA(c[0], c[1], c[2]), lumaK);
+  for (let i = 0; i < 3; i++) c[i] += DAMAGE_COLOR[i] * dv * w * (1 - c[i]);
+};
+const unDamage = (c, dv, lumaK) => {
+  const y = [c[0], c[1], c[2]];
+  const x = [c[0], c[1], c[2]];
+  for (let n = 0; n < (lumaK > 1e-6 ? 6 : 1); n++) {
+    const w = damageLumaWeight(LUMA(x[0], x[1], x[2]), lumaK);
+    for (let i = 0; i < 3; i++) {
+      const k = DAMAGE_COLOR[i] * dv * w;
+      x[i] = k > 1e-6 ? (y[i] - k) / (1 - k) : y[i];
+    }
   }
+  c[0] = x[0]; c[1] = x[1]; c[2] = x[2];
 };
 
-function unGrade(c, g, vig, dv) {
-  if (dv > 1e-6) unDamage(c, dv);
+function unGrade(c, g, vig, dv, lumaK) {
+  if (dv > 1e-6) unDamage(c, dv, lumaK);
   if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] /= vig;
   unSplit(c, g);
   const l = LUMA(c[0], c[1], c[2]);
@@ -237,7 +272,7 @@ const applySat = (c, g) => {
  * real per-channel floor is `lift + splitShadow` scaled by the vignette, which
  * is NEGATIVE in red; under 'liftlast' it is exactly `lift`.
  */
-function reGrade(c, g, vig, dv) {
+function reGrade(c, g, vig, dv, lumaK) {
   for (let i = 0; i < 3; i++) {
     c[i] = Math.pow(Math.max(c[i] * g.gain[i], 0), 1 / Math.max(g.gamma[i], 0.01));
   }
@@ -255,7 +290,7 @@ function reGrade(c, g, vig, dv) {
     applySplit(c, g);
     if (vig > 1e-6) for (let i = 0; i < 3; i++) c[i] *= vig;
   }
-  if (dv > 1e-6) applyDamage(c, dv);
+  if (dv > 1e-6) applyDamage(c, dv, lumaK);
 }
 
 /* --- statistics ----------------------------------------------------------- */
@@ -424,7 +459,7 @@ function writePng(path, W, H, rgba) {
 
 function parseMap(spec) {
   const cand = { ...SHIPPED, lift: [...SHIPPED.lift], gain: [...SHIPPED.gain],
-    gamma: [...SHIPPED.gamma], agxLook: [...SHIPPED.agxLook],
+    gamma: [...SHIPPED.gamma], agxLook: [...SHIPPED.agxLook], damageDir: [...SHIPPED.damageDir],
     splitShadow: [...SHIPPED.splitShadow], splitHighlight: [...SHIPPED.splitHighlight] };
   let touchesGrade = false;
   let touchesAgx = false;
@@ -441,6 +476,14 @@ function parseMap(spec) {
       case 'power': cand.agxLook = [cand.agxLook[0], cand.agxLook[1], Number(v), cand.agxLook[3]];
         touchesGrade = true; touchesAgx = true; break;
       case 'damage': cand.damage = Number(v); touchesGrade = true; break;
+      // The two structural terms of the rim, both 0 in every capture taken
+      // before 2026-09-05. `dmgDir` is a SCREEN direction in aspect-corrected
+      // units — +x right, +y UP — pointing at where the shot came from;
+      // `dmgBias` is how much of the rim that lobe owns; `dmgLuma` is the
+      // luma weight's amount.
+      case 'dmgDir': cand.damageDir = nums(); touchesGrade = true; break;
+      case 'dmgBias': cand.damageBias = Number(v); touchesGrade = true; break;
+      case 'dmgLuma': cand.damageLuma = Number(v); touchesGrade = true; break;
       case 'lift': cand.lift = tri(); touchesGrade = true; break;
       case 'gain': cand.gain = tri(); touchesGrade = true; break;
       case 'gamma': cand.gamma = tri(); touchesGrade = true; break;
@@ -469,6 +512,8 @@ function describeCand(c) {
   if (c.exposure !== SHIPPED.exposure) bits.push(`exposure ${c.exposure}`);
   if (String(c.agxLook) !== String(SHIPPED.agxLook)) bits.push(`agxLook ${c.agxLook}`);
   if ((c.damage || 0) !== 0) bits.push(`damage ${c.damage}`);
+  if ((c.damageBias || 0) !== 0) bits.push(`dmgBias ${c.damageBias} dir ${c.damageDir}`);
+  if ((c.damageLuma || 0) !== 0) bits.push(`dmgLuma ${c.damageLuma}`);
   if (String(c.lift) !== String(SHIPPED.lift)) bits.push(`lift ${c.lift}`);
   if (String(c.gain) !== String(SHIPPED.gain)) bits.push(`gain ${c.gain}`);
   if (String(c.gamma) !== String(SHIPPED.gamma)) bits.push(`gamma ${c.gamma}`);
@@ -491,7 +536,20 @@ function transform(img, cand, vigParams, dmgParams) {
   const c = [0, 0, 0];
   let clipLo = 0, clipHi = 0;
   const [vA, vS] = vigParams;
-  const [dmgShipped, dmgPulse] = dmgParams;
+  const [dmgShipped, dmgPulse, dmgBiasS, dmgDirXS, dmgDirYS, dmgLumaS] = dmgParams;
+  const aspect = W / H;
+  // The directional lobe, exactly as FINAL_FRAG writes it: a cosine lobe
+  // squared, in ASPECT-CORRECTED screen coordinates with y UP (the PNG is
+  // top-down, so dy is negated below). 1 toward the source, 0 opposite.
+  const lobeAt = (dx, dyUp, bias, dirX, dirY) => {
+    if (bias <= 1e-6) return 1;
+    const px = dx * aspect, py = dyUp;
+    const len = Math.hypot(px, py);
+    if (len < 1e-6) return 1;
+    const a = (px * dirX + py * dirY) / len;
+    const q = 0.5 + 0.5 * a;
+    return 1 + bias * (q * q - 1);
+  };
   // A change above the tonemap needs the scene radiance back, which costs an
   // AgX inversion per pixel — so only pay for it when the candidate asks.
   const deep = cand._agx;
@@ -517,16 +575,19 @@ function transform(img, cand, vigParams, dmgParams) {
         // value; count it so the caveat is quantified rather than assumed away.
         if (data[p] === 0 || data[p + 1] === 0 || data[p + 2] === 0) clipLo++;
         if (data[p] === 255 || data[p + 1] === 255 || data[p + 2] === 255) clipHi++;
-        const dvS = dmgShipped > 1e-6 ? dmgShipped * dmgPulse * dmgRamp : 0;
-        const dvC = cand.damage > 1e-6 ? cand.damage * dmgPulse * dmgRamp : 0;
-        unGrade(c, SHIPPED, vig, dvS);
+        const dvS = dmgShipped > 1e-6
+          ? dmgShipped * dmgPulse * dmgRamp * lobeAt(dx, -dy, dmgBiasS, dmgDirXS, dmgDirYS) : 0;
+        const dvC = cand.damage > 1e-6
+          ? cand.damage * dmgPulse * dmgRamp *
+            lobeAt(dx, -dy, cand.damageBias, cand.damageDir[0], cand.damageDir[1]) : 0;
+        unGrade(c, SHIPPED, vig, dvS, dmgLumaS);
         if (deep) {
           const lin = agxInverse(c, SHIPPED.agxLook);
           for (let i = 0; i < 3; i++) lin[i] *= cand.exposure / SHIPPED.exposure;
           const d2 = agxDisplay(lin, cand.agxLook);
           c[0] = d2[0]; c[1] = d2[1]; c[2] = d2[2];
         }
-        reGrade(c, cand, vigC, dvC);
+        reGrade(c, cand, vigC, dvC, cand.damageLuma);
       }
 
       out[p] = dispToCode(clamp01(c[0]), cand.encode);
@@ -566,13 +627,19 @@ const rectSpecs = argv.reduce((acc, a, i) => {
 }, []);
 const vigParams = flag('vig') ? flag('vig').split(',').map(Number)
   : [SHIPPED.vignette, SHIPPED.vignetteSmooth];
-// `--dmg uDamage[,pulse]` states what the low-AP/hit rim was doing WHEN THE
-// CAPTURE WAS TAKEN, which nothing in the PNG records. Read it off
-// tools/probes/tonebloom.js (`redRim.uDamage`) or a pose note. Default 0: with
-// no rim to undo, a candidate that adds one still works.
-const dmgParams = flag('dmg')
-  ? (() => { const a = flag('dmg').split(',').map(Number); return [a[0], a.length > 1 ? a[1] : 0.86]; })()
-  : [0, 0.86];
+// `--dmg uDamage[,pulse[,bias,dirX,dirY[,lumaK]]]` states what the low-AP/hit
+// rim was doing WHEN THE CAPTURE WAS TAKEN, which nothing in the PNG records.
+// Read it off tools/probes/tonebloom.js (`redRim`) or a pose note. Default 0:
+// with no rim to undo, a candidate that adds one still works. The last four
+// fields describe the rim's SHAPE and are 0 for every capture taken before
+// 2026-09-05 — leave them out for those.
+const dmgParams = (() => {
+  const d = [0, 0.86, 0, 1, 0, 0];
+  if (!flag('dmg')) return d;
+  const a = flag('dmg').split(',').map(Number);
+  for (let i = 0; i < a.length && i < d.length; i++) if (Number.isFinite(a[i])) d[i] = a[i];
+  return d;
+})();
 const skip = new Set();
 for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) skip.add(i + 1);
 const files = argv.filter((a, i) => !a.startsWith('--') && !skip.has(i));
@@ -581,7 +648,9 @@ if (!files.length) {
   console.error('usage: node tools/retransfer.mjs <png ...> [--map SPEC]... [--out DIR]' +
     ' [--hist] [--vig a,s] [--from 2.2|srgb]\n' +
     "  SPEC keys: encode exposure agx slope power lift gain gamma contrast\n" +
-    "             split splitHi bal sat vig vigSmooth damage order\n" +
+    "             split splitHi bal sat vig vigSmooth order\n" +
+    "             damage dmgDir dmgBias dmgLuma   (the rim; see --dmg for the\n" +
+    "             values the CAPTURE was shot with)\n" +
     "  e.g. --map 'slope=1.45;power=1.12'   --map 'damage=0'");
   process.exit(1);
 }

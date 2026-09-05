@@ -204,6 +204,9 @@ uniform float uVignette;
 uniform float uVignetteSmooth;
 uniform float uDamage;
 uniform vec3  uDamageColor;
+uniform vec2  uDamageDir;    // screen direction of the incoming hit, y UP, aspect-corrected
+uniform float uDamageBias;   // 0 = the old symmetric rim, 1 = the full directional lobe
+uniform float uDamageLuma;   // 0 = a flat screen blend, 1 = the full luma weight
 uniform float uGrain;
 uniform float uScanline;
 uniform float uScanCount;
@@ -340,6 +343,47 @@ void main() {
     float pulse = 0.72 + 0.28 * sin( uTime * 7.0 );
     float dv = smoothstep( 0.60, 1.02, rEdge );
     dv = dv * dv * uDamage * pulse;
+
+    // ---- WHICH SIDE THE SHOT CAME FROM ------------------------------------
+    //
+    // A warning that appears equally on all four edges carries NO INFORMATION,
+    // and that is half of why this reads as a post filter rather than as
+    // damage. EV.PLAYER_HIT has always carried the attacker; Pipeline turns it
+    // into a screen direction plus a confidence (an attacker sitting on the
+    // reticle has no side, so the lobe fades out and the rim goes back to being
+    // symmetric — which is honest, not a fallback).
+    //
+    // The lobe is a SQUARED COSINE: 1 toward the source, 0.25 at 90 degrees, 0
+    // opposite. Because it only ever multiplies dv DOWN, a hit's peak on the
+    // side it came from is exactly the peak the symmetric rim had — this change
+    // can only remove red, never add it. uDamageBias also carries the hit
+    // term's share of uDamage, so the low-AP warning, which has no direction to
+    // point at, stays symmetric no matter what the last hit did.
+    vec2 pd = vec2( cc.x * ( uTexel.y / uTexel.x ), cc.y );
+    float q = 0.5 + 0.5 * dot( pd / max( length( pd ), 1e-4 ), uDamageDir );
+    dv *= mix( 1.0, q * q, uDamageBias );
+
+    // ---- AND STOP IT WASHING THE SHADOWS ----------------------------------
+    //
+    // A screen blend lifts DARK pixels hardest — the (1 - disp) factor is 0.95
+    // on a near-black pixel and 0.3 on a bright one — which is why the measured
+    // tint was worst exactly where the frame was darkest, painting flat red
+    // over corners that had no image in them. Weighting dv by the pixel's own
+    // luma undoes that, NORMALISED AT A PIVOT so it is not a blanket cut: a
+    // pixel at the pivot keeps precisely the rim it had, and only the crushed
+    // toe below it loses any.
+    //
+    // 0.35 / 0.33: measured with tools/retransfer.mjs at uDamage 0.44 on the
+    // darkest frame in shots/ (mech_detail, rim-region mean luma 53). Mean R-G
+    // lift by luma quartile went 10.1 / 6.4 / 6.4 / 7.0 — falling with
+    // brightness, i.e. the tint was strongest where the image was weakest — to
+    // 6.8 / 4.7 / 6.2 / 7.3, which is flat. On a normally exposed frame
+    // (cliff, mean luma 108) the same weight moves the mean lift 5.60 -> 5.86,
+    // so this costs the low-AP warning NOTHING except in a frame that is
+    // already crushed. That was the trade this was waiting on.
+    float lumV = luma( disp );
+    dv *= mix( 1.0, ( 0.35 + 0.65 * lumV ) / ( 0.35 + 0.65 * 0.33 ), uDamageLuma );
+
     disp = disp + uDamageColor * dv * ( 1.0 - disp );
   }
 

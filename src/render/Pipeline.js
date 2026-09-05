@@ -169,6 +169,17 @@ export class RenderPipeline {
       // so the vignette was spending most of its darkening on the one part of
       // the frame that was already the hardest to read.
       vignette: { amount: 0.26, smoothness: 0.42 },
+      // The damage rim's two STRUCTURAL terms, as amounts rather than baked
+      // constants so the next person can A/B them from a pose without a
+      // rebuild (`game.pipeline.params.damage.dirBias = 0`). Both are 1 =
+      // fully on; both only ever REMOVE rim, so 0 restores the symmetric
+      // screen-blend rim exactly. `dirBias` biases the rim toward the screen
+      // direction the hit came from and is scaled by the hit term's share of
+      // uDamage, so it cannot make the low-AP warning directional.
+      // `offAxis` is the angle, as a fraction of the half vertical FOV, at
+      // which a hit is treated as fully directional: inside it the attacker is
+      // near the reticle and the player can already see them.
+      damage: { dirBias: 1.0, lumaWeight: 1.0, offAxis: 1.0 },
       grain: { amount: 0.030 },
       scanline: { amount: 0.010, count: 900 },
       atmosphere: { strength: 1.0 },
@@ -290,7 +301,7 @@ export class RenderPipeline {
     this._dyn = {
       crit: 0, critT: 0,
       speed: 0, speedT: 0,
-      hit: 0, punch: 0, scan: 0,
+      hit: 0, punch: 0, scan: 0, hitConf: 0,
       focus: this.params.dof.restFocus, focusT: this.params.dof.restFocus,
       exposureBias: 1,
     };
@@ -331,6 +342,13 @@ export class RenderPipeline {
     this._aerialDensity = 0.0024;
     this._aerialRamp = 1000;
     this._damageColor = new THREE.Color(0.85, 0.06, 0.05);
+    // Screen direction of the last hit (aspect-corrected, y UP) and how much to
+    // trust it. Scratch for `_setHitDirection`, which runs on an event and must
+    // not allocate either.
+    this._damageDir = new THREE.Vector2(1, 0);
+    this._hitVec = new THREE.Vector3();
+    this._playerPos = new THREE.Vector3();
+    this._hasPlayerPos = false;
 
     this._jitter = new Float32Array(JITTER_COUNT * 2);
     for (let i = 0; i < JITTER_COUNT; i++) {
@@ -591,6 +609,9 @@ export class RenderPipeline {
       uVignetteSmooth: { value: p.vignette.smoothness },
       uDamage: { value: 0 },
       uDamageColor: { value: this._damageColor },
+      uDamageDir: { value: this._damageDir },
+      uDamageBias: { value: 0 },
+      uDamageLuma: { value: p.damage.lumaWeight },
       uGrain: { value: p.grain.amount },
       uScanline: { value: p.scanline.amount },
       uScanCount: { value: p.scanline.count },
@@ -658,9 +679,10 @@ export class RenderPipeline {
     // 0.26, where the accumulator sat rock-steady at 0.44. Flicker is the point:
     // a value that returns to zero between hits reads as being hit, a value
     // that never does reads as a gel over the lens.
-    this._offs.push(bus.on(EV.PLAYER_HIT, () => {
+    this._offs.push(bus.on(EV.PLAYER_HIT, (e) => {
       this._dyn.hit = Math.max(this._dyn.hit, 0.85);
       this._dyn.scan = Math.min(1, this._dyn.scan + 0.5);
+      this._setHitDirection(e);
     }));
     this._offs.push(bus.on(EV.STAGGER, (e) => {
       if (e && e.entity && e.entity.isPlayer) this._dyn.scan = 1;
@@ -988,6 +1010,63 @@ export class RenderPipeline {
     }
 
     if (game?.state === 'dead') d.critT = 1;
+
+    if (pp) { this._playerPos.copy(pp); this._hasPlayerPos = true; }
+  }
+
+  /**
+   * Turn an `EV.PLAYER_HIT` payload into the screen direction the shot came
+   * from, plus how much that direction should be trusted.
+   *
+   * THE RIM IS A SCREEN EFFECT, SO THE BASIS IS THE CAMERA'S, NOT THE MECH'S.
+   * Where a threat appears on screen is decided by the camera, and the mech's
+   * own facing is 180 degrees from `aimYaw` besides (see the amendment). The
+   * vector is expressed in camera space — x right, y up, z BEHIND, because
+   * three cameras look down their local -Z — and the screen direction is simply
+   * its (x, y), NOT its projection: for an attacker behind the camera the
+   * projection is mirrored and would put the rim on the wrong side, while (x,y)
+   * still says "left of me", which is what the player needs.
+   *
+   * Confidence ramps with the OFF-AXIS ANGLE, scaled by the half vertical FOV:
+   * an attacker within the frame's own half-height of the reticle is one the
+   * player can already see, and pointing at them adds nothing, so the rim stays
+   * symmetric there. Past that — including everything off-screen and everything
+   * behind — it is fully directional. Allocation-free; called from an event.
+   *
+   * @param {{ source?: { root?: THREE.Object3D }, point?: THREE.Vector3 }} e
+   */
+  _setHitDirection(e) {
+    const d = this._dyn;
+    const cam = this.camera;
+    d.hitConf = 0;
+    if (!cam) return;
+
+    const src = e && e.source && e.source.root && e.source.root.position;
+    const v = this._hitVec;
+    if (src) {
+      v.copy(src).sub(cam.position);
+    } else if (e && e.point && this._hasPlayerPos) {
+      // No attacker on the payload — a splash or a collision. The impact point
+      // sits on the hull FACING whatever caused it, so player -> point is the
+      // incoming direction, and it is already a direction rather than a place.
+      v.copy(e.point).sub(this._playerPos);
+    } else {
+      return;
+    }
+
+    const len = v.length();
+    if (len < 1e-3) return;
+
+    const m = cam.matrixWorld.elements;
+    const x = v.x * m[0] + v.y * m[1] + v.z * m[2];
+    const y = v.x * m[4] + v.y * m[5] + v.z * m[6];
+    const lat = Math.hypot(x, y);
+    if (lat < 1e-4) return;              // dead ahead or dead astern: no side
+
+    this._damageDir.set(x / lat, y / lat);
+    const halfFov = 0.5 * (cam.fov || 50) * Math.PI / 180;
+    const scale = Math.sin(halfFov) * Math.max(0.05, this.params.damage.offAxis);
+    d.hitConf = clamp(lat / len / scale, 0, 1);
   }
 
   /**
@@ -1097,7 +1176,20 @@ export class RenderPipeline {
     // 2.6/s, so two hits inside half a second pinned it and four engaged
     // enemies held it there for the whole fight. See `_updateDynamics` for the
     // ceiling and decay; the coefficient here is the other half of the trade.
-    f.uDamage.value = clamp(d.crit * 0.55 + d.hit * 0.52, 0, 1);
+    const critRim = d.crit * 0.55;
+    const hitRim = d.hit * 0.52;
+    f.uDamage.value = clamp(critRim + hitRim, 0, 1);
+    // THE LOBE BELONGS TO THE HIT TERM ALONE. `crit` is a STATE — the frame is
+    // red because AP is low — and a state has no incoming direction to point
+    // at, so biasing it would be a lie that also flickered its direction on
+    // every landed shot. Scaling the bias by the hit term's share of the rim
+    // makes the crossover automatic: a full-health mech taking fire gets a
+    // fully directional flash, a dying one gets the symmetric warning back
+    // underneath it.
+    const sum = critRim + hitRim;
+    f.uDamageBias.value = sum > 1e-4
+      ? (hitRim / sum) * d.hitConf * this.params.damage.dirBias : 0;
+    f.uDamageLuma.value = this.params.damage.lumaWeight;
     f.uGrain.value = p.grain.amount * (1 + d.crit * 1.4);
     f.uScanline.value = p.scanline.amount + d.scan * 0.10 + d.crit * 0.02;
     f.uScanCount.value = p.scanline.count;
