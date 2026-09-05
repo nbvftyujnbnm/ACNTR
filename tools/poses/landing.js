@@ -90,7 +90,13 @@
   // `liveParticles` in report.json belonged to a frame that was tens of
   // seconds older than the picture beside them.
   window.__POSE_NOTE__ = { pending: true };
-  game.engine.addLateUpdate(() => {
+  // KEEP THE UNSUBSCRIBE. `addLateUpdate` returns one, and dropping it leaves
+  // this sampler running for the rest of the browser session — it then
+  // overwrites the NEXT pose's `__POSE_NOTE__` every frame. Measured: in
+  // shots/rehab2 the `cliff` shot's report carried this pose's landing numbers
+  // (`landings: 1, impactSpeed: 17.4, frozenAtImpact: true`), which is a report
+  // that looks fine and describes a different picture.
+  const offNote = game.engine.addLateUpdate(() => {
     const m = game.player.moveState || {};
     const n = {
       landings,
@@ -110,5 +116,5 @@
     window.__POSE_NOTE__ = n;
   });
 
-  window.__POSE_CLEANUP__ = () => { debug.freeze(false); off?.(); };
+  window.__POSE_CLEANUP__ = () => { debug.freeze(false); off?.(); offNote?.(); };
 })();

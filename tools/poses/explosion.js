@@ -156,7 +156,9 @@
   // before the screenshot (which takes 24-130 s on this box), `releaseCamera`
   // handed the frame back to the chase camera, and the 1 s sample was long
   // gone by then. There was never a second camera.
-  game.engine.addLateUpdate(() => {
+  // Keep the unsubscribe — a sampler left installed rewrites the NEXT pose's
+  // note every frame. See the note in landing.js for the measured case.
+  const offNote = game.engine.addLateUpdate(() => {
     const n = window.__POSE_NOTE__;
     if (!n) return;
     const c = game.engine.camera;
@@ -171,6 +173,7 @@
   // only place it can go: on a timer it unfreezes a 500 ms effect tens of
   // seconds before the picture is taken.
   window.__POSE_CLEANUP__ = () => {
+    offNote?.();
     debug.freeze(false);
     debug.releaseCamera();
     debug.setPass('motionBlur', true);

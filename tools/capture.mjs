@@ -178,10 +178,12 @@ async function startServer() {
   for (const pose of poses) {
     const src = readFileSync(resolve(POSE_DIR, `${pose}.js`), 'utf8');
     const before = consoleErrors.length;
-    await page.evaluate(() => {
+    const hooksBefore = await page.evaluate(() => {
       delete window.__POSE_NOTE__;
       delete window.__POSE_CLEANUP__;
-    }).catch(() => {});
+      const e = window.__ACNTR__?.engine;
+      return { up: e?._updaters?.length ?? -1, late: e?._lateUpdaters?.length ?? -1 };
+    }).catch(() => null);
     try {
       await page.evaluate(src);
     } catch (e) {
@@ -281,6 +283,30 @@ async function startServer() {
         window.__ACNTR__.game?.closeGarage?.();
       } catch { /* noop */ }
     }).catch(() => {});
+
+    // LEAKED HOOK CHECK. `engine.addUpdate` / `addLateUpdate` both RETURN an
+    // unsubscribe, and a pose that installs a sampler and drops it leaves that
+    // sampler running for the rest of the browser session — where it rewrites
+    // the NEXT pose's `__POSE_NOTE__` every frame. That is the worst kind of
+    // failure here, because the report then looks complete and describes a
+    // different picture: measured, `cliff` in shots/rehab2 carried landing's
+    // numbers (`landings: 1, impactSpeed: 17.4`) beside a cliff photograph.
+    // Nothing but a count can catch this generically, so count.
+    const hooksAfter = await page.evaluate(() => {
+      const e = window.__ACNTR__?.engine;
+      return { up: e?._updaters?.length ?? -1, late: e?._lateUpdaters?.length ?? -1 };
+    }).catch(() => null);
+    if (hooksBefore && hooksAfter && hooksBefore.up >= 0 && hooksAfter.up >= 0) {
+      const dUp = hooksAfter.up - hooksBefore.up;
+      const dLate = hooksAfter.late - hooksBefore.late;
+      if (dUp > 0 || dLate > 0) {
+        const msg = `leaked ${dUp} update and ${dLate} late-update hook(s) — `
+          + 'keep the unsubscribe addLateUpdate returns and call it in __POSE_CLEANUP__';
+        console.error(`  [pose:${pose}] ${msg}`);
+        shot.leakedHooks = { update: dUp, lateUpdate: dLate };
+        writeFileSync(resolve(outDir, 'report.json'), JSON.stringify(report, null, 2));
+      }
+    }
   }
 
   delete report.partial;

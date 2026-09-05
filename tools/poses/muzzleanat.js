@@ -277,7 +277,9 @@
     passes: debug.passes(),
   };
 
-  game.engine.addLateUpdate(() => {
+  // Keep the unsubscribe — a sampler left installed rewrites the NEXT pose's
+  // note every frame. See the note in landing.js for the measured case.
+  const offNote = game.engine.addLateUpdate(() => {
     const n = window.__POSE_NOTE__;
     if (!n) return;
     n.frameCount++;
@@ -285,6 +287,7 @@
   });
 
   window.__POSE_CLEANUP__ = () => {
+    offNote?.();
     debug.freeze(false);
     debug.setPass('motionBlur', true);
     debug.setPass('dof', true);

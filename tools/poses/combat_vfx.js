@@ -64,9 +64,10 @@
   debug.step(0.05);
 
   // --- the volley ----------------------------------------------------------
-  // Phases are in REAL milliseconds because the settle window is real time.
-  // At any shutter time from ~0.6 s on, `blast` has produced a blast at every
-  // age from 0 to 900 ms.
+  // Phases are in SIM seconds. They used to be in real milliseconds, on the
+  // theory that "the settle window is real time" — which is true of the window
+  // and false of the simulation inside it, and that gap is what made this pose
+  // fail. See the block above the staging loop below.
   let k = 0;
   const blast = () => {
     const i = k++;
@@ -133,6 +134,7 @@
     grounded: !!m.grounded,
     litPlumes: (game.vfx?._flames || []).filter((f) => f.intensity > 0.05).length,
     liveParticles: game.vfx?.liveParticles ?? null,
-    volley: 'explosion every 300 ms, weapons every 140 ms, through the settle window',
+    volley: 'four blasts staged 0.3 s apart in SIM time, oldest first, plus a '
+          + 'weapon volley beside each; frozen after the last so the flash survives',
   };
 })();

@@ -2885,3 +2885,53 @@ two of the silhouette metrics were wrong on their first outing.
   exponent to the gain — that is curve-fitting to two measured points, not a
   source function. `params.atmosphere.aerialViewDep` is a live control (0
   restores the constant exactly) so the A/B has an arm that can actually move.
+- 2026-09-05 [tools] **A POSE THAT INSTALLS AN `addLateUpdate` SAMPLER AND DROPS
+  THE UNSUBSCRIBE REWRITES THE NEXT POSE'S NOTE.** `Engine.addUpdate` and
+  `addLateUpdate` both RETURN an unsubscribe function; three poses were calling
+  them and throwing it away. The sampler then runs for the rest of the browser
+  session and overwrites `window.__POSE_NOTE__` every frame.
+
+  Measured in shots/rehab2: the `cliff` shot's report carried
+  `{landings: 1, impactSpeed: 17.4, grounded: true, frozenAtImpact: true}` — the
+  landing pose's numbers, beside a photograph of a cliff. This is the worst
+  failure mode this harness has, because the report looks COMPLETE and describes
+  a different picture; it is the same class as the "gameplay frame with no
+  enemies in it" that `__POSE_NOTE__` was introduced to catch.
+
+  Fixed in `landing`, `explosion` and `muzzleanat`, and capture.mjs now counts
+  `engine._updaters` / `_lateUpdaters` before each pose and after its cleanup
+  and reports any growth as `leakedHooks` in report.json plus a console error.
+  Nothing but a count catches this generically — the leak is invisible in the
+  picture and plausible in the note.
+- 2026-09-05 [render] The aerial ramp is confirmed IN PIXELS as well as in the
+  probe. shots/veil1/cliff.png (before) against shots/rehab2/cliff.png (after),
+  at `tools/probes/veil.js`'s own sample coordinates, sorted by the elevation
+  the probe reports for each ray:
+
+      butteL cap   9.1 deg  gain 0.935   -3.7 codes
+      butteL far   8.8      gain 0.947   -3.0
+      butteR cap   6.5      gain 1.044   +2.2
+      butteL mid   6.1      gain 1.066   +3.5
+      butteR mid   4.9      gain 1.128   +7.1
+      butteR toe   3.3      gain 1.225  +12.1
+      dune right   3.1      gain 1.241   +9.4
+      butteL toe   3.0      gain 1.250  +12.6
+      butteL low   2.1      gain 1.313  +13.9
+      plain mid    0.3      gain 1.449  +19.3
+      ground near -7.9      gain 1.478   +4.8   (wAir only 0.26, so damped)
+
+  Monotonic in the gain, negative above the 7.5 deg anchor and positive below,
+  and `ground near` is damped exactly as its low aerial SHARE predicts rather
+  than by its gain. The two rays the probe classifies as true SKY moved -2.4 and
+  +2.0 codes — the sky pass is not fogged, so that is the run-to-run noise floor
+  (TAA and dust drift between two separate captures), the same ~1-2 codes the
+  rim A/B measured.
+- 2026-09-05 [tools] `tools/poses/landing.js` HAS NOW PHOTOGRAPHED A LANDING.
+  It never had before: every previous run reported `landings: 0`. With the fall
+  stepped in sim time the note reads `landings: 1, impactSpeed: 17.4 m/s,
+  grounded: true, heightAboveGround: 0.02, frozenAtImpact: true, timeScale: 0`
+  with 551 live particles, and the frame's bottom two row-bands measure mean
+  luma 87.8 and 100.2 at a standard deviation of 18.1 and 14.9 — a bright,
+  smooth sheet against the structured terrain's sd of ~33 above it. That is the
+  dust wash. Grade the landing from this pose now; it is the first capture of it
+  that contains one.
