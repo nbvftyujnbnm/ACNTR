@@ -1329,6 +1329,17 @@ export class Level {
       }
     }
 
+    /*
+     * The gully field draws from ITS OWN generator, the same discipline
+     * `_mesaRing`'s `FACE` already keeps. Drawn from `rng` it consumed four
+     * numbers per butte and walked the whole stream, so every radius, height,
+     * squash and tilt in the group came out different — and the capture that
+     * was meant to isolate one new term instead reshuffled the entire layer and
+     * could not be attributed. A parameter you intend to A/B must not move the
+     * seed of everything beside it.
+     */
+    const grng = mulberry32(SEED ^ 0x7c31);
+
     for (const [, rad0, rads, br0, brs, bh0, bhs, con] of GROUPS) {
       for (let i = 0; i < place.length; i++) {
         const ang = place[i].ang;
@@ -1418,7 +1429,7 @@ export class Level {
          * pointedly NOT a bed frequency — a gully must not beat against the
          * horizontal banding or the two alias into a plaid.
          */
-        const H_GULLY = harmonics(rng, [5, 8, 13, 19], 0.85);
+        const H_GULLY = harmonics(grng, [5, 8, 13, 19], 0.85);
         const bedPhase = rng() * TAU;
 
         const pos = new Float32Array(NV * NP * 3);
