@@ -69,6 +69,14 @@
     bandThickness: U.uBandThickness.value,
     aerialDensity: U.uAerialDensity.value,
     aerialRamp: U.uAerialRamp.value,
+    // The view-dependent aerial ramp added 2026-09-05. Read from the live
+    // uniforms like everything else here, so that if the shader stops
+    // publishing them this probe reports zeros rather than quietly grading the
+    // old maths.
+    skyZenith: U.uSkyZenith ? c3(U.uSkyZenith.value) : null,
+    skyHorizon: U.uSkyHorizon ? c3(U.uSkyHorizon.value) : null,
+    skyHazeFalloff: U.uSkyHazeFalloff ? U.uSkyHazeFalloff.value : 0,
+    aerialViewDep: U.uAerialViewDep ? U.uAerialViewDep.value : 0,
     fogStrength: U.uFogStrength.value,
     dustAmount: U.uDustAmount ? U.uDustAmount.value : 0,
     sunDir: c3({ r: U.uSunDir.value.x, g: U.uSunDir.value.y, b: U.uSunDir.value.z }),
@@ -123,8 +131,24 @@
     const tAir = uni.aerialDensity * dist * (rn2 / (1 + rn2));
     const sum = Math.max(tDeck + tBand + tAir, 1e-5);
 
+    // The aerial term follows the sky along this ray — COMPOSITE_FRAG's
+    // AERIAL_REF_UP block, reproduced exactly. Anchored as a ratio against
+    // sin(7.5 deg), so at that elevation the gain is 1 and this collapses to
+    // the old constant.
+    const REF_UP = 0.1305;
+    const hzV = Math.exp(-Math.max(rayDir.y, 0) * uni.skyHazeFalloff);
+    const hzR = Math.exp(-REF_UP * uni.skyHazeFalloff);
+    const aerial = [0, 1, 2].map((i) => {
+      if (!uni.skyZenith || !uni.skyHorizon) return uni.aerialColor[i];
+      const sv = uni.skyZenith[i] + (uni.skyHorizon[i] - uni.skyZenith[i]) * hzV;
+      const sr = uni.skyZenith[i] + (uni.skyHorizon[i] - uni.skyZenith[i]) * hzR;
+      const gain = clamp(sv / Math.max(sr, 1e-4), 0.35, 2.5);
+      return uni.aerialColor[i] * (1 + (gain - 1) * uni.aerialViewDep);
+    });
+    out.aerialGain = +(aerial[1] / Math.max(uni.aerialColor[1], 1e-6)).toFixed(4);
+
     const inscat = [0, 1, 2].map((i) =>
-      (uni.deckColor[i] * tDeck + uni.bandColor[i] * tBand + uni.aerialColor[i] * tAir) / sum);
+      (uni.deckColor[i] * tDeck + uni.bandColor[i] * tBand + aerial[i] * tAir) / sum);
 
     // Forward-scattering lobe, applied exactly as the shader does.
     const mu = Math.max(rayDir.x * uni.sunDir[0] + rayDir.y * uni.sunDir[1]

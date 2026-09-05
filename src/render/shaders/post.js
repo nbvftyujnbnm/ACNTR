@@ -333,6 +333,10 @@ uniform float uBandHeight;
 uniform float uBandThickness;
 uniform float uAerialDensity;
 uniform float uAerialRamp;
+uniform vec3  uSkyZenith;     // sky dome's zenith colour, for the aerial ramp
+uniform vec3  uSkyHorizon;    // sky dome's horizon colour
+uniform float uSkyHazeFalloff;// same exponent SKY_FRAG uses for its base ramp
+uniform float uAerialViewDep; // 0 = constant veil, 1 = follow the sky ramp
 uniform float uFogStrength;
 uniform float uDustAmount;    // 0 = perfectly smooth media, 1 = full modulation
 uniform float uDustScale;     // metres per noise cell (horizontal)
@@ -461,8 +465,65 @@ void main() {
 
     float tau = ( tDeck + tBand + tAir ) * uFogStrength;
 
+    // THE AERIAL TERM FOLLOWS THE SKY ALONG THIS RAY.
+    //
+    // It used to be one constant, and the note above aerialColor.
+    // multiplyScalar(0.90) in Sky.js records exactly what that costs: measured
+    // on the cliff pose, along one bearing the sky runs 0.38 linear at 2 deg of
+    // elevation down to 0.21 at 9 deg, while the veil sat at 0.2450-0.2506 on
+    // every one of those rays. Under the sky low down, over it higher up, and
+    // dead flat across a landform that spans both — which is what makes a
+    // distant butte read as pasted paper regardless of its hue.
+    //
+    // A veil integrated over kilometres of near-ground air terminates into the
+    // colour the sky shows in that direction, so the fix is to make the ratio
+    // right rather than to re-tune a constant. skyBase is the sky dome's own
+    // base gradient (SKY_FRAG: mix(uZenith, uHorizon, exp(-up*uHazeFalloff)))
+    // — the Rayleigh and Mie lobes are deliberately NOT included, because the
+    // composite already applies its own forward-scattering lobe below and
+    // adding them here would double it.
+    //
+    // Anchored as a RATIO against a reference elevation, not used raw: at
+    // AERIAL_REF_UP the gain is exactly 1 and the veil is exactly
+    // uAerialColor, so the hue trim and the 0.90 that were measured into that
+    // colour survive untouched and only the ramp is new. 0.1305 is sin(7.5 deg)
+    // — the elevation at which the constant already matched the sky, so this
+    // change lifts the veil below that line and drops it above, and does
+    // nothing at all in between.
+    //
+    // uAerialViewDep is a live control, not a switch to be assumed: 0 gives
+    // back the constant exactly.
+    //
+    // HOW MUCH OF THE FLATNESS THIS ACTUALLY CLOSES — computed from the shipped
+    // palette, so it is a prediction to check rather than a claim.
+    // zenith (0.070,0.090,0.128), horizon (0.285,0.262,0.230), falloff 5.2:
+    //   2 deg  hz 0.834  base G 0.2334  gain 1.316
+    //   7.5    hz 0.507  base G 0.1773  gain 1.000  (the anchor)
+    //   9      hz 0.443  base G 0.1663  gain 0.938
+    // So this ramp spans 1.40 between 2 and 9 degrees, against the 1.81 the
+    // cliff pose measured in the sky itself (0.38 -> 0.21 linear) — about 57% of
+    // it in log terms. The veil at 2 deg goes 0.248 -> 0.326 against a sky at
+    // 0.38 (was over it in places, now under), and at 9 deg 0.248 -> 0.232
+    // against 0.21 (still ~11% over).
+    //
+    // The missing steepness is NOT a reason to fit an exponent to two measured
+    // points. It is the Mie lobe: SKY_FRAG weights its aerosol term by
+    // (0.22 + 1.15*hz), which piles brightness into the first few degrees, and
+    // that term is deliberately left out here because the composite applies its
+    // own forward-scattering lobe below. Giving THAT lobe the same elevation
+    // weighting is the identified next step, and it is a separate change with
+    // its own control.
+    #define AERIAL_REF_UP 0.1305
+    vec3 skyV = mix( uSkyZenith, uSkyHorizon, exp( - max( dir.y, 0.0 ) * uSkyHazeFalloff ) );
+    vec3 skyR = mix( uSkyZenith, uSkyHorizon, exp( - AERIAL_REF_UP * uSkyHazeFalloff ) );
+    // Per-channel so the veil tracks the sky's hue ramp as well as its
+    // brightness, clamped because a channel where the reference is near zero
+    // would otherwise explode.
+    vec3 gain = clamp( skyV / max( skyR, vec3( 1e-4 ) ), vec3( 0.35 ), vec3( 2.5 ) );
+    vec3 aerial = uAerialColor * mix( vec3( 1.0 ), gain, uAerialViewDep );
+
     // Colour weighted by which medium the ray actually spent its length in.
-    vec3 inscat = ( uDeckColor * tDeck + uBandColor * tBand + uAerialColor * tAir )
+    vec3 inscat = ( uDeckColor * tDeck + uBandColor * tBand + aerial * tAir )
                 / max( tDeck + tBand + tAir, 1e-5 );
 
     // Forward-scattering lobe: haze glows toward the sun and ONLY there. A

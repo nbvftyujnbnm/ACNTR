@@ -182,7 +182,12 @@ export class RenderPipeline {
       damage: { dirBias: 1.0, lumaWeight: 1.0, offAxis: 1.0 },
       grain: { amount: 0.030 },
       scanline: { amount: 0.010, count: 900 },
-      atmosphere: { strength: 1.0 },
+      // `aerialViewDep` 0 = the in-scatter is one constant colour (the
+      // behaviour before 2026-09-05); 1 = it tracks the sky's own near-horizon
+      // ramp along the view ray, anchored so that at AERIAL_REF_UP it is
+      // EXACTLY `uAerialColor` and every existing calibration of that colour
+      // survives. A pose can set it to 0 for a live control arm.
+      atmosphere: { strength: 1.0, aerialViewDep: 1.0 },
       // Dust-bank structure for the deck and band media — see `dustGain` in
       // COMPOSITE_FRAG. `amount` is the peak fractional swing in those two
       // terms' density (0.55 = 0.45x .. 1.55x, mean exactly 1.0, so total
@@ -330,6 +335,12 @@ export class RenderPipeline {
     this._deckColor = new THREE.Color(0.33, 0.27, 0.21);
     this._bandColor = new THREE.Color(0.40, 0.32, 0.24);
     this._aerialColor = new THREE.Color(0.16, 0.17, 0.19);
+    // The sky's own near-horizon ramp, so the aerial in-scatter can FOLLOW the
+    // sky instead of being one constant across a landform that spans 2 to 9
+    // degrees of elevation. See `uAerialViewDep` in COMPOSITE_FRAG.
+    this._skyZenith = new THREE.Color(0.070, 0.090, 0.128);
+    this._skyHorizon = new THREE.Color(0.285, 0.262, 0.230);
+    this._skyHazeFalloff = 5.2;
     // Fallbacks only — Sky pushes the real atmosphere over `sky:params`. Kept
     // in step with Sky.fogParams so a frame rendered before the first emit does
     // not visibly re-grade when it arrives.
@@ -490,6 +501,10 @@ export class RenderPipeline {
       uBandThickness: { value: this._bandThickness },
       uAerialDensity: { value: this._aerialDensity },
       uAerialRamp: { value: this._aerialRamp },
+      uSkyZenith: { value: this._skyZenith },
+      uSkyHorizon: { value: this._skyHorizon },
+      uSkyHazeFalloff: { value: this._skyHazeFalloff },
+      uAerialViewDep: { value: p.atmosphere.aerialViewDep },
       uFogStrength: { value: p.atmosphere.strength },
       uDustAmount: { value: p.dust.amount },
       uDustScale: { value: p.dust.scale },
@@ -649,6 +664,9 @@ export class RenderPipeline {
       if (s.deckColor) this._deckColor.copy(s.deckColor);
       if (s.bandColor) this._bandColor.copy(s.bandColor);
       if (s.aerialColor) this._aerialColor.copy(s.aerialColor);
+      if (s.skyZenith) this._skyZenith.copy(s.skyZenith);
+      if (s.skyHorizon) this._skyHorizon.copy(s.skyHorizon);
+      if (typeof s.skyHazeFalloff === 'number') this._skyHazeFalloff = s.skyHazeFalloff;
       if (typeof s.fogDensity === 'number') this._fogDensity = s.fogDensity;
       if (typeof s.fogHeight === 'number') this._fogHeight = s.fogHeight;
       if (typeof s.fogFalloff === 'number') this._fogFalloff = s.fogFalloff;
@@ -1240,6 +1258,8 @@ export class RenderPipeline {
     c.uBandThickness.value = this._bandThickness;
     c.uAerialDensity.value = this._aerialDensity;
     c.uAerialRamp.value = this._aerialRamp;
+    c.uSkyHazeFalloff.value = this._skyHazeFalloff;
+    c.uAerialViewDep.value = p.atmosphere.aerialViewDep;
     c.uFogStrength.value = p.atmosphere.strength;
     c.uDustAmount.value = p.dust.amount;
     c.uDustScale.value = p.dust.scale;

@@ -453,6 +453,15 @@ export class Sky {
       aerialColor: f.aerialColor,
       aerialDensity: f.aerialDensity,
       aerialRamp: f.aerialRamp,
+      // The sky's OWN near-horizon ramp, so the composite's in-scatter can
+      // follow it instead of being a constant. `aerialColor` above stays the
+      // calibrated reference; these are what let the post stack ask "and how
+      // much brighter is the sky along THIS ray than along the reference one".
+      // See the note above `aerialColor.multiplyScalar(0.90)` for the
+      // measurement that made this necessary.
+      skyZenith: this.colors.zenith,
+      skyHorizon: this.colors.horizon,
+      skyHazeFalloff: this.params.hazeFalloff,
     });
   }
 
