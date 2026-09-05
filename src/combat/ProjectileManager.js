@@ -280,7 +280,9 @@ export class ProjectileManager {
       this._fxRing[i] = { point: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), type: 'metal', scale: 1 };
     }
     this._fxIdx = 0;
-    this._explOpts = { color: 0xffa040, power: 1, type: 'explosive', shockwave: true, ground: true };
+    // options object for the direct `VFX.impact` call — see _fxImpact
+    this._impactOpts = { scale: 1 };
+    this._explOpts ={ color: 0xffa040, power: 1, type: 'explosive', shockwave: true, ground: true };
     // scratch for the ground probe under a detonation — see _fxExplosion
     this._gDown = new THREE.Vector3(0, -1, 0);
     this._gHit = { hit: false, point: new THREE.Vector3(), normal: new THREE.Vector3(), distance: 0, object: null };
@@ -1222,7 +1224,15 @@ export class ProjectileManager {
     const v = this.vfx;
     if (v && v.impact && !this._vfxBad.impact) {
       try {
-        v.impact(pay.point, pay.normal, type, scale);
+        // `VFX.impact(pos, normal, type, opts)` — the fourth argument is an
+        // OPTIONS OBJECT, not a number. Handing it the bare scale meant
+        // `(opts && opts.scale) || 1` read `undefined` and every impact ran at
+        // scale 1: a charged shot's 1.8, a beam's 2.2 and a splash's 1.4 were
+        // authored and then thrown away at the call site. Same class of bug as
+        // the deleted `_fxTrail`. The object is reused, never allocated here.
+        const io = this._impactOpts;
+        io.scale = scale;
+        v.impact(pay.point, pay.normal, type, io);
       } catch (err) {
         this._vfxBad.impact = true;
       }

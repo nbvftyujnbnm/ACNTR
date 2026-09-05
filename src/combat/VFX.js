@@ -299,9 +299,20 @@ export class VFX {
       if (!p || !this.enabled) return;
       const pt = p.point || p.position || p.pos;
       if (!pt) return;
+      // A DETONATION IS NOT A SURFACE HIT. `ProjectileManager._fxExplosion`
+      // emits EV.IMPACT with `type: 'explosion'` so audio and the HUD hear
+      // about the blast, and then calls `vfx.explosion` directly. This handler
+      // used to answer that event too: `_impactKind` has no case for
+      // 'explosion', so it fell through to its 'concrete' default and every
+      // blast ALSO got a full concrete impact at scale = clamp(radius, .., 4) —
+      // ~55 grey dust puffs, ~35 chunks and a 3-6 m CRACK DECAL, laid over the
+      // fireball and, for an airburst, hanging in open sky. That is the exact
+      // floating-decal bug `_fxExplosion` probes the ground to avoid, arriving
+      // through the other door.
+      const t = p.type || p.damageType;
+      if (t === 'explosion' || t === 'blast') return;
       const n = p.normal || p.n || _up;
       const kind = this._impactKind(p);
-      if (this._isDuplicate(pt)) return;
       this.impact(pt, n, kind, { scale: p.scale ?? p.power ?? 1 });
     });
 
@@ -573,6 +584,15 @@ export class VFX {
    */
   impact(pos, normal, type = 'metal', opts) {
     if (!this.enabled || !pos) return;
+    // THE DE-DUPLICATION RING BELONGS HERE, NOT ON THE BUS HANDLER ALONE.
+    // `ProjectileManager._fxImpact` both emits EV.IMPACT and calls this method
+    // directly, in that order. The bus handler checked `_isDuplicate` and the
+    // direct call did not, so EVERY round that hit anything spawned the whole
+    // impact TWICE — two spark bursts, two scorch decals, two flash lights,
+    // double the additive energy at one point. Guarding the entry point makes
+    // the ring do the job its own comment says it does, whichever path arrives
+    // first. 8 slots x 40 ms x 0.25 m, so genuinely distinct hits still count.
+    if (this._isDuplicate(pos)) return;
     this._noteImpact(pos);
     _dir.copy(normal || _up);
     if (_dir.lengthSq() < 1e-6) _dir.set(0, 1, 0);
