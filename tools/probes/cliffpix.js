@@ -48,7 +48,9 @@
     ndc.set((x / W) * 2 - 1, -((y / H) * 2 - 1));
     rc.setFromCamera(ndc, cam);
     const hits = rc.intersectObject(game.scene, true);
-    const h = hits.find((q) => q.object.visible && q.object.type === 'Mesh');
+    const h = hits.find((q) => q.object.visible && q.object.type === 'Mesh'
+      && q.object.name !== 'ContainmentField'
+      && !(q.object.material && q.object.material.transparent));
     if (!h) return { x, y, hit: 'SKY' };
     let n = h.object.name || '(unnamed)';
     for (let o = h.object.parent; o && !h.object.name; o = o.parent) if (o.name) { n = o.name + '/child'; break; }
