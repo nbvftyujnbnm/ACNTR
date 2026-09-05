@@ -2843,3 +2843,45 @@ two of the silhouette metrics were wrong on their first outing.
   (tile 1, radiance 17) is the top contributor at alpha 0.81.
 
   Do not re-open this without a capture taken after 65ec71e.
+- 2026-09-05 [render] **THE AERIAL VEIL NOW FOLLOWS THE SKY'S NEAR-HORIZON RAMP,
+  AND THE "LANDFORM BRIGHTER THAN ITS SKY" DEFECT IS CLOSED AT THE CREST.**
+  Verified with `tools/probes/veil.js`, which evaluates COMPOSITE_FRAG's fog
+  maths on the CPU from the LIVE uniforms — not from a restatement of them.
+
+  The complaint, from the note above `aerialColor.multiplyScalar(0.90)`: the
+  in-scatter was one constant, measured at 0.2450-0.2506 linear on every ray
+  from 2 to 9 degrees of elevation, while the sky along the same bearing ran
+  0.38 down to 0.21. At the butte crest the veil terminated into 0.2500 where
+  the sky was 0.2094 — 19% BRIGHTER than the sky it was drawn in front of.
+
+  COMPOSITE_FRAG now evaluates SKY_FRAG's own base gradient along the view ray
+  and applies it as a per-channel ratio against a 7.5 degree reference, so at
+  that elevation the gain is exactly 1 and every calibration already measured
+  into `aerialColor` (the hue trim, the 0.90) is untouched. Measured gains, one
+  probe run, in elevation order:
+
+      -7.9 deg  1.478      4.9 deg  1.128
+       0.3      1.449      6.1      1.066
+       2.1      1.313      6.5      1.044
+       3.0      1.250      8.8      0.947
+       3.3      1.225      9.1      0.935
+                          11.7      0.845
+
+  Crossing 1.0 at 7.5 as designed. The in-scatter's own luminance now runs
+  0.2946 at 2.1 deg to 0.2125 at 9.1 — a span of 1.386 against the 1.40
+  predicted from the palette before the change, and against the FLAT
+  0.2450-0.2506 it replaced.
+
+  The defect itself: butte crest veil 0.2500 -> 0.2125 against a sky at 0.2094.
+  From 19% over to 1.5% over. At the toe (3.0 deg) the veil is 0.280 against a
+  sky near 0.355 — still under, which is correct: an in-scatter integrated over
+  a finite path should not reach the whole atmospheric column.
+
+  STILL OPEN, and it is the ~43% of the ramp this does not recover: SKY_FRAG
+  weights its Mie lobe by (0.22 + 1.15*hz), piling brightness into the first few
+  degrees, and that term is deliberately excluded here because the composite
+  applies its own forward-scattering lobe. Giving that lobe the same elevation
+  weighting is the next step. Do NOT close the remaining gap by fitting an
+  exponent to the gain — that is curve-fitting to two measured points, not a
+  source function. `params.atmosphere.aerialViewDep` is a live control (0
+  restores the constant exactly) so the A/B has an arm that can actually move.

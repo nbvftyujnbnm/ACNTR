@@ -2,17 +2,19 @@
 //
 // TWO traps this pose exists to avoid, both of which it used to fall into.
 //
-// 1. THE SHUTTER OPENS TENS OF SECONDS AFTER THIS SCRIPT RETURNS — capture.mjs
-//    waits 1100 ms and then screenshots, and the screenshot itself has measured
-//    24-130 s on this box. The old version fired its effects inside the script
-//    and returned; AC6-scale impacts are gone in 200 ms and a fireball in under
-//    a second, so the frame that got graded for "VFX" contained nothing but
-//    stale smoke. Everything here is driven from a REAL-TIME interval that runs
-//    until __POSE_CLEANUP__ (which capture.mjs calls AFTER the shutter), and the
-//    volley is phased so that whenever the shutter opens there is one blast in
-//    its white-flash stage, one in its orange-fireball stage, and one that is
-//    already a black smoke column — which is exactly the three-stage structure
-//    REVIEW.md grades.
+// 1. REAL TIME AND SIM TIME DIVERGE HARD HERE. The shutter is tens of seconds
+//    of real time after this script returns (capture.mjs settles 1100 ms and
+//    then takes a screenshot that has measured 24-130 s), but only ~0.2-0.5 s
+//    of SIMULATION time — the engine clamps dt to 0.1 s and only a handful of
+//    frames run in that window. Both of this pose's earlier designs got that
+//    wrong. Firing in-script and returning was blamed on effects going stale,
+//    which was never the problem at 0.3 s of sim. Driving the volley from a
+//    real-time interval instead fired it ~100 times into a static simulation
+//    and made the frame so expensive the screenshot timed out and the pose
+//    failed. The volley is now staged with `debug.step`, in sim time, and the
+//    frame is frozen at the end — so the three-stage structure REVIEW.md grades
+//    (white flash, orange fireball, black smoke column) is guaranteed rather
+//    than hoped for.
 //
 // 2. ABSOLUTE WORLD COORDINATES DO NOT SURVIVE REAL TERRAIN. Everything is
 //    positioned relative to the mech, and the mech is placed on measured open
@@ -80,18 +82,50 @@
     debug.vfx('impact', c, fwd.clone().negate(), Math.random() < 0.5 ? 'metal' : 'energy');
   };
 
+  // STAGED IN SIM TIME, NOT ON A REAL-TIME INTERVAL.
+  //
+  // This used to be `setInterval(blast, 300)` and `setInterval(shoot, 140)`,
+  // and both readings of the shutter it was built on were wrong in opposite
+  // directions. The shutter is tens of seconds of REAL time after this returns
+  // but only ~0.2-0.5 s of SIM time (CONTRACT.md, 2026-09-05), so a real-time
+  // interval fires roughly a hundred times into a simulation that has barely
+  // moved, and none of what it deposits can expire. Capped at 6 s it starved
+  // the frame; uncapped it buried it — measured, this pose's screenshot blew
+  // capture.mjs's 180 s timeout and the shot FAILED.
+  //
+  // So the volley is staged with `debug.step`, which advances sim time
+  // deterministically and at the rate the game actually runs. Oldest first, so
+  // that when the last one goes off the first has had its full age: at the
+  // shutter there is a blast at ~0.9 s (black smoke), one at ~0.6 (rolling fire
+  // into smoke), one at ~0.3 (fireball) and one at ~0.0 (white flash) — the
+  // three-stage structure REVIEW.md grades, and now it is guaranteed rather
+  // than hoped for. Weapons fire between them so a muzzle flash is in the same
+  // frame; the LAST volley is fired closest to the freeze because a flash is
+  // gone in 80 ms.
+  //
+  // AND THE MECH IS PINNED WHILE IT RUNS. `Space` is held so the plumes stay
+  // lit, which means 0.9 s of stepped sim would carry the mech up to 16 m up —
+  // out of a frame whose camera was placed, in world coordinates, before the
+  // volley started. `placePlayer` zeroes velocity, so re-seating it at `p` on
+  // every step keeps the thrusters commanded and lit while the framing holds.
+  const pinYaw = debug.yaw();
+  for (const gap of [0.3, 0.3, 0.3]) {
+    blast();
+    shoot();
+    debug.step(gap);
+    debug.placePlayer(p.x, p.y, p.z, pinYaw);
+  }
   blast();
   shoot();
 
-  // 300 ms apart: at the shutter one blast is ~0.05-0.3 s old (white flash and
-  // fireball), the one before it 0.35-0.6 s (rolling fire into smoke), the one
-  // before that ~0.9 s (black smoke). Weapons fire twice as often so there is
-  // always a muzzle flash inside its 60 ms life.
-  const tb = setInterval(blast, 300);
-  const ts = setInterval(shoot, 140);
-  // Both volleys run until cleanup, which capture.mjs calls AFTER the shutter.
+  // FREEZE. Everything above is now within 0.9 s of its age and the flash
+  // within 0. Without this the ~0.3 s of sim that still runs before the shutter
+  // would take the muzzle flashes and the youngest fireball with it.
+  debug.freeze(true);
+
   window.__POSE_CLEANUP__ = () => {
-    clearInterval(tb); clearInterval(ts); debug.releaseKeys();
+    debug.freeze(false);
+    debug.releaseKeys();
   };
 
   const m = game.player.moveState || {};
