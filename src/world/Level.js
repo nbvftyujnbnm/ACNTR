@@ -1160,10 +1160,24 @@ export class Level {
     const out = [];
     const baseY = this.terrain ? this.terrain.minHeight - 4 : -20;
 
-    /** [radius factor, height fraction] — scree cone, caprock, rim, cap. */
+    /**
+     * [radius factor, height fraction] — scree cone, caprock, rim, cap.
+     *
+     * TWICE THE RINGS THROUGH THE BODY, because the silhouette is the only
+     * channel this layer owns and it was quantised. On shots/L52/cliff.png the
+     * near butte spans about 540 x 280 px, so the old 0.10-of-height ring
+     * spacing landed at ~28 px and the outline climbed the frame as a visible
+     * staircase — a shape whose interior is measured at sd 3.0 cannot also
+     * afford a stepped edge. The added rings are pure interpolation of the
+     * profile that was already there; the caprock flare and the cap closure are
+     * untouched, and the `p >= NP - 3` / `p === NP - 4` cap-darkening test still
+     * addresses exactly the same four rings because it counts from the end.
+     */
     const PROF = [
-      [1.000, 0.000], [0.905, 0.115], [0.828, 0.235], [0.762, 0.350],
-      [0.712, 0.455], [0.686, 0.560], [0.672, 0.665], [0.664, 0.760],
+      [1.000, 0.000], [0.950, 0.058], [0.905, 0.115], [0.865, 0.175],
+      [0.828, 0.235], [0.793, 0.292], [0.762, 0.350], [0.736, 0.402],
+      [0.712, 0.455], [0.698, 0.508], [0.686, 0.560], [0.678, 0.612],
+      [0.672, 0.665], [0.667, 0.712], [0.664, 0.760],
       // The caprock stands PROUD of the slope it sits on. That flare is the
       // overhang line every real mesa carries just under its rim, and it is the
       // one place a shape this veiled can still put a hard dark edge.
