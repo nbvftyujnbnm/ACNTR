@@ -603,7 +603,9 @@ export class Debug {
     const camPos = new THREE.Vector3();
     const toMech = new THREE.Vector3();
 
-    let best = null;
+    // Every bearing that survives the physics pass, ranked — the render-geometry
+    // check below is too expensive to run inside the loop.
+    const candidates = [];
     let bestScore = -Infinity;
 
     for (const sp of pts) {
@@ -646,14 +648,100 @@ export class Debug {
         const sideOn = 1 - Math.abs(viewH.dot(sunH)); // 1 = perpendicular
 
         const score = sideOn * 100 + Math.min(minClear, 60);
-        if (score > bestScore) {
-          bestScore = score;
-          best = { sp, feetY, a, camPos: camPos.clone(), sideOn };
-        }
+        candidates.push({ sp, feetY, a, camPos: camPos.clone(), sideOn, score });
       }
     }
 
-    if (!best) return false;
+    // NOW CHECK AGAINST THE GEOMETRY THAT IS ACTUALLY DRAWN.
+    //
+    // Everything above rejects a blocked bearing using `Physics.raycast`, and
+    // it is thorough — minimum-ray clearance, underground rejection, a
+    // lens-to-mech occlusion test. It still produced a `mech_detail` frame in
+    // which a DECK RAILING fills the foreground and most of the mech is behind
+    // it, because the physics world and the rendered world are not the same
+    // world. Railings, gantries, catwalk frames, pipes and cables carry no
+    // collider, so a physics ray passes straight through them and the test
+    // reports a clear line to a shot that is half handrail.
+    //
+    // A THREE.Raycaster sees what the camera sees. It is far more expensive
+    // than the physics ray, so it runs only on the ranked survivors rather
+    // than inside the 16-bearing loop: the physics pass is a cheap filter and
+    // this is the authority.
+    if (!candidates.length) return false;
+    candidates.sort((x, y) => y.score - x.score);
+
+    const rc = new THREE.Raycaster();
+    rc.far = 400;
+    // The mech is the SUBJECT — hitting it is the point, not an obstruction.
+    // Ditto anything that is not solid on screen: sky, VFX sprites and the
+    // loot beam are all `transparent` or unlit and none of them hide a hull.
+    const playerRoot = this.game.player?.root ?? null;
+    const isSubject = (o) => {
+      for (let n = o; n; n = n.parent) if (n === playerRoot) return true;
+      return false;
+    };
+    const blocksView = (o) => {
+      if (!o.visible || isSubject(o)) return false;
+      const m = o.material;
+      if (!m) return false;
+      const mats = Array.isArray(m) ? m : [m];
+      return mats.some((mm) => mm && mm.visible !== false && !mm.transparent);
+    };
+
+    // A FAN, NOT A SINGLE RAY. One ray from the lens to the mech's centre
+    // tests one line, and occlusion is about the FRAME: the first version of
+    // this check cast exactly that ray, passed, and produced the identical
+    // railing-filled shot — because a centre ray threads straight between two
+    // horizontal handrail bars. Sample a grid across the mech's projected
+    // extent and reject on the FRACTION blocked.
+    const camRight = new THREE.Vector3();
+    const camUp = new THREE.Vector3();
+    const target = new THREE.Vector3();
+    // Roughly the mech's half-extent: ~2.6 m across, ~4.5 m of body above the
+    // look point down to the feet.
+    const HW = 2.6;
+    const HH = 4.0;
+    const OFFS = [
+      [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
+      [-1, -1], [1, -1], [-1, 1], [1, 1],
+    ];
+
+    let best = null;
+    let bestBlocked = Infinity;
+    for (const c of candidates) {
+      toMech.set(c.sp.x - c.camPos.x, c.feetY + lookY - c.camPos.y, c.sp.z - c.camPos.z);
+      const span = toMech.length();
+      toMech.normalize();
+      camRight.set(toMech.z, 0, -toMech.x).normalize();
+      camUp.crossVectors(camRight, toMech).normalize();
+
+      let blocked = 0;
+      for (const [u, v] of OFFS) {
+        target.set(c.sp.x, c.feetY + lookY, c.sp.z)
+          .addScaledVector(camRight, u * HW)
+          .addScaledVector(camUp, v * HH);
+        const dir2 = target.sub(c.camPos);
+        const d = dir2.length();
+        if (d < 0.2) continue;
+        dir2.divideScalar(d);
+        rc.set(c.camPos, dir2);
+        rc.far = Math.max(d - 1.2, 0.1);
+        for (const hit of rc.intersectObject(this.game.scene, true)) {
+          if (blocksView(hit.object)) { blocked++; break; }
+        }
+      }
+      // Two of nine is a strut clipping a corner; more than that is a fence.
+      if (blocked <= 2) { best = c; bestScore = c.score; break; }
+      // Otherwise keep the LEAST obstructed seen so far, so a level with no
+      // clean bearing still returns its best rather than its highest-scoring.
+      if (blocked < bestBlocked) { bestBlocked = blocked; best = c; bestScore = c.score; }
+    }
+    // Every bearing has something drawn across it. Fall back to the best the
+    // physics pass liked rather than failing the pose outright — a framed shot
+    // with a railing in it is still more useful than no shot.
+    if (!best) { best = candidates[0]; bestScore = candidates[0].score; }
+    this._lastHeroBlocked = best === candidates[0] && bestBlocked === Infinity
+      ? 0 : (bestBlocked === Infinity ? 0 : bestBlocked);
 
     // Face the mech roughly toward the camera so we see its front.
     const faceYaw = yaw != null ? yaw : Math.atan2(best.camPos.x - best.sp.x, best.camPos.z - best.sp.z);
@@ -663,7 +751,14 @@ export class Debug {
       { x: best.sp.x, y: best.feetY + lookY, z: best.sp.z },
       fov
     );
-    this._lastHeroFraming = { sideOn: +best.sideOn.toFixed(2), score: +bestScore.toFixed(1) };
+    this._lastHeroFraming = {
+      sideOn: +best.sideOn.toFixed(2),
+      score: +bestScore.toFixed(1),
+      // How many of the nine sight lines to the mech are blocked by DRAWN
+      // geometry. A pose reporting more than 2 here is looking through a fence.
+      blockedRays: this._lastHeroBlocked ?? 0,
+      candidates: candidates.length,
+    };
     return true;
   }
 

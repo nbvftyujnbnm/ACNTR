@@ -2365,3 +2365,41 @@ two of the silhouette metrics were wrong on their first outing.
   showed cut-outs. The contract's own rule settled it: when a measurement and
   an image disagree, believe the image and go fix the metric. The metric was
   measuring hue when the residual was luma.
+- 2026-09-05 [tools] `frameHeroShot` VALIDATED THE CAMERA AGAINST THE PHYSICS
+  WORLD AND THE PICTURE IS MADE OF THE RENDER WORLD. Every `mech_detail` and
+  `hero` frame this project has taken from a deck had a HANDRAIL across it,
+  and the framing code looked thorough: minimum-ray clearance over 12
+  bearings, underground rejection, an explicit lens-to-mech occlusion test.
+  All of it used `Physics.raycast`. Railings, gantries, catwalk frames, pipes
+  and cables carry NO COLLIDER, so a physics ray passes straight through them
+  and the test reports a clear line to a shot that is half fence.
+  Now: the physics pass is a cheap filter that produces ranked candidates, and
+  a `THREE.Raycaster` against the live scene is the authority, run only on the
+  survivors. Transparent and invisible materials are ignored (sky, VFX
+  sprites, the loot beam hide nothing) and the player's own hierarchy is the
+  subject, not an obstruction.
+  **AND IT HAS TO BE A FAN, NOT A RAY.** The first version cast one ray from
+  the lens to the mech's centre, passed, and produced the IDENTICAL
+  railing-filled frame — a centre ray threads straight between two horizontal
+  handrail bars. Occlusion is about the FRAME. It now samples nine points over
+  the mech's projected extent (+/-2.6 m wide, +/-4.0 m tall) and rejects on
+  the FRACTION blocked; 2 of 9 is a strut clipping a corner, more is a fence.
+  `_lastHeroFraming.blockedRays` reports it. If no bearing is clean it keeps
+  the LEAST obstructed rather than the highest-scoring, and never fails the
+  pose outright.
+  GENERAL FORM, worth remembering: a validity test must run in the same world
+  as the thing it validates. This is the same family as the aerial A/B whose
+  control was overwritten by `sky:params`, and the `debug.setPass` no-op —
+  a check that cannot see the failure reads exactly like a passing check.
+- 2026-09-05 [mech] THE MECH IS NOT FLAT OR UNDERLIT — measured, so it does
+  not get "fixed". On the first honest `mech_detail` frame
+  (shots/mech02/mech_detail.png) the hull spans lit side luma 62.1, torso
+  centre 37.1, arm 31.7 — about 30 luma of key-to-fill separation — against a
+  background wall at 49.4 and deck at 53.2. The frame reads dark because the
+  LOCATION is a shadowed deck at a 13.5 deg sun, not because the mech lacks
+  modelling. My own first impression was "very dark and low contrast" and the
+  numbers refuted it.
+  What is genuinely open on the hull is STRUCTURE, not tone: the greeble is
+  distributed at one scale, so it reads as noise rather than as armour plate,
+  panel line and fitting in a hierarchy. That is a modelling question for
+  `src/mech/`, not a lighting one.
