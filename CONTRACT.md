@@ -2985,3 +2985,49 @@ two of the silhouette metrics were wrong on their first outing.
   Note for whoever takes it: the hero frame's own numbers were unusable until
   today, because the subject was facing away. The mech's p50 went 43 -> 55 and
   its p95 102 -> 158 purely from turning it around into the key.
+- 2026-09-06 [render] **MEASURED DEAD END: THE ATMOSPHERE IS NOT WHAT REMOVES
+  THE FRAME'S HIGHLIGHTS.** Recorded because it is the pass that looks guilty,
+  the hypothesis is a reasonable one, and acting on it would have spent a pass
+  turning down the one thing in this level that carries depth.
+
+  The reasoning that led there was sound as far as it went. `rtScene` is PASS 1
+  and therefore PRE-FOG; `tools/probes/tonebloom.js` reads it and reports a
+  healthy scene — max-channel p50 0.105, p90 0.297, p99 0.595, with 10.9% of the
+  frame above 0.25 — while the finished PNG has 1% above code 172. The
+  atmosphere is applied at PASS 6, where COMPOSITE_FRAG does
+  `color = mix(color, inscat, f)` with `inscat` measured at 0.19-0.32 linear and
+  `f` reaching 0.85 on distant geometry. A surface 85% veiled keeps 15% of its
+  own radiance, so the veil looked like the obvious place the top end goes.
+
+  `params.atmosphere.strength` scales tau directly and is a live control, so
+  `tools/probes/veilcost.js` holds the hero framing and reads `rtA` — post
+  composite, pre tonemap — back at five strengths. Scene-linear LUMA percentiles:
+
+      strength     p05     p50     p90     p95     p99   >0.15  >0.30  >0.60
+        1.00    0.0121  0.0665   0.126   0.144   0.350   3.77%  1.18%  0.38%
+        0.75    0.0114  0.0573   0.109   0.129   0.351   4.08%  1.19%  0.36%
+        0.50    0.0108  0.0484   0.093   0.127   0.346   3.43%  1.15%  0.37%
+        0.25    0.0099  0.0360  0.0809   0.127   0.349   4.02%  1.17%  0.36%
+        0.00    0.0065  0.0247  0.0735   0.121   0.341   3.54%  1.15%  0.37%
+
+  The veil is a LIFT ON THE FLOOR, not a cap on the ceiling. Removing it
+  entirely moves p50 from 0.0665 to 0.0247 — the frame gets DARKER — while the
+  populations that matter to the complaint, above 0.30 (display 163) and above
+  0.60 (display 203), move by under 0.05 percentage points across the whole
+  sweep. There is nothing for the atmosphere to give back.
+
+  WHAT THIS LEAVES. The 2026-09-03 placement diagnosis stands and is now
+  narrowed: at shipped strength the hero frame's p90 is scene-linear 0.126
+  (display ~112) and 0.38% of it exceeds 0.60. The scene really is placed low
+  for THIS frame, and the cause is upstream of the composite. Ruled out or
+  closed so far: the transfer curve (grade-model says no clip until 3.2, a 4.1 EV
+  unused shoulder), `contrast` (moves the frame by single code values),
+  `sunIntensity` (24 is documented as the last value that is free — 27 brings the
+  background up with it and spends figure/ground separation), and now the
+  atmosphere. The untested lever is the ALBEDO of the large surfaces: a 13.5-deg
+  sun puts 24*sin(13.5) = 5.6 of irradiance on horizontal ground, so Lambert
+  radiance is albedo/pi * 5.6, and display 163 needs albedo 0.17 while desert
+  sand is 0.3-0.4. Measure it before believing that arithmetic — `BUTTE_ALBEDO`
+  is already recorded in this file as a near-inert control, so the albedo a
+  material declares and the albedo the frame receives are not the same number
+  here.
