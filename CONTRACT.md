@@ -3031,3 +3031,66 @@ two of the silhouette metrics were wrong on their first outing.
   is already recorded in this file as a near-inert control, so the albedo a
   material declares and the albedo the frame receives are not the same number
   here.
+- 2026-09-06 [render] **WHY THE TOP END IS THIN, ALL THE WAY DOWN.** The
+  2026-09-03 entry called it a scene/exposure placement problem and left it
+  there. `tools/probes/irradiance.js` closes it. The answer is not a bug: it is
+  two deliberate art decisions multiplying, and the arithmetic is exact.
+
+  The probe raycasts a pixel, reads the surface's material colour AND its
+  interpolated vertex colour (every surface here is merged geometry with
+  `vertexColors` on, so `material.color` alone is a multiplier and not the
+  albedo — the first run of this probe reported an `impliedE` that was worthless
+  for exactly that reason), then reads the SAME pixel out of `rtScene`, which is
+  pass 1 and therefore pre-fog and pre-AO. Lambert gives
+  `E = radiance * PI / albedo`: the irradiance the surface actually received.
+
+  1. THE KEY IS NOT 24. `Lighting._applySunColor` does
+     `l.color.copy(sky.sunColor)` and `l.intensity = sunIntensity`, and three.js
+     multiplies the two. Unlike `hemi` and `fill`, which are put through
+     `normaliseHue`, the KEY IS NOT RENORMALISED. `Sky._updateSun` at 13.5
+     degrees produces (1.000, 0.715, 0.446), luma 0.7564. So the effective
+     white-equivalent key is 24 * 0.7564 = 18.15. The knob named `sunIntensity`
+     is not the irradiance, and the recorded "27 brings the background up with
+     it" measurement was taken through that same coupling.
+  2. A 13.5 DEGREE SUN PUTS 23.3% OF ITSELF ON FLAT GROUND. N.L = sin(13.5) =
+     0.2334, so horizontal ground receives E = 18.15 * 0.2334 = 4.24. A perfect
+     dielectric at this level's brightest albedo (0.225) then renders at
+     0.225/PI * 4.24 = 0.304 scene-linear, which `tools/grade-model.mjs` maps to
+     display 163. THAT IS THE CEILING FOR FLAT GROUND, and no exposure, curve,
+     contrast or atmosphere setting moves it, because it is geometry.
+
+  A vertical surface facing the sun gets N.L 0.97, E 17.6, radiance 0.71,
+  display 208 — so the frame's few bright faces are the vertical ones, exactly
+  as measured. The scene is horizontally dominated, so the frame is dominated by
+  the 163 ceiling and everything shadowed below it.
+
+  AND THE DECK IS WELL UNDER EVEN THAT. Measured on the hero framing, the large
+  walkable surfaces are the `steel` family at METALNESS 1:
+
+      sample        material   metal  albedo   N.L    radiance   implied E
+      deck near     steel        1     0.225   0.419   0.00855      0.119
+      deck mid      steel        1     0.225   0.233   0.0420       0.587
+      ground L      steel        1     0.225   0.035   0.0087       0.121
+      midground     steel        1     0.225   0.035   0.0094       0.131
+      far terrain   teal         0     0.195   0        0.0195      0.315
+
+  A conductor has NO diffuse lobe, so those radiances are rough environment
+  specular alone: display 13 to 55. This file already documents that exact
+  failure — "a deck full of hardware rendered as one black shape with a plastic
+  sheen" — and the fix taken then moved paint, primer, rust and concrete to
+  dielectric while deliberately keeping `steel` at 1.0 as "the one family that
+  is genuinely bare alloy". The measurement above is what that decision costs on
+  the surfaces the player actually stands on. Terrain is NOT affected:
+  `Terrain.js` sets metalness 0 and forces `metalnessFactor = 0.0` in its
+  shader, so sand is correctly dielectric.
+
+  THE OPEN QUESTION IS NOW A NARROW ONE, and it is an art call rather than a
+  bug hunt: is a large horizontal deck plate bare alloy, or is it oxidised and
+  dust-covered — i.e. a dielectric? Real weathered decking is the latter, and it
+  is the single change that would lift the biggest dark region in these frames.
+  Whoever takes it should note that this file's style rules forbid fractional
+  metalness outside a rust transition, so the choice is 0 or 1, not a dial.
+  Also RULED OUT along the way, so nobody re-checks: the renderer's own ACES is
+  not double-applied (`Pipeline` sets `NoToneMapping` over `Engine`'s
+  `ACESFilmicToneMapping`), and the vertex colours are not the limiter — they
+  measure 0.91 to 0.997.
