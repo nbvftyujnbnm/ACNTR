@@ -3151,3 +3151,42 @@ two of the silhouette metrics were wrong on their first outing.
   starts the context on `input:locked`, so the fallback had to emit that same
   event rather than setting the flag directly. It routes through `_setActive`,
   which does.
+- 2026-09-09 [tools] **THE ENV-BAKE EXPLANATION FOR THE DECK PROBE'S DRIFT IS
+  WRONG.** Recorded because it was mine, it was plausible, and it is the kind of
+  tidy story that gets believed and repeated.
+
+  The masked deck A/B measures its two IDENTICAL control arms at mean 0.0234 and
+  0.0626 — a 2.7x climb across the run — against a treatment of 0.0095. The
+  offered explanation was the PMREM bake: the deck is metalness 1, so its entire
+  appearance is environment specular, and `Sky` re-bakes the cube on a 7 s timer
+  (`bakeInterval`), so three arms across a minute would be measuring the bake
+  converging rather than the material. It is a good story and it is false.
+  Forcing `sky.bake()` before every arm changed the result by nothing at all:
+
+      arm            before bake fix   after bake fix
+      shipped (A)         0.0234           0.0234
+      dielectric          0.0526           0.0525
+      shipped (B)         0.0626           0.0626
+
+  Identical to three significant figures, drift 0.0392 both times. Whatever
+  climbs monotonically on steel pixels over this run, it is NOT the environment
+  bake. The statement in the previous amendment that "any measurement of a
+  metallic surface is a measurement of the env map's state" is UNSUPPORTED —
+  a metal surface does mirror the cube, but the cube is not what was moving.
+
+  WHAT THE NUMBERS STILL SUPPORT, stated at the strength they earn: the drift is
+  monotonic in ARM ORDER, so interpolating the control between its two
+  measurements puts the expected shipped value at the treatment's moment at
+  0.043, against a measured dielectric of 0.0525 — about +22%. That is
+  SUGGESTIVE of a real lift and it is four times smaller than the drift, so it
+  does not support a decision either way.
+
+  STOP MEASURING THIS WITH A LIVE A/B. An art call between two material
+  definitions wants two STABLE frames, not a percentile chased through a moving
+  scene: build each arm, capture each, and diff the deck mask between the two
+  PNGs. That is a cross-build comparison, which this file warns about elsewhere
+  — but the warning is about builds that differ in more than the thing under
+  test, and here both builds are yours and differ in one constant. The mask
+  technique in `tools/probes/decksteel.js` (an emissive ID pass, exact at full
+  resolution, no raycasting) is the reusable half of this work and transfers to
+  that method unchanged.
