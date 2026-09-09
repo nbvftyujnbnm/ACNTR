@@ -3094,3 +3094,26 @@ two of the silhouette metrics were wrong on their first outing.
   not double-applied (`Pipeline` sets `NoToneMapping` over `Engine`'s
   `ACESFilmicToneMapping`), and the vertex colours are not the limiter — they
   measure 0.91 to 0.997.
+- 2026-09-09 [tools] The `steel`-to-dielectric A/B CANNOT BE MEASURED ON A
+  WHOLE-FRAME HISTOGRAM, and the probe's own control is what says so.
+  `tools/probes/decksteel.js` flips `metalness` on the steel materials at
+  runtime and re-reads `rtA`, with a `restored` arm carrying identical settings
+  to `asShipped` so the noise floor is measured rather than assumed:
+
+      arm            p05     p25     p50     p75     p95    >0.08
+      as shipped   0.0118  0.0376  0.0678  0.0956   0.146   36.98%
+      dielectric   0.0148  0.0394  0.0680  0.0940   0.146   37.01%
+      restored     0.0118  0.0378  0.0736  0.1030   0.149   43.12%
+
+  Treatment effect 0.03 points; noise floor 6.14 points. Not separable, and
+  freezing the sim and resetting the TAA history made it WORSE rather than
+  better (3.3 points before, 6.14 after). The drift is monotonic — `restored` is
+  brighter than `asShipped` every run — so it is a trend, not jitter, and the
+  likeliest source is the PMREM environment bake (`bakeInterval: 7.0`) still
+  converging across the run rather than anything the probe controls.
+  TWO LESSONS. A change confined to particular SURFACES cannot be read off a
+  whole-frame percentile — the deck is a modest share of this framing, so even a
+  large change to it is diluted below the noise. Use `measure-frame.mjs --rect`
+  with a mask on the deck itself. And an A/B on this renderer needs its control
+  arm measured LAST as well as first, or a monotonic warm-up masquerades as an
+  effect; the pattern of arm/treatment/arm is what caught this.

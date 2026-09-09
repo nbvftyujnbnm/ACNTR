@@ -25,7 +25,19 @@ export class Input {
     this.mouse = { dx: 0, dy: 0, buttons: 0, wheel: 0 };
     this.mousePressed = new Set();
     this.mouseReleased = new Set();
+    /**
+     * INPUT IS ACTIVE — not "the Pointer Lock API is engaged". Those are the
+     * same thing in a normal tab and are NOT the same thing everywhere the game
+     * can be embedded: an iframe without `allow="pointer-lock"` refuses the
+     * request outright, and this class used to gate `_onMouseMove` and
+     * `_onMouseDown` on the raw API state. The result was a build that ran,
+     * rendered and accepted the keyboard while being completely unable to aim or
+     * fire — playable-looking and unplayable.
+     */
     this.locked = false;
+    /** True once the environment has refused a lock and we are driving without it. */
+    this.pointerFallback = false;
+    this._lockWatchdog = 0;
     this.sensitivity = 0.0021;
     this.invertY = false;
     this.enabled = true;
@@ -43,6 +55,11 @@ export class Input {
     };
     this._onMouseMove = (e) => {
       if (!this.locked || !this.enabled) return;
+      // `movementX/Y` is populated on ordinary mousemove too, so the fallback
+      // aims with the same code path and the same sensitivity as a real lock.
+      // What it cannot do is recentre the cursor, so a player in fallback runs
+      // out of screen and lifts the mouse — the reason this is a fallback and
+      // not the default.
       this.mouse.dx += e.movementX || 0;
       this.mouse.dy += e.movementY || 0;
     };
@@ -64,12 +81,12 @@ export class Input {
       this.mouse.buttons = 0;
     };
     this._onLockChange = () => {
-      this.locked = document.pointerLockElement === this.dom;
-      bus.emit(this.locked ? 'input:locked' : 'input:unlocked');
-      if (!this.locked) {
-        this.keys.clear();
-        this.mouse.buttons = 0;
-      }
+      // In fallback the API is not what is driving us, so its events are not
+      // ours to act on — a stray `pointerlockchange` would otherwise switch the
+      // controls off underneath a player who never had a lock to lose.
+      if (this.pointerFallback) return;
+      clearTimeout(this._lockWatchdog);
+      this._setActive(document.pointerLockElement === this.dom);
     };
     this._onContext = (e) => e.preventDefault();
 
@@ -86,19 +103,55 @@ export class Input {
 
   requestLock() {
     if (this.locked) return;
+    // Already established that this environment will not give us a lock.
+    if (this.pointerFallback) { this._setActive(true); return; }
+    if (!this.dom.requestPointerLock) { this._useFallback(); return; }
     // Chrome returns a promise here and REJECTS it when there is no user
     // gesture behind the call — which is always true in a headless capture, and
     // also true whenever the browser is still inside the exit cooldown after a
     // previous unlock. Unhandled, that reaches the console as an error, and the
     // review harness treats any console error as an automatic failure. It is a
     // refusal, not a fault: swallow it.
+    //
+    // A REFUSAL IS NOT ALWAYS A REJECTED PROMISE. Older Chrome returns
+    // undefined from this call, and an iframe that lacks `allow="pointer-lock"`
+    // can simply never fire `pointerlockchange`. Neither is distinguishable
+    // from "the user has not clicked yet" at the call site, so arm a watchdog
+    // as well: if no lock has arrived shortly after we asked, take the hint.
     try {
       const p = this.dom.requestPointerLock?.();
-      if (p && typeof p.catch === 'function') p.catch(() => { /* refused */ });
-    } catch { /* older signature throws instead of rejecting */ }
+      if (p && typeof p.catch === 'function') p.catch(() => this._useFallback());
+    } catch { this._useFallback(); return; }
+    clearTimeout(this._lockWatchdog);
+    this._lockWatchdog = setTimeout(() => {
+      if (!this.locked && !this.pointerFallback) this._useFallback();
+    }, 700);
   }
+
+  /**
+   * Drive the game without the Pointer Lock API. Aim still works — `movementX`
+   * is delivered on ordinary mousemove — so the only thing lost is cursor
+   * recentring, which costs the player a mouse lift at the screen edge.
+   */
+  _useFallback() {
+    if (this.pointerFallback) return;
+    this.pointerFallback = true;
+    clearTimeout(this._lockWatchdog);
+    this.dom.style.cursor = 'none';
+    this._setActive(true);
+  }
+
+  _setActive(on) {
+    if (this.locked === on) return;
+    this.locked = on;
+    bus.emit(on ? 'input:locked' : 'input:unlocked');
+    if (!on) { this.keys.clear(); this.mouse.buttons = 0; }
+  }
+
   exitLock() {
-    if (this.locked) document.exitPointerLock?.();
+    if (!this.locked) return;
+    if (this.pointerFallback) { this._setActive(false); return; }
+    document.exitPointerLock?.();
   }
 
   down(code) { return this.enabled && this.keys.has(code); }
@@ -138,6 +191,7 @@ export class Input {
     window.removeEventListener('mouseup', this._onMouseUp);
     window.removeEventListener('wheel', this._onWheel);
     window.removeEventListener('blur', this._onBlur);
+    clearTimeout(this._lockWatchdog);
     document.removeEventListener('pointerlockchange', this._onLockChange);
     this.dom.removeEventListener('contextmenu', this._onContext);
   }
