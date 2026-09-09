@@ -3117,3 +3117,37 @@ two of the silhouette metrics were wrong on their first outing.
   with a mask on the deck itself. And an A/B on this renderer needs its control
   arm measured LAST as well as first, or a monotonic warm-up masquerades as an
   effect; the pattern of arm/treatment/arm is what caught this.
+- 2026-09-09 [core] **A REFUSED POINTER LOCK USED TO MEAN A GAME THAT RENDERS
+  AND CANNOT BE PLAYED**, and the fix is verified against all three ways a
+  browser refuses. `Input._onMouseMove` and `_onMouseDown` both gated on the raw
+  Pointer Lock API state, so anywhere a lock is denied — an iframe without
+  `allow="pointer-lock"`, a browser policy, an embed — the mech rendered, the
+  HUD ran, the keyboard worked, and there was no aim and no fire.
+
+  `locked` now means INPUT IS ACTIVE, not "the API is engaged". On refusal the
+  game drives off the same `movementX/Y` (browsers deliver it on ordinary
+  mousemove) at the same sensitivity; the only thing lost is cursor recentring.
+
+  VERIFY IT BY FORCING THE REFUSAL, because the harness cannot produce one
+  naturally. Measured: a same-origin file:// iframe with no `allow` attribute is
+  GRANTED the lock by Chromium, so an iframe test alone leaves the fallback path
+  shipped and untested. Overriding `Element.prototype.requestPointerLock` in an
+  init script is what actually exercises it. All three refusal shapes, because
+  they present differently across browsers:
+
+      mode      trigger                                fallback  aim      fire
+      granted   (control) same-origin iframe           n/a       -0.966   yes
+      reject    rejected promise, as Chromium does     YES       -0.966   49 px
+      silent    returns undefined, no event ever fires YES       -0.966   52 px
+
+  The identical `aimYaw` across all three is the point: the fallback is not a
+  reduced control scheme, it is the same code path with the lock removed. The
+  `silent` row is the one the watchdog exists for and the one a real embed
+  produces — a promise that never settles and a `pointerlockchange` that never
+  comes are indistinguishable from "the user has not clicked yet" at the call
+  site, so nothing but a timeout can tell.
+
+  Audio survives it too, and that was not automatic: `AudioDirector._armGesture`
+  starts the context on `input:locked`, so the fallback had to emit that same
+  event rather than setting the flag directly. It routes through `_setActive`,
+  which does.
