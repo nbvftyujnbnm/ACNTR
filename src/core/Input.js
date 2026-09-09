@@ -137,13 +137,18 @@ export class Input {
     if (this.pointerFallback) return;
     this.pointerFallback = true;
     clearTimeout(this._lockWatchdog);
-    this.dom.style.cursor = 'none';
     this._setActive(true);
   }
 
   _setActive(on) {
     if (this.locked === on) return;
     this.locked = on;
+    // THE CURSOR FOLLOWS THE ACTIVE STATE, NOT THE FALLBACK FLAG. Hiding it
+    // once, when the fallback engages, leaves it hidden through the pause —
+    // where the game's own card says "click to resume" and the player has no
+    // pointer to click with. Under a real lock the browser hides and restores
+    // it for us; in fallback that is this line's job, both ways.
+    if (this.pointerFallback) this.dom.style.cursor = on ? 'none' : '';
     bus.emit(on ? 'input:locked' : 'input:unlocked');
     if (!on) { this.keys.clear(); this.mouse.buttons = 0; }
   }
