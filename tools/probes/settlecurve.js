@@ -93,14 +93,41 @@
     return n ? s / n : 0;
   };
 
-  // The curve. Nothing is changed between samples — the only variable is time.
+  // WHICH DISCRETE EVENT? The first run of this probe answered the shape
+  // question and immediately posed a sharper one: the curve is a STAIRCASE, not
+  // a warm-up ramp — flat plateaus with sudden steps between them. That is the
+  // fingerprint of a periodic event firing, not of anything converging, so
+  // instrument the candidates rather than reason about them. `sky.bake` is the
+  // obvious suspect (it runs on a 7 s timer and the mask is metalness 1, so its
+  // whole appearance is the environment cube) but forcing an extra bake in the
+  // deck probe changed nothing, which is evidence against it. Record when it
+  // actually fires and let the alignment decide.
+  const bakeFrames = [];
+  let f = 0;
+  const sky = game.sky;
+  const realBake = sky?.bake?.bind(sky);
+  if (realBake) sky.bake = function () { bakeFrames.push(f); return realBake(); };
+
+  // The lighting rig follows the player through a smoothed focus point, and a
+  // focus that is still moving re-fits the CSM cascades — which changes what is
+  // shadowed, on a surface whose brightness is exactly what is being measured.
+  const focusOf = () => {
+    const p2 = game.lighting?._focus;
+    return p2 ? [+p2.x.toFixed(1), +p2.y.toFixed(1), +p2.z.toFixed(1)] : null;
+  };
+
   const STEP = 6, SAMPLES = 22;
   const curve = [];
-  let f = 0;
   for (let k = 0; k < SAMPLES; k++) {
     for (let i = 0; i < STEP; i++) { await frame(); f++; }
-    curve.push({ frame: f, mean: +maskedMean().toPrecision(4) });
+    curve.push({
+      frame: f,
+      mean: +maskedMean().toPrecision(4),
+      bakesSoFar: bakeFrames.length,
+      focus: focusOf(),
+    });
   }
+  if (realBake) sky.bake = realBake;
 
   debug.freeze(false);
 
@@ -109,6 +136,7 @@
   const tailSpread = Math.max(...tail) - Math.min(...tail);
   return {
     maskPixels: maskN,
+    bakeFiredOnFrames: bakeFrames,
     note: 'Nothing is changed between samples. Any movement here is the renderer '
         + 'settling (or failing to), and it is the floor under every A/B in this project.',
     curve,
