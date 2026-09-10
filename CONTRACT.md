@@ -3241,3 +3241,38 @@ two of the silhouette metrics were wrong on their first outing.
   does; and both masked probes now ASSERT that the render target still matches
   the dimensions the mask was built against, throwing rather than returning
   plausible numbers. Any probe that builds a pixel mask must carry that check.
+- 2026-09-10 [level] **`steel` IS NOW A DIELECTRIC, and the "genuinely bare
+  alloy" exemption is retired.** When paint, primer, rust and concrete moved off
+  metalness 1, `steel` was deliberately kept as the one family that is really
+  bare metal. That principle was stated without measuring what it costs, and the
+  measurement is decisive.
+
+  MEASURED with `tools/probes/decksteel.js`, masked to these surfaces on the hero
+  framing (8.03% of the frame), after the resolution-pinning fix that made masked
+  A/Bs trustworthy at all:
+
+      arm            mean      p50      p95
+      shipped (A)  0.0231   0.0167   0.0495
+      dielectric   0.0389   0.0273   0.0880
+      shipped (B)  0.0225   0.0163   0.0485
+
+  A 70.6% lift against a control-arm drift of -0.0006 — 27x the noise. Display
+  mean goes from roughly code 36 to 53, p95 from 57 to 90.
+
+  AND THE FAMILY IS NOT WHAT ITS NAME SAYS. Sampling 300 masked pixels and
+  classifying by world normal: 93.3% HORIZONTAL PLATE, 6.7% upright hardware.
+  This is the floor the player walks on, not machinery, and a conductor has no
+  diffuse lobe — the exact failure this file already records for the families
+  that were fixed ("a deck full of hardware rendered as one black shape with a
+  plastic sheen"). Weathered deck plate is oxide and dust.
+
+  SCOPE. `Level.prop.steel` KEEPS metalness 1: props are containers, pipes and
+  machine housings, where bare alloy is right and is what catches a glint. The
+  orientation split is measured on ONE framing, and the hero pose stands on a
+  deck, so 93.3% is that frame's number rather than the level's — a vista or
+  gantry-heavy shot would weight it differently. It does not change the reading
+  here, because the surface under measurement IS the deck.
+  Albedo deliberately NOT raised to compensate, for the reason recorded when the
+  other families moved: a dielectric reads at its albedo, so the paint owns its
+  own darkness, and compensating would smuggle a second change in under the
+  first.

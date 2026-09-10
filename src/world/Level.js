@@ -559,7 +559,31 @@ export class Level {
      * owns darkness here exactly as it does on the mech.
      */
     this.mat = {
-      steel: mk('steel', plateA, { color: 0x7d848b, rough: 0.80, metal: 1.0, env: 0.95, normalScale: 1.0 }),
+      // STEEL IS THE DECK, AND THE DECK IS NOT BARE ALLOY. This family was the
+      // one left at metal 1.0 when paint, primer, rust and concrete moved to
+      // dielectric, on the principle quoted above that it "is genuinely bare
+      // alloy". The principle was stated without measuring what it costs, and
+      // measured it is expensive: `tools/probes/decksteel.js`, masking to these
+      // surfaces on the hero framing (8.03% of the frame), reads mean 0.0225
+      // scene-linear as a conductor against 0.0389 as a dielectric — a 70.6%
+      // lift, against a control-arm drift of -0.0006, so 27x the noise. In
+      // display terms the deck mean goes from about code 36 to 53 and its p95
+      // from 57 to 90.
+      //
+      // The justification also does not match how the family is USED. Sampling
+      // 300 masked pixels and classifying by world normal: 93.3% of it is
+      // horizontal plate and 6.7% upright hardware. This is the floor the player
+      // walks on, not machinery, and a conductor has no diffuse lobe at all —
+      // which is exactly the failure this file already documents for the
+      // families that were fixed ("a deck full of hardware rendered as one black
+      // shape with a plastic sheen"). Weathered deck plate is oxide and dust.
+      //
+      // `Level.prop.steel` KEEPS its conductor: props are containers, pipes and
+      // machine housings, where bare alloy is right and is what catches a glint.
+      // Albedo is deliberately NOT raised to compensate, for the same reason
+      // recorded above — a dielectric reads at its albedo, so the paint owns its
+      // own darkness.
+      steel: mk('steel', plateA, { color: 0x7d848b, rough: 0.80, metal: 0.0, env: 0.95, normalScale: 1.0 }),
       teal: mk('teal', plateA, { color: 0x53837c, rough: 0.86, metal: 0.0, env: 0.85, normalScale: 1.05 }),
       rust: mk('rust', plateA, { color: 0x8c4f2c, rough: 0.96, metal: 0.0, env: 0.7, normalScale: 1.15 }),
       ochre: mk('ochre', plateB, { color: 0x9c8340, rough: 0.90, metal: 0.0, env: 0.8 }),
