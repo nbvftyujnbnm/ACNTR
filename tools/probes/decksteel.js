@@ -151,6 +151,44 @@
     };
   };
 
+  // IS THIS MASK DECK, OR IS IT MACHINERY? It decides the SHAPE of any fix.
+  // `steel` is right for pipes, railings and machine housings — a conductor is
+  // what catches a glint — so a global flip is only defensible if the family is
+  // overwhelmingly being used for large horizontal plate. Sample the mask and
+  // classify by world normal: |n.y| > 0.7 is floor or ceiling, the rest is
+  // upright. Sampling a few hundred pixels rather than raycasting the grid,
+  // because a dense ray grid over 3.1 M triangles does not finish in time.
+  const orientation = (() => {
+    const rc = new THREE.Raycaster();
+    rc.far = 600;
+    const ndc = new THREE.Vector2();
+    const cam = game.engine.camera;
+    cam.updateMatrixWorld(true);
+    const idx = [];
+    for (let i = 0; i < mask.length; i++) if (mask[i]) idx.push(i);
+    let horiz = 0, upright = 0, missed = 0;
+    const N = Math.min(300, idx.length);
+    const nm = new THREE.Matrix3();
+    for (let k = 0; k < N; k++) {
+      const i = idx[Math.floor((k + 0.5) * idx.length / N)];
+      const px = i % idPass.W, py = Math.floor(i / idPass.W);
+      // The ID buffer is bottom-up; NDC y is bottom-up too, so no flip here.
+      ndc.set((px / idPass.W) * 2 - 1, (py / idPass.H) * 2 - 1);
+      rc.setFromCamera(ndc, cam);
+      const h = rc.intersectObject(game.scene, true).find((q) => q.object.visible && q.face);
+      if (!h) { missed++; continue; }
+      const n = h.face.normal.clone()
+        .applyNormalMatrix(nm.getNormalMatrix(h.object.matrixWorld)).normalize();
+      if (Math.abs(n.y) > 0.7) horiz++; else upright++;
+    }
+    const hit = horiz + upright;
+    return {
+      sampled: N, missed,
+      horizontalPct: hit ? +(100 * horiz / hit).toFixed(1) : null,
+      uprightPct: hit ? +(100 * upright / hit).toFixed(1) : null,
+    };
+  })();
+
   const orig = [...mats.values()].map((m) => m.metalness);
   // No `needsUpdate`: metalness and emissive are UNIFORMS on
   // MeshStandardMaterial, not shader defines, so flagging them only forces a
@@ -176,6 +214,7 @@
   return {
     materialsFound: found,
     maskPixels: maskN,
+    maskOrientation: orientation,
     maskFractionOfFrame: +(100 * maskN / (idPass.W * idPass.H)).toFixed(2),
     displayCodeReference: '0.02->32  0.04->54  0.08->86  0.15->121  0.30->163',
     shippedA, dielectric, shippedB,
