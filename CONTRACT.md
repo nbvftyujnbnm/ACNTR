@@ -3190,3 +3190,15 @@ two of the silhouette metrics were wrong on their first outing.
   technique in `tools/probes/decksteel.js` (an emissive ID pass, exact at full
   resolution, no raycasting) is the reusable half of this work and transfers to
   that method unchanged.
+- 2026-09-10 [tools] The leaked-hook guard in `capture.mjs` IS VERIFIED, by
+  making a pose leak on purpose. `tools/poses/_leaktest.js` installs one
+  `addUpdate` and one `addLateUpdate` and throws both unsubscribes away; a
+  capture over it reports `leakedHooks: {update: 1, lateUpdate: 1}`. Both kinds,
+  because the check counts them separately and a bug could plausibly catch one
+  and miss the other.
+  WHY THIS WAS WORTH A RUN. Since the three real poses were fixed nothing leaks,
+  so the reporting branch had never executed once — and an inverted comparison
+  or a typo inside it looks exactly like success from the outside. A guard that
+  has never fired is not a verified guard. The fixture stays in the tree for the
+  same reason `tools/smoke.mjs` was tested by deliberately breaking a file; it
+  is NOT in REVIEW_POSES and must never be added.
