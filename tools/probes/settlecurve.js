@@ -151,8 +151,16 @@
     firstToLastRatio: +(last / Math.max(first, 1e-9)).toFixed(2),
     tailSpreadAbsolute: +tailSpread.toPrecision(3),
     tailSpreadRelative: +(tailSpread / Math.max(last, 1e-9)).toFixed(4),
-    reading: tailSpread / Math.max(last, 1e-9) < 0.02
-      ? 'PLATEAUED — the tail is flat, so the rise is warm-up and the plateau frame is the settle requirement'
-      : 'STILL MOVING at the end of the run — not a warm-up that waiting fixes',
+    // Three outcomes, and the flat-from-the-start case is the one that matters
+    // now: with `probe.mjs` pinning the resolution this run reads 1.01
+    // first-to-last where it read 2.82 before, so the renderer is stable and
+    // this number is the NOISE FLOOR any masked A/B has to beat.
+    reading: (() => {
+      const flatTail = tailSpread / Math.max(last, 1e-9) < 0.02;
+      const rose = last / Math.max(first, 1e-9) > 1.05;
+      if (!rose && flatTail) return 'FLAT throughout — the renderer is stable and the tail spread is the noise floor for a masked A/B';
+      if (rose && flatTail) return 'ROSE then PLATEAUED — warm-up; start every arm after the plateau frame';
+      return 'STILL MOVING at the end of the run — not a warm-up that waiting fixes';
+    })(),
   };
 })();
