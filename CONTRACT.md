@@ -3202,3 +3202,42 @@ two of the silhouette metrics were wrong on their first outing.
   has never fired is not a verified guard. The fixture stays in the tree for the
   same reason `tools/smoke.mjs` was tested by deliberately breaking a file; it
   is NOT in REVIEW_POSES and must never be added.
+- 2026-09-10 [tools] **`probe.mjs` NEVER PINNED THE RESOLUTION, AND THAT IS WHAT
+  "SCENE DRIFT" WAS.** Root cause of the 2.8x movement that invalidated the deck
+  A/B, and it was the measuring apparatus, not the renderer.
+
+  `Engine._adaptResolution` runs every 0.5 s of REAL time and steps
+  `resolutionScale` down by 0.1 whenever fps is more than 12 under its target of
+  58, with a 4-tick cooldown. Probes run on SwiftShader at ~10 fps — permanently
+  under that floor — so the scale ratchets down roughly every 2.5 s and calls
+  `resize()`, giving the render targets new dimensions mid-probe. `capture.mjs`
+  has pinned this since it was written (`adaptiveResolution = false`);
+  `probe.mjs` never did.
+
+  Harmless for a whole-frame percentile. FATAL for a probe that builds a pixel
+  mask and then reads the target again: the mask indexes a buffer that is no
+  longer the size it was built against, so it samples progressively less of what
+  it was aimed at — here, less of the dark deck and more of its brighter
+  surroundings. Monotonic, in discrete steps.
+
+  THE FINGERPRINT, from `tools/probes/settlecurve.js` with nothing changed
+  between samples across 132 frames: plateaus at 0.0237, 0.0490, 0.0626, 0.0670
+  with steps exactly 36 FRAMES APART. A staircase is a periodic event firing;
+  it is never a convergence, and reading it as one is what produced two wrong
+  explanations from me — an env-bake convergence and an unexplained warm-up.
+  Both candidates were then eliminated outright by instrumenting them:
+  `sky.bake` fired ZERO times (the sim is frozen, so dt is 0 and its 7 s timer
+  never advances — which is also why forcing an extra bake changed nothing), and
+  `Lighting._focus` never moved off [-198, 65.6, -8].
+
+  WHAT IS AFFECTED. Only probes that mask across MULTIPLE reads, which is the
+  deck A/B and this settle probe. `veilcost.js`, `tonebloom.js` and
+  `irradiance.js` are unharmed: whole-frame percentiles are robust to a resize,
+  and `irradiance.js` recomputes the target dimensions inside a single read.
+  Their results stand as recorded.
+
+  FIXED TWO WAYS, because a pinned setting upstream is still an assumption at
+  the point of use. `probe.mjs` now pins resolution exactly as `capture.mjs`
+  does; and both masked probes now ASSERT that the render target still matches
+  the dimensions the mask was built against, throwing rather than returning
+  plausible numbers. Any probe that builds a pixel mask must carry that check.

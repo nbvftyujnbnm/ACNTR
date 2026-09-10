@@ -60,6 +60,32 @@ let server = null;
     for (const e of errors.slice(0, 30)) console.error('  ' + e);
     await browser.close(); killTree(server); process.exit(2);
   }
+  // PIN THE RESOLUTION, exactly as capture.mjs does — and for a sharper reason
+  // than image quality.
+  //
+  // `Engine._adaptResolution` runs every 0.5 s of real time and steps
+  // `resolutionScale` DOWN by 0.1 whenever fps is more than 12 under its target
+  // of 58. Probes run on SwiftShader at ~10 fps, which is permanently below that floor, so
+  // the scale ratchets down every ~2.5 s and calls `resize()` — new render
+  // target dimensions, mid-probe, silently.
+  //
+  // For a probe that reads whole-frame percentiles this is harmless. For one
+  // that builds a PIXEL MASK and then reads the target again, it is fatal: the
+  // mask indexes a buffer that is no longer the size it was built against, so
+  // it samples progressively less of what it was aimed at. Measured: a masked
+  // deck probe produced a clean STAIRCASE — plateaus at 0.0237, 0.0490, 0.0626,
+  // 0.0670 with steps exactly 36 frames apart — over a run in which nothing at
+  // all was changed, and that staircase was read as scene drift twice, once as
+  // an env-bake convergence and once as an unexplained warm-up. It was neither.
+  // It was the buffer shrinking under the mask.
+  await page.evaluate(() => {
+    const e = window.__ACNTR__?.engine;
+    if (!e) return;
+    e.adaptiveResolution = false;
+    e.resolutionScale = 1;
+    e.maxPixelRatio = 1;
+    e.resize();
+  }).catch(() => {});
   await page.waitForTimeout(2000);
 
   const file = arg('file', null);

@@ -82,8 +82,16 @@
   }
   mats.forEach((m, k) => { if (m.emissive && saved[k].e) m.emissive.copy(saved[k].e); m.emissiveIntensity = saved[k].i; });
 
+  // GUARD THE MASK AGAINST A RESIZE. `probe.mjs` now pins the resolution, but a
+  // mask read against a buffer that changed size is the failure that produced a
+  // 2.8x staircase and two wrong explanations for it, so the invariant is
+  // asserted here rather than assumed upstream.
+  const maskDims = { W: id.W, H: id.H };
   const maskedMean = () => {
     const { W, H, buf, dec } = readRTA();
+    if (W !== maskDims.W || H !== maskDims.H) {
+      throw new Error(`mask built at ${maskDims.W}x${maskDims.H} but the render target is now ${W}x${H} — adaptive resolution resized it mid-probe and every masked number after this point would be wrong`);
+    }
     let s = 0, n = 0;
     for (let i = 0, p = 0; i < W * H; i++, p += 4) {
       if (!mask[i]) continue;
