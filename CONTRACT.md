@@ -3276,3 +3276,13 @@ two of the silhouette metrics were wrong on their first outing.
   other families moved: a dielectric reads at its albedo, so the paint owns its
   own darkness, and compensating would smuggle a second change in under the
   first.
+  CONFIRMED IN THE FRAME, not just the mask. `shots/deck1/hero.png` against
+  `shots/rev02/hero.png`, whole-frame luma percentiles:
+      metallic   p1 12  p5 20  p50 68  p95 115  p99 172   under-16: 2.74%
+      dielectric p1 14  p5 23  p50 68  p95 115  p99 171   under-16: 1.60%
+  The crushed-black population falls by 42% while the median, p95 and p99 do not
+  move at all. That is the signature of a change that did exactly the one thing
+  it was aimed at: the deck and the gantry walkway gain readable plate seams and
+  panel structure, the mech and sky are untouched, and the dusty low-sun mood
+  survives intact. A 70% lift on the floor could easily have washed the frame
+  out; it did not.
