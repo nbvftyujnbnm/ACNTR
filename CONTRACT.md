@@ -3286,3 +3286,15 @@ two of the silhouette metrics were wrong on their first outing.
   panel structure, the mech and sky are untouched, and the dusty low-sun mood
   survives intact. A 70% lift on the floor could easily have washed the frame
   out; it did not.
+- 2026-09-10 [tools] The leaked-hook guard in `capture.mjs` IS VERIFIED, by a
+  fixture that deliberately leaks. `tools/poses/_leaktest.js` installs one
+  updater and one late-updater and throws both unsubscribes away; a run over it
+  reports `leakedHooks: {update: 1, lateUpdate: 1}`, both kinds caught and
+  counted separately.
+  This needed doing because since the three real poses were fixed nothing leaks,
+  so the reporting branch had never executed once — and an inverted comparison
+  or a wrong field name in it would have looked exactly like success on every
+  run. The same reasoning is why `tools/smoke.mjs` was once tested by
+  deliberately breaking a file. A guard that has never fired is not a guard.
+  `_leaktest` is NOT in `REVIEW_POSES` and must never be added; run it by name:
+      node tools/capture.mjs --poses _leaktest --out shots/leak
